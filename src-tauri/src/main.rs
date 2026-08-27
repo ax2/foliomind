@@ -708,10 +708,7 @@ enum BoundedLine {
     Eof,
 }
 
-fn read_bounded_line(
-    reader: &mut impl BufRead,
-    max_bytes: usize,
-) -> std::io::Result<BoundedLine> {
+fn read_bounded_line(reader: &mut impl BufRead, max_bytes: usize) -> std::io::Result<BoundedLine> {
     let mut line = Vec::with_capacity(max_bytes.min(8192));
     let mut too_long = false;
     loop {
@@ -1004,7 +1001,10 @@ mod tests {
     #[test]
     fn bounded_line_reader_discards_oversized_frames_without_losing_the_next_line() {
         let mut input = BufReader::with_capacity(3, &b"123456\nok\nlast"[..]);
-        assert_eq!(read_bounded_line(&mut input, 4).unwrap(), BoundedLine::TooLong);
+        assert_eq!(
+            read_bounded_line(&mut input, 4).unwrap(),
+            BoundedLine::TooLong
+        );
         assert_eq!(
             read_bounded_line(&mut input, 4).unwrap(),
             BoundedLine::Line(b"ok".to_vec())
