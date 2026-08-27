@@ -94,4 +94,23 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().runtimeMode).toBe("pi-rpc");
     expect(useLabStore.getState().messages.at(-1)).toMatchObject({ text: "已在取消前完成", streaming: false });
   });
+
+  it("prevents analysis while Runtime settings are being applied", async () => {
+    expect(useLabStore.getState().beginRuntimeConfiguration()).toBe(true);
+    expect(useLabStore.getState().runtimeConfiguring).toBe(true);
+
+    await expect(useLabStore.getState().sendMessage("不应发出的请求")).resolves.toBe(false);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().messages).toHaveLength(initialLabState.messages.length);
+
+    useLabStore.getState().endRuntimeConfiguration();
+    expect(useLabStore.getState().runtimeConfiguring).toBe(false);
+  });
+
+  it.each(["running", "cancelling"])("refuses to apply Runtime settings while mode is %s", (runtimeMode) => {
+    useLabStore.setState({ runtimeMode });
+
+    expect(useLabStore.getState().beginRuntimeConfiguration()).toBe(false);
+    expect(useLabStore.getState().runtimeConfiguring).toBe(false);
+  });
 });

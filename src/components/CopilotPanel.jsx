@@ -9,10 +9,12 @@ export function CopilotPanel({ standalone = false }) {
   const sendMessage = useLabStore((state) => state.sendMessage);
   const cancelMessage = useLabStore((state) => state.cancelMessage);
   const runtimeMode = useLabStore((state) => state.runtimeMode);
+  const runtimeConfiguring = useLabStore((state) => state.runtimeConfiguring);
   const feedEnd = useRef(null);
   const running = runtimeMode === "running";
   const cancelling = runtimeMode === "cancelling";
-  const busy = running || cancelling;
+  const runtimeBusy = running || cancelling;
+  const busy = runtimeBusy || runtimeConfiguring;
   useEffect(() => {
     if (typeof feedEnd.current?.scrollIntoView === "function") feedEnd.current.scrollIntoView({ block: "nearest" });
   }, [messages, busy]);
@@ -39,8 +41,8 @@ export function CopilotPanel({ standalone = false }) {
         <div ref={feedEnd} />
       </div>
       <div className="composer" aria-busy={busy}>
-        <textarea aria-label="分析问题" value={draft} maxLength={32000} disabled={busy} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={busy ? (cancelling ? "正在停止本轮分析…" : "Pi 正在分析…") : "向 FolioMind 提问或下达分析指令…"} />
-        <div><button className="composer-tool" aria-label="添加内容" disabled={busy}><Plus size={19} /></button><span className="mode-select">{cancelling ? "取消中" : running ? "分析中" : "深度分析"}</span><button className={`send-button${busy ? " cancel-button" : ""}`} disabled={cancelling || (!running && !draft.trim())} onClick={running ? () => { void cancelMessage(); } : submit} aria-label={cancelling ? "正在取消" : running ? "停止分析" : "发送"}>{busy ? <Square size={13} weight="fill" /> : <ArrowUp size={19} weight="bold" />}</button></div>
+        <textarea aria-label="分析问题" value={draft} maxLength={32000} disabled={busy} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={runtimeConfiguring ? "正在应用设置，暂不能发起分析…" : busy ? (cancelling ? "正在停止本轮分析…" : "Pi 正在分析…") : "向 FolioMind 提问或下达分析指令…"} />
+        <div><button className="composer-tool" aria-label="添加内容" disabled={busy}><Plus size={19} /></button><span className="mode-select">{runtimeConfiguring ? "应用设置中" : cancelling ? "取消中" : running ? "分析中" : "深度分析"}</span><button className={`send-button${runtimeBusy ? " cancel-button" : ""}`} disabled={runtimeConfiguring || cancelling || (!running && !draft.trim())} onClick={running ? () => { void cancelMessage(); } : submit} aria-label={runtimeConfiguring ? "正在应用设置" : cancelling ? "正在取消" : running ? "停止分析" : "发送"}>{runtimeBusy ? <Square size={13} weight="fill" /> : <ArrowUp size={19} weight="bold" />}</button></div>
       </div>
       <div className="disclaimer">内容由 AI 生成，仅供参考，不构成投资建议。</div>
     </aside>

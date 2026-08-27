@@ -14,6 +14,7 @@ export const initialLabState = {
   ],
   rules: [{ id: "r1", symbol: "600519", name: "批价波动监控", enabled: true }],
   runtimeMode: "ready",
+  runtimeConfiguring: false,
 };
 
 export const useLabStore = create((set, get) => ({
@@ -24,9 +25,20 @@ export const useLabStore = create((set, get) => ({
   toggleSkill: (id) => set((state) => ({ skillItems: state.skillItems.map((item) => item.id === id ? { ...item, installed: !item.installed } : item) })),
   toggleRule: (id) => set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? { ...rule, enabled: !rule.enabled } : rule) })),
   addRule: (symbol) => set((state) => ({ rules: [...state.rules, { id: crypto.randomUUID(), symbol, name: "成交量异常监控", enabled: true }] })),
+  beginRuntimeConfiguration: () => {
+    let acquired = false;
+    set((state) => {
+      if (state.runtimeConfiguring || ["running", "cancelling"].includes(state.runtimeMode)) return {};
+      acquired = true;
+      return { runtimeConfiguring: true };
+    });
+    return acquired;
+  },
+  endRuntimeConfiguration: () => set({ runtimeConfiguring: false }),
   sendMessage: async (text) => {
     const prompt = String(text ?? "").trim();
-    if (!prompt || ["running", "cancelling"].includes(get().runtimeMode)) return false;
+    const state = get();
+    if (!prompt || state.runtimeConfiguring || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const userId = crypto.randomUUID();
     const assistantId = crypto.randomUUID();
     set((state) => ({

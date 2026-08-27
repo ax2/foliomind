@@ -1,10 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
-const integrationMocks = vi.hoisted(() => ({ loadIntegrationStatus: vi.fn() }));
+const integrationMocks = vi.hoisted(() => ({
+  applyIntegrationSettings: vi.fn(),
+  loadIntegrationStatus: vi.fn(),
+}));
 
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
@@ -19,12 +22,14 @@ vi.mock("lightweight-charts", () => ({
 
 vi.mock("./lib/integrations.js", async (importOriginal) => ({
   ...await importOriginal(),
+  applyIntegrationSettings: integrationMocks.applyIntegrationSettings,
   loadIntegrationStatus: integrationMocks.loadIntegrationStatus,
 }));
 
 afterEach(cleanup);
 
 beforeEach(() => {
+  integrationMocks.applyIntegrationSettings.mockReset();
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
     settings: {
@@ -135,6 +140,87 @@ describe("FolioMind core flows", () => {
     expect(screen.getByLabelText("Gateway Base URL")).toBeEnabled();
     expect(screen.getByLabelText("默认模型")).toHaveValue("model-a");
     expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks analysis while Runtime settings are being applied", async () => {
+    let finishApply;
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+    integrationMocks.applyIntegrationSettings.mockImplementation(() => new Promise((resolve) => { finishApply = resolve; }));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存并应用" }));
+    expect(useLabStore.getState().runtimeConfiguring).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+    expect(screen.getByLabelText("分析问题")).toBeDisabled();
+    expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在应用设置，暂不能发起分析…");
+    expect(screen.getByRole("button", { name: "正在应用设置" })).toBeDisabled();
+    expect(screen.getByText("应用设置中")).toBeInTheDocument();
+
+    await act(async () => {
+      finishApply({
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      });
+    });
+    await waitFor(() => expect(screen.getByLabelText("分析问题")).toBeEnabled());
+    expect(useLabStore.getState().runtimeConfiguring).toBe(false);
+  });
+
+  it("releases the Runtime configuration lock when applying settings fails", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+    integrationMocks.applyIntegrationSettings.mockRejectedValue(new Error("Runtime 重启失败"));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存并应用" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Runtime 重启失败");
+    await waitFor(() => expect(useLabStore.getState().runtimeConfiguring).toBe(false));
+    expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled();
+  });
+
+  it.each(["running", "cancelling"])("does not apply settings while Runtime mode is %s", async (runtimeMode) => {
+    useLabStore.setState({ runtimeMode });
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("请等待当前分析结束后再应用设置")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存并应用" })).toBeDisabled();
+    expect(integrationMocks.applyIntegrationSettings).not.toHaveBeenCalled();
   });
 
   it("routes a live-data request through the agent conversation", async () => {
