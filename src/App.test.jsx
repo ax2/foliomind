@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
+const originalCancelMessage = useLabStore.getState().cancelMessage;
+
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
   HistogramSeries: {},
@@ -22,6 +24,7 @@ beforeEach(() => {
     skillItems: initialLabState.skillItems.map((item) => ({ ...item })),
     messages: initialLabState.messages.map((message) => ({ ...message })),
     rules: initialLabState.rules.map((rule) => ({ ...rule })),
+    cancelMessage: originalCancelMessage,
   });
 });
 
@@ -92,5 +95,23 @@ describe("FolioMind core flows", () => {
     render(<App />);
     expect(screen.getByText("正在分析").closest(".assistant-message")).toHaveAttribute("aria-busy", "true");
     expect(screen.getByText("正在生成第一段")).toBeInTheDocument();
+  });
+
+  it("offers an accessible stop control while an analysis is running", () => {
+    const cancelMessage = vi.fn();
+    useLabStore.setState({ runtimeMode: "running", cancelMessage });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "停止分析" }));
+    expect(cancelMessage).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("分析问题")).toBeDisabled();
+    expect(screen.getByText("分析中")).toBeInTheDocument();
+  });
+
+  it("prevents repeated cancellation while the abort command is pending", () => {
+    useLabStore.setState({ runtimeMode: "cancelling" });
+    render(<App />);
+    expect(screen.getByRole("button", { name: "正在取消" })).toBeDisabled();
+    expect(screen.getByText("取消中")).toBeInTheDocument();
+    expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在停止本轮分析…");
   });
 });

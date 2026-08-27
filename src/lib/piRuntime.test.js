@@ -10,7 +10,7 @@ const tauri = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 
-import { askPi, textFromFrame } from "./piRuntime.js";
+import { ABORTED_CODE, abortPi, askPi, textFromFrame } from "./piRuntime.js";
 
 describe("Pi runtime client", () => {
   beforeEach(() => {
@@ -83,6 +83,29 @@ describe("Pi runtime client", () => {
     await expect(askPi("分析超时", { settleTimeoutMs: 5 })).rejects.toThrow("已取消本轮任务");
     expect(tauri.invoke).toHaveBeenCalledWith("runtime_send_rpc", expect.objectContaining({ payload: { type: "abort" } }));
     expect(tauri.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("sends an explicit abort command for a user cancellation", async () => {
+    tauri.invoke.mockResolvedValue({ type: "response", success: true });
+    await expect(abortPi()).resolves.toBe(true);
+    expect(tauri.invoke).toHaveBeenCalledWith("runtime_send_rpc", { payload: { type: "abort" }, timeoutMs: 5_000 });
+  });
+
+  it("surfaces an abort rejected by Pi", async () => {
+    tauri.invoke.mockResolvedValue({ type: "response", success: false, error: "Agent is not streaming" });
+    await expect(abortPi()).rejects.toThrow("Agent is not streaming");
+  });
+
+  it("marks an aborted final frame as a cancellation", async () => {
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "runtime_status") return { state: "running" };
+      queueMicrotask(() => {
+        tauri.eventHandler?.({ payload: { frame: { type: "message_end", message: { role: "assistant", stopReason: "aborted", content: [] } } } });
+        tauri.eventHandler?.({ payload: { frame: { type: "agent_settled" } } });
+      });
+      return { type: "response", success: true };
+    });
+    await expect(askPi("停止分析", { settleTimeoutMs: 100 })).rejects.toMatchObject({ code: ABORTED_CODE, message: "本轮分析已取消" });
   });
 
   it("waits for agent_settled across an automatic retry", async () => {

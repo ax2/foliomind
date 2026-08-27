@@ -2,6 +2,7 @@ const DEMO_REPLY = "我会按 Search → Inspect → Call 流程调用 QVeris，
 const DEFAULT_SETTLE_TIMEOUT_MS = 120_000;
 const MAX_PROMPT_CHARS = 32_000;
 const SETTLE_TIMEOUT_CODE = "PI_SETTLE_TIMEOUT";
+export const ABORTED_CODE = "PI_ABORTED";
 
 export function isDesktopRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
@@ -17,7 +18,11 @@ function runtimeErrorFromFrame(frame) {
   const message = frame?.message;
   if (frame?.type !== "message_end" || message?.role !== "assistant") return undefined;
   if (message.stopReason === "error") return new Error(message.errorMessage || "模型请求失败");
-  if (message.stopReason === "aborted") return new Error("本轮分析已取消");
+  if (message.stopReason === "aborted") {
+    const error = new Error("本轮分析已取消");
+    error.code = ABORTED_CODE;
+    return error;
+  }
   return null;
 }
 
@@ -34,6 +39,15 @@ async function abortActiveRun(invoke) {
   } catch {
     // Preserve the original timeout. Runtime crash/transport events already expose abort failures.
   }
+}
+
+export async function abortPi() {
+  if (!isDesktopRuntime()) throw new Error("停止分析仅在桌面应用中可用");
+  const { invoke } = await import("@tauri-apps/api/core");
+  const response = await invoke("runtime_send_rpc", { payload: { type: "abort" }, timeoutMs: 5_000 });
+  const commandError = rejectedCommandError(response);
+  if (commandError) throw commandError;
+  return true;
 }
 
 function normalizedPrompt(message) {

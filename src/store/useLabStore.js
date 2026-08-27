@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { skills } from "../data/market.js";
-import { askPi } from "../lib/piRuntime.js";
+import { ABORTED_CODE, abortPi, askPi } from "../lib/piRuntime.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 
@@ -26,7 +26,7 @@ export const useLabStore = create((set, get) => ({
   addRule: (symbol) => set((state) => ({ rules: [...state.rules, { id: crypto.randomUUID(), symbol, name: "成交量异常监控", enabled: true }] })),
   sendMessage: async (text) => {
     const prompt = String(text ?? "").trim();
-    if (!prompt || get().runtimeMode === "running") return false;
+    if (!prompt || ["running", "cancelling"].includes(get().runtimeMode)) return false;
     const userId = crypto.randomUUID();
     const assistantId = crypto.randomUUID();
     set((state) => ({
@@ -53,12 +53,29 @@ export const useLabStore = create((set, get) => ({
       }));
       return true;
     } catch (error) {
+      const cancelled = error?.code === ABORTED_CODE;
       set((state) => ({
-        runtimeMode: "error",
+        runtimeMode: cancelled ? "cancelled" : "error",
         messages: state.messages.map((message) => message.id === assistantId
-          ? { ...message, text: `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}`, mode: "error", streaming: false }
+          ? {
+            ...message,
+            text: cancelled ? "已取消本轮分析。" : `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}`,
+            mode: cancelled ? "cancelled" : "error",
+            streaming: false,
+          }
           : message),
       }));
+      return false;
+    }
+  },
+  cancelMessage: async () => {
+    if (get().runtimeMode !== "running") return false;
+    set({ runtimeMode: "cancelling" });
+    try {
+      await abortPi();
+      return true;
+    } catch {
+      set((state) => state.runtimeMode === "cancelling" ? { runtimeMode: "running" } : {});
       return false;
     }
   },

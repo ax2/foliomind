@@ -725,6 +725,16 @@ textarea:focus-visible {
 .send-button:hover {
   background: #0f68df;
 }
+.send-button.cancel-button {
+  background: #d94747;
+}
+.send-button.cancel-button:hover {
+  background: #be3434;
+}
+.send-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 .disclaimer {
   padding: 8px 12px 11px;
   text-align: center;
