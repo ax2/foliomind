@@ -6,7 +6,7 @@ use std::{
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -26,6 +26,7 @@ const MAX_IDENTIFIER_BYTES: usize = 256;
 const MAX_TOOL_IDS: usize = 5;
 const MAX_PARAMETERS_BYTES: usize = 256 * 1024;
 const STREAM_CHUNK_BYTES: usize = 16 * 1024;
+const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +51,28 @@ pub struct BridgeEnvironment {
 pub struct RunExecutor {
     address: std::net::SocketAddr,
     shutdown: Arc<AtomicBool>,
+}
+
+struct ConnectionSlot {
+    active: Arc<AtomicUsize>,
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        let previous = self.active.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "executor connection counter underflow");
+    }
+}
+
+fn try_acquire_connection_slot(active: &Arc<AtomicUsize>) -> Option<ConnectionSlot> {
+    active
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            (count < MAX_CONCURRENT_CONNECTIONS).then_some(count + 1)
+        })
+        .ok()?;
+    Some(ConnectionSlot {
+        active: active.clone(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,16 +111,26 @@ impl RunExecutor {
         };
         let worker_environment = environment.clone();
         let worker_shutdown = shutdown.clone();
+        let active_connections = Arc::new(AtomicUsize::new(0));
         thread::spawn(move || {
             while !worker_shutdown.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, peer)) if peer.ip().is_loopback() => {
+                        let Some(slot) = try_acquire_connection_slot(&active_connections) else {
+                            let _ = write_response(
+                                stream,
+                                503,
+                                json!({"error":"executor connection limit reached"}),
+                            );
+                            continue;
+                        };
                         let store = credential_store.clone();
                         let env = worker_environment.clone();
                         let audit = audit.clone();
                         let base = base_url.clone();
                         let model_base = model_gateway_url.clone();
                         thread::spawn(move || {
+                            let _slot = slot;
                             handle_connection(stream, store, env, base, model_base, audit)
                         });
                     }
@@ -817,6 +850,27 @@ mod tests {
         assert!(has_capability(&headers, "cap_test"));
         headers.insert("authorization".into(), "Bearer cap_other".into());
         assert!(!has_capability(&headers, "cap_test"));
+    }
+    #[test]
+    fn connection_slots_enforce_and_release_the_hard_limit() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let mut slots = (0..MAX_CONCURRENT_CONNECTIONS)
+            .map(|_| try_acquire_connection_slot(&active).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(active.load(Ordering::Acquire), MAX_CONCURRENT_CONNECTIONS);
+        assert!(try_acquire_connection_slot(&active).is_none());
+
+        drop(slots.pop().expect("a connection slot should be present"));
+        assert_eq!(
+            active.load(Ordering::Acquire),
+            MAX_CONCURRENT_CONNECTIONS - 1
+        );
+        let replacement = try_acquire_connection_slot(&active).unwrap();
+        assert_eq!(active.load(Ordering::Acquire), MAX_CONCURRENT_CONNECTIONS);
+
+        drop(replacement);
+        drop(slots);
+        assert_eq!(active.load(Ordering::Acquire), 0);
     }
     #[test]
     fn model_catalog_normalization_keeps_pi_required_fields() {
