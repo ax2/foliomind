@@ -2,12 +2,13 @@ use crate::{config, credentials::CredentialStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
+    future::Future,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread,
     time::Duration,
@@ -25,8 +26,8 @@ const MAX_QUERY_BYTES: usize = 4 * 1024;
 const MAX_IDENTIFIER_BYTES: usize = 256;
 const MAX_TOOL_IDS: usize = 5;
 const MAX_PARAMETERS_BYTES: usize = 256 * 1024;
-const STREAM_CHUNK_BYTES: usize = 16 * 1024;
 const MAX_CONCURRENT_CONNECTIONS: usize = 16;
+const EXECUTOR_STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,10 +52,82 @@ pub struct BridgeEnvironment {
 pub struct RunExecutor {
     address: std::net::SocketAddr,
     shutdown: Arc<AtomicBool>,
+    connections: Arc<ConnectionRegistry>,
 }
 
 struct ConnectionSlot {
     active: Arc<AtomicUsize>,
+}
+
+#[derive(Default)]
+struct ConnectionRegistryState {
+    stopped: bool,
+    next_id: usize,
+    sockets: HashMap<usize, TcpStream>,
+}
+
+#[derive(Default)]
+struct ConnectionRegistry {
+    inner: Mutex<ConnectionRegistryState>,
+}
+
+struct ConnectionRegistration {
+    id: usize,
+    registry: Arc<ConnectionRegistry>,
+}
+
+impl ConnectionRegistry {
+    fn register(self: &Arc<Self>, stream: &TcpStream) -> Result<ConnectionRegistration, String> {
+        let socket = stream
+            .try_clone()
+            .map_err(|_| "cannot track executor connection")?;
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "executor connection registry poisoned")?;
+        if inner.stopped {
+            return Err("executor stopped".into());
+        }
+        let id = inner.next_id;
+        inner.next_id = inner.next_id.wrapping_add(1);
+        inner.sockets.insert(id, socket);
+        Ok(ConnectionRegistration {
+            id,
+            registry: self.clone(),
+        })
+    }
+
+    fn shutdown_all(&self) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        inner.stopped = true;
+        for socket in inner.sockets.values() {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+    }
+
+    fn active_count(&self) -> usize {
+        self.inner
+            .lock()
+            .map(|inner| inner.sockets.len())
+            .unwrap_or_default()
+    }
+
+    fn wait_until_empty(&self, timeout: Duration) {
+        let deadline = std::time::Instant::now() + timeout;
+        while self.active_count() != 0 && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for ConnectionRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.registry.inner.lock() {
+            inner.sockets.remove(&self.id);
+        }
+    }
 }
 
 impl Drop for ConnectionSlot {
@@ -112,8 +185,10 @@ impl RunExecutor {
         let worker_environment = environment.clone();
         let worker_shutdown = shutdown.clone();
         let active_connections = Arc::new(AtomicUsize::new(0));
+        let connections = Arc::new(ConnectionRegistry::default());
+        let worker_connections = connections.clone();
         thread::spawn(move || {
-            while !worker_shutdown.load(Ordering::Relaxed) {
+            while !worker_shutdown.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((stream, peer)) if peer.ip().is_loopback() => {
                         let Some(slot) = try_acquire_connection_slot(&active_connections) else {
@@ -124,14 +199,31 @@ impl RunExecutor {
                             );
                             continue;
                         };
+                        let registration = match worker_connections.register(&stream) {
+                            Ok(registration) => registration,
+                            Err(_) => {
+                                let _ = stream.shutdown(Shutdown::Both);
+                                continue;
+                            }
+                        };
                         let store = credential_store.clone();
                         let env = worker_environment.clone();
                         let audit = audit.clone();
                         let base = base_url.clone();
                         let model_base = model_gateway_url.clone();
+                        let connection_shutdown = worker_shutdown.clone();
                         thread::spawn(move || {
                             let _slot = slot;
-                            handle_connection(stream, store, env, base, model_base, audit)
+                            let _registration = registration;
+                            handle_connection(
+                                stream,
+                                store,
+                                env,
+                                base,
+                                model_base,
+                                audit,
+                                connection_shutdown,
+                            )
                         });
                     }
                     Ok((stream, _)) => {
@@ -144,13 +236,22 @@ impl RunExecutor {
                 }
             }
         });
-        Ok((Self { address, shutdown }, environment))
+        Ok((
+            Self {
+                address,
+                shutdown,
+                connections,
+            },
+            environment,
+        ))
     }
 
     pub fn stop(&self) {
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.store(true, Ordering::Release);
+        self.connections.shutdown_all();
         let _ = TcpStream::connect_timeout(&self.address, Duration::from_millis(100))
             .and_then(|stream| stream.shutdown(Shutdown::Both));
+        self.connections.wait_until_empty(EXECUTOR_STOP_TIMEOUT);
     }
 }
 
@@ -167,8 +268,13 @@ fn handle_connection(
     base_url: String,
     model_gateway_url: String,
     audit: Arc<dyn Fn(AuditEvent) + Send + Sync>,
+    shutdown: Arc<AtomicBool>,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    if ensure_executor_running(&shutdown).is_err() {
+        return;
+    }
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(error) => {
@@ -176,13 +282,24 @@ fn handle_connection(
             return;
         }
     };
+    if ensure_executor_running(&shutdown).is_err() {
+        return;
+    }
     if request.path.starts_with("/model/v1/") {
         if !has_capability(&request.headers, &environment.model_capability) {
             let _ = write_response(stream, 401, json!({"error":"unauthorized"}));
             return;
         }
-        if let Err(error) = proxy_model_request(&mut stream, &store, &model_gateway_url, request) {
-            let _ = write_response(&mut stream, 502, json!({"error": redact(&error)}));
+        if let Err(error) = block_on_upstream(proxy_model_request(
+            &mut stream,
+            &store,
+            &model_gateway_url,
+            request,
+            &shutdown,
+        )) {
+            if ensure_executor_running(&shutdown).is_ok() {
+                let _ = write_response(&mut stream, 502, json!({"error": redact(&error)}));
+            }
         }
         return;
     }
@@ -207,7 +324,10 @@ fn handle_connection(
     }
     let tool_call_id = bridge.tool_call_id.clone();
     let operation = bridge.operation.clone();
-    let result = execute_official_api(&store, &base_url, &bridge);
+    let result = block_on_upstream(execute_official_api(&store, &base_url, &bridge, &shutdown));
+    if ensure_executor_running(&shutdown).is_err() {
+        return;
+    }
     match result {
         Ok(result) => {
             audit(AuditEvent {
@@ -331,11 +451,71 @@ fn has_capability(headers: &std::collections::HashMap<String, String>, capabilit
         .is_some_and(|value| value == &format!("Bearer {capability}"))
 }
 
-fn execute_official_api(
+fn ensure_executor_running(shutdown: &AtomicBool) -> Result<(), String> {
+    if shutdown.load(Ordering::Acquire) {
+        Err("executor stopped".into())
+    } else {
+        Ok(())
+    }
+}
+
+async fn wait_for_executor_stop(shutdown: &AtomicBool) {
+    while !shutdown.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+fn block_on_upstream<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "cannot initialize executor network runtime")?
+        .block_on(future)
+}
+
+async fn send_cancellable(
+    builder: reqwest::RequestBuilder,
+    shutdown: &AtomicBool,
+    error: &'static str,
+) -> Result<reqwest::Response, String> {
+    tokio::select! {
+        biased;
+        _ = wait_for_executor_stop(shutdown) => Err("executor stopped".into()),
+        response = builder.send() => response.map_err(|_| error.into()),
+    }
+}
+
+async fn read_response_limited(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    shutdown: &AtomicBool,
+    read_error: &'static str,
+    size_error: &'static str,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    loop {
+        let chunk = tokio::select! {
+            biased;
+            _ = wait_for_executor_stop(shutdown) => return Err("executor stopped".into()),
+            chunk = response.chunk() => chunk.map_err(|_| read_error)?,
+        };
+        let Some(chunk) = chunk else {
+            return Ok(bytes);
+        };
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(size_error.into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+}
+
+async fn execute_official_api(
     store: &Arc<dyn CredentialStore>,
     base_url: &str,
     request: &BridgeRequest,
+    shutdown: &AtomicBool,
 ) -> Result<Value, String> {
+    ensure_executor_running(shutdown)?;
     let key = store
         .read_qveris_key()?
         .filter(|key| !key.trim().is_empty())
@@ -401,25 +581,26 @@ fn execute_official_api(
         }
         _ => unreachable!(),
     };
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(UPSTREAM_TIMEOUT)
         .build()
         .map_err(|_| "cannot initialize QVeris client")?;
-    let response = client
-        .post(endpoint)
-        .bearer_auth(key)
-        .json(&body)
-        .send()
-        .map_err(|_| "QVeris request failed or timed out")?;
+    let response = send_cancellable(
+        client.post(endpoint).bearer_auth(key).json(&body),
+        shutdown,
+        "QVeris request failed or timed out",
+    )
+    .await?;
+    ensure_executor_running(shutdown)?;
     let status = response.status();
-    let mut limited = response.take((MAX_RESPONSE_BYTES + 1) as u64);
-    let mut bytes = Vec::new();
-    limited
-        .read_to_end(&mut bytes)
-        .map_err(|_| "cannot read QVeris response")?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err("QVeris response exceeds size limit".into());
-    }
+    let bytes = read_response_limited(
+        response,
+        MAX_RESPONSE_BYTES,
+        shutdown,
+        "cannot read QVeris response",
+        "QVeris response exceeds size limit",
+    )
+    .await?;
     if !status.is_success() {
         return Err(format!("QVeris API returned HTTP {}", status.as_u16()));
     }
@@ -535,12 +716,14 @@ fn model_endpoint(base_url: &str, suffix: &str) -> Result<Url, String> {
     Ok(endpoint)
 }
 
-fn proxy_model_request(
+async fn proxy_model_request(
     stream: &mut TcpStream,
     store: &Arc<dyn CredentialStore>,
     base_url: &str,
     request: HttpRequest,
+    shutdown: &AtomicBool,
 ) -> Result<(), String> {
+    ensure_executor_running(shutdown)?;
     let key = store
         .read_qveris_key()?
         .filter(|value| !value.trim().is_empty())
@@ -564,7 +747,7 @@ fn proxy_model_request(
         return Ok(());
     }
     let endpoint = model_endpoint(base_url, suffix)?;
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(MODEL_TIMEOUT)
         .build()
         .map_err(|_| "cannot initialize model proxy")?;
@@ -573,19 +756,22 @@ fn proxy_model_request(
     } else {
         client.post(endpoint).body(request.body)
     };
-    let response = builder
-        .bearer_auth(key)
-        .header(
-            "Accept",
-            request
-                .headers
-                .get("accept")
-                .map(String::as_str)
-                .unwrap_or("application/json"),
-        )
-        .header("Content-Type", "application/json")
-        .send()
-        .map_err(|_| "QVeris model request failed or timed out")?;
+    let response = send_cancellable(
+        builder
+            .bearer_auth(key)
+            .header(
+                "Accept",
+                request
+                    .headers
+                    .get("accept")
+                    .map(String::as_str)
+                    .unwrap_or("application/json"),
+            )
+            .header("Content-Type", "application/json"),
+        shutdown,
+        "QVeris model request failed or timed out",
+    )
+    .await?;
     let status = response.status();
     let content_type = response
         .headers()
@@ -594,21 +780,24 @@ fn proxy_model_request(
         .unwrap_or("application/json")
         .to_owned();
     if status.is_success() && is_event_stream(&content_type) {
+        ensure_executor_running(shutdown)?;
         write_streaming_response_head(stream, status.as_u16(), &content_type)
             .map_err(|_| "cannot write model stream headers".to_string())?;
         // Headers are already visible to Pi. On an upstream/read/size failure, close the
         // response instead of appending a second HTTP response to the SSE byte stream.
-        let _ = copy_stream_limited(response, stream, MAX_MODEL_RESPONSE_BYTES);
+        let _ = copy_response_stream_limited(response, stream, MAX_MODEL_RESPONSE_BYTES, shutdown)
+            .await;
         return Ok(());
     }
-    let mut limited = response.take((MAX_MODEL_RESPONSE_BYTES + 1) as u64);
-    let mut bytes = Vec::new();
-    limited
-        .read_to_end(&mut bytes)
-        .map_err(|_| "cannot read model response")?;
-    if bytes.len() > MAX_MODEL_RESPONSE_BYTES {
-        return Err("QVeris model response exceeds size limit".into());
-    }
+    let bytes = read_response_limited(
+        response,
+        MAX_MODEL_RESPONSE_BYTES,
+        shutdown,
+        "cannot read model response",
+        "QVeris model response exceeds size limit",
+    )
+    .await?;
+    ensure_executor_running(shutdown)?;
     write_raw_response(stream, status.as_u16(), &content_type, &bytes)
         .map_err(|_| "cannot write model response".to_string())
 }
@@ -632,29 +821,42 @@ fn write_streaming_response_head(
     stream.flush()
 }
 
-fn copy_stream_limited(
-    mut source: impl Read,
+async fn copy_response_stream_limited(
+    mut source: reqwest::Response,
     target: &mut impl Write,
     max_bytes: usize,
+    shutdown: &AtomicBool,
 ) -> Result<usize, String> {
     let mut total = 0;
-    let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
     loop {
-        let size = source
-            .read(&mut buffer)
-            .map_err(|_| "cannot read model stream")?;
-        if size == 0 {
+        let chunk = tokio::select! {
+            biased;
+            _ = wait_for_executor_stop(shutdown) => return Err("executor stopped".into()),
+            chunk = source.chunk() => chunk.map_err(|_| "cannot read model stream")?,
+        };
+        let Some(chunk) = chunk else {
             return Ok(total);
-        }
-        if total.saturating_add(size) > max_bytes {
-            return Err("QVeris model stream exceeds size limit".into());
-        }
-        target
-            .write_all(&buffer[..size])
-            .and_then(|_| target.flush())
-            .map_err(|_| "cannot write model stream")?;
-        total += size;
+        };
+        ensure_executor_running(shutdown)?;
+        write_stream_chunk_limited(target, &chunk, &mut total, max_bytes)?;
     }
+}
+
+fn write_stream_chunk_limited(
+    target: &mut impl Write,
+    chunk: &[u8],
+    total: &mut usize,
+    max_bytes: usize,
+) -> Result<(), String> {
+    if total.saturating_add(chunk.len()) > max_bytes {
+        return Err("QVeris model stream exceeds size limit".into());
+    }
+    target
+        .write_all(chunk)
+        .and_then(|_| target.flush())
+        .map_err(|_| "cannot write model stream")?;
+    *total += chunk.len();
+    Ok(())
 }
 
 struct HttpRequest {
@@ -754,7 +956,9 @@ fn redact(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use crate::credentials::InMemoryCredentialStore;
+    use std::sync::mpsc;
+    use std::time::Instant;
     fn environment() -> BridgeEnvironment {
         BridgeEnvironment {
             url: "http://127.0.0.1:1/execute".into(),
@@ -773,6 +977,16 @@ mod tests {
             tool_call_id: "call_test".into(),
             operation: "search".into(),
             input: json!({"query":"weather"}),
+        }
+    }
+    fn socket_is_closed(stream: &mut TcpStream) -> bool {
+        match stream.read(&mut [0_u8; 1]) {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(error) => !matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ),
         }
     }
     #[test]
@@ -872,6 +1086,124 @@ mod tests {
         drop(slots);
         assert_eq!(active.load(Ordering::Acquire), 0);
     }
+
+    #[test]
+    fn stop_closes_connections_blocked_on_incomplete_requests() {
+        let store = Arc::new(InMemoryCredentialStore::new());
+        let (executor, _) = RunExecutor::start(
+            store,
+            "http://127.0.0.1:1".into(),
+            "http://127.0.0.1:1/v1".into(),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+        let mut client = TcpStream::connect(executor.address).unwrap();
+        client
+            .write_all(b"POST /execute HTTP/1.1\r\nContent-Length: 100\r\n\r\npartial")
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while executor.connections.active_count() != 1 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(executor.connections.active_count(), 1);
+
+        executor.stop();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        assert!(socket_is_closed(&mut client));
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while executor.connections.active_count() != 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(executor.connections.active_count(), 0);
+    }
+
+    fn assert_stop_cancels_upstream(model_request: bool) {
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let upstream_address = upstream.local_addr().unwrap();
+        let (request_seen_tx, request_seen_rx) = mpsc::channel();
+        let (connection_closed_tx, connection_closed_rx) = mpsc::channel();
+        let upstream_thread = thread::spawn(move || {
+            let (mut stream, _) = upstream.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            read_request(&mut stream).unwrap();
+            request_seen_tx.send(()).unwrap();
+            connection_closed_tx
+                .send(socket_is_closed(&mut stream))
+                .unwrap();
+        });
+
+        let store = Arc::new(InMemoryCredentialStore::new());
+        store.write_qveris_key("test-key").unwrap();
+        let base_url = format!("http://{upstream_address}");
+        let audit_events = Arc::new(Mutex::new(Vec::<AuditEvent>::new()));
+        let captured_events = audit_events.clone();
+        let (executor, environment) = RunExecutor::start(
+            store,
+            base_url.clone(),
+            base_url,
+            Arc::new(move |event| captured_events.lock().unwrap().push(event)),
+        )
+        .unwrap();
+        let mut client = TcpStream::connect(executor.address).unwrap();
+        let (path, capability, body) = if model_request {
+            (
+                "/model/v1/chat/completions",
+                environment.model_capability.as_str(),
+                serde_json::to_vec(&json!({"model":"model-a","messages":[]})).unwrap(),
+            )
+        } else {
+            (
+                "/execute",
+                environment.capability.as_str(),
+                serde_json::to_vec(&json!({
+                    "bridge_version": BRIDGE_VERSION,
+                    "run_id": environment.run_id,
+                    "product_run_id": environment.product_run_id,
+                    "tool_call_id": "call-test",
+                    "operation": "search",
+                    "input": {"query":"AAPL"},
+                }))
+                .unwrap(),
+            )
+        };
+        write!(
+            client,
+            "POST {path} HTTP/1.1\r\nAuthorization: Bearer {capability}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        client.write_all(&body).unwrap();
+
+        request_seen_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("upstream should receive the request");
+        executor.stop();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        assert!(socket_is_closed(&mut client));
+        assert!(connection_closed_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("cancelled request should close its upstream connection"));
+        upstream_thread.join().unwrap();
+        assert!(audit_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stop_cancels_an_inflight_tool_request() {
+        assert_stop_cancels_upstream(false);
+    }
+
+    #[test]
+    fn stop_cancels_an_inflight_model_request() {
+        assert_stop_cancels_upstream(true);
+    }
     #[test]
     fn model_catalog_normalization_keeps_pi_required_fields() {
         let model = normalize_model(
@@ -918,17 +1250,21 @@ mod tests {
     fn streams_and_flushes_with_a_hard_size_limit() {
         let payload = b"data: {\"delta\":\"first\"}\n\ndata: [DONE]\n\n";
         let mut output = Vec::new();
-        assert_eq!(
-            copy_stream_limited(Cursor::new(payload), &mut output, payload.len()).unwrap(),
-            payload.len()
-        );
+        let mut total = 0;
+        write_stream_chunk_limited(&mut output, payload, &mut total, payload.len()).unwrap();
+        assert_eq!(total, payload.len());
         assert_eq!(output, payload);
 
         let mut limited = Vec::new();
-        assert!(
-            copy_stream_limited(Cursor::new(payload), &mut limited, payload.len() - 1).is_err()
-        );
-        assert!(limited.len() < payload.len());
+        let mut limited_total = 0;
+        assert!(write_stream_chunk_limited(
+            &mut limited,
+            payload,
+            &mut limited_total,
+            payload.len() - 1,
+        )
+        .is_err());
+        assert!(limited.is_empty());
     }
     #[test]
     fn streaming_headers_are_close_delimited_and_disable_sniffing() {
