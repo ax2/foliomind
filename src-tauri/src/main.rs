@@ -697,12 +697,7 @@ fn integration_settings_save(
         .trim()
         .trim_end_matches('/')
         .to_owned();
-    if model_gateway_base_url
-        != settings
-            .model_gateway_base_url
-            .trim()
-            .trim_end_matches('/')
-    {
+    if model_gateway_base_url != settings.model_gateway_base_url.trim().trim_end_matches('/') {
         return Err("模型网关地址已更改，请先同步模型目录".into());
     }
     settings.capability_base_url = capability_base_url;
