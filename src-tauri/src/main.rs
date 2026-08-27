@@ -1,14 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Local-only Pi RPC host. The only listener is a run-scoped loopback executor.
 
-mod credentials;
 mod config;
+mod credentials;
 mod executor;
 mod process_command;
 
+use config::IntegrationSettings;
 use credentials::{CredentialStore, OsCredentialStore};
 use executor::{AuditEvent, BridgeEnvironment, RunExecutor};
-use config::IntegrationSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -16,7 +16,10 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{atomic::{AtomicU64, Ordering}, mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Arc, Mutex,
+    },
     time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -35,15 +38,31 @@ struct RuntimeStatus {
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum RuntimeState { Stopped, Starting, Running, Stopping, Crashed }
+enum RuntimeState {
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+    Crashed,
+}
 
 impl Default for RuntimeStatus {
-    fn default() -> Self { Self { state: RuntimeState::Stopped, pid: None, detail: None } }
+    fn default() -> Self {
+        Self {
+            state: RuntimeState::Stopped,
+            pid: None,
+            detail: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeEvent { kind: String, status: RuntimeStatus, frame: Option<Value> }
+struct RuntimeEvent {
+    kind: String,
+    status: RuntimeStatus,
+    frame: Option<Value>,
+}
 
 struct Inner {
     child: Option<Arc<Mutex<Child>>>,
@@ -54,25 +73,57 @@ struct Inner {
 }
 
 #[derive(Clone)]
-struct PiHost { inner: Arc<Mutex<Inner>>, next_id: Arc<AtomicU64>, credentials: Arc<dyn CredentialStore> }
+struct PiHost {
+    inner: Arc<Mutex<Inner>>,
+    next_id: Arc<AtomicU64>,
+    credentials: Arc<dyn CredentialStore>,
+}
 
 impl Default for PiHost {
     fn default() -> Self {
-        Self { inner: Arc::new(Mutex::new(Inner { child: None, writer: None, pending: HashMap::new(), status: RuntimeStatus::default(), executor: None })), next_id: Arc::new(AtomicU64::new(1)), credentials: Arc::new(OsCredentialStore) }
+        Self {
+            inner: Arc::new(Mutex::new(Inner {
+                child: None,
+                writer: None,
+                pending: HashMap::new(),
+                status: RuntimeStatus::default(),
+                executor: None,
+            })),
+            next_id: Arc::new(AtomicU64::new(1)),
+            credentials: Arc::new(OsCredentialStore),
+        }
     }
 }
 
 impl PiHost {
-    fn status(&self) -> RuntimeStatus { self.inner.lock().expect("host lock poisoned").status.clone() }
+    fn status(&self) -> RuntimeStatus {
+        self.inner
+            .lock()
+            .expect("host lock poisoned")
+            .status
+            .clone()
+    }
 
     fn publish(&self, app: &AppHandle, kind: &str, frame: Option<Value>) {
-        let _ = app.emit(EVENT_NAME, RuntimeEvent { kind: kind.into(), status: self.status(), frame });
+        let _ = app.emit(
+            EVENT_NAME,
+            RuntimeEvent {
+                kind: kind.into(),
+                status: self.status(),
+                frame,
+            },
+        );
     }
 
     fn start(&self, app: AppHandle) -> Result<RuntimeStatus, String> {
         {
             let inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-            if !matches!(inner.status.state, RuntimeState::Stopped | RuntimeState::Crashed) { return Err("Pi runtime is already active".into()); }
+            if !matches!(
+                inner.status.state,
+                RuntimeState::Stopped | RuntimeState::Crashed
+            ) {
+                return Err("Pi runtime is already active".into());
+            }
         }
         let binary = resolve_pi_binary(&app);
         let extension = resolve_bridge_extension(&app)?;
@@ -81,15 +132,84 @@ impl PiHost {
         let settings = config::load(&app)?;
         self.set_status(&app, RuntimeState::Starting, None, None, "status");
         let audit_app = app.clone();
-        let audit = Arc::new(move |event: AuditEvent| { let _ = audit_app.emit(EVENT_NAME, serde_json::json!({ "kind": "qveris_audit", "audit": event })); });
-        let (executor, bridge) = RunExecutor::start(self.credentials.clone(), settings.capability_base_url.clone(), settings.model_gateway_base_url.clone(), audit).map_err(|error| { self.set_status(&app, RuntimeState::Crashed, None, Some(error.clone()), "crash"); error })?;
-        let agent_dir = match config::write_pi_config(&app, &settings, &bridge.model_base_url, bundled_bash.as_deref()) { Ok(path) => path, Err(error) => { executor.stop(); self.set_status(&app, RuntimeState::Crashed, None, Some(error.clone()), "crash"); return Err(error); } };
+        let audit = Arc::new(move |event: AuditEvent| {
+            let _ = audit_app.emit(
+                EVENT_NAME,
+                serde_json::json!({ "kind": "qveris_audit", "audit": event }),
+            );
+        });
+        let (executor, bridge) = RunExecutor::start(
+            self.credentials.clone(),
+            settings.capability_base_url.clone(),
+            settings.model_gateway_base_url.clone(),
+            audit,
+        )
+        .map_err(|error| {
+            self.set_status(
+                &app,
+                RuntimeState::Crashed,
+                None,
+                Some(error.clone()),
+                "crash",
+            );
+            error
+        })?;
+        let agent_dir = match config::write_pi_config(
+            &app,
+            &settings,
+            &bridge.model_base_url,
+            bundled_bash.as_deref(),
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                executor.stop();
+                self.set_status(
+                    &app,
+                    RuntimeState::Crashed,
+                    None,
+                    Some(error.clone()),
+                    "crash",
+                );
+                return Err(error);
+            }
+        };
         let mut command = process_command::new_command(binary);
-        command.arg("--extension").arg(extension).arg("--skill").arg(finance_skill).args(["--mode", "rpc", "--no-session", "--no-extensions", "--no-context-files", "--tools", "bash,qveris_search,qveris_inspect,qveris_call"]);
-        if !settings.model_id.trim().is_empty() { command.args(["--provider", "qveris", "--model", settings.model_id.trim()]); }
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .arg("--extension")
+            .arg(extension)
+            .arg("--skill")
+            .arg(finance_skill)
+            .args([
+                "--mode",
+                "rpc",
+                "--no-session",
+                "--no-extensions",
+                "--no-context-files",
+                "--tools",
+                "bash,qveris_search,qveris_inspect,qveris_call",
+            ]);
+        if !settings.model_id.trim().is_empty() {
+            command.args(["--provider", "qveris", "--model", settings.model_id.trim()]);
+        }
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         sanitized_environment(&mut command, &bridge, &agent_dir, bundled_bash.as_deref());
-        let mut child = match command.spawn() { Ok(child) => child, Err(error) => { executor.stop(); self.set_status(&app, RuntimeState::Crashed, None, Some(error.to_string()), "crash"); return Err(format!("cannot start Pi RPC runtime: {error}")); } };
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                executor.stop();
+                self.set_status(
+                    &app,
+                    RuntimeState::Crashed,
+                    None,
+                    Some(error.to_string()),
+                    "crash",
+                );
+                return Err(format!("cannot start Pi RPC runtime: {error}"));
+            }
+        };
         let pid = child.id();
         let stdin = child.stdin.take().ok_or("Pi stdin was not piped")?;
         let stdout = child.stdout.take().ok_or("Pi stdout was not piped")?;
@@ -98,7 +218,14 @@ impl PiHost {
         let (writer, writer_rx) = mpsc::channel();
         {
             let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-            inner.child = Some(child.clone()); inner.writer = Some(writer); inner.executor = Some(executor); inner.status = RuntimeStatus { state: RuntimeState::Running, pid: Some(pid), detail: None };
+            inner.child = Some(child.clone());
+            inner.writer = Some(writer);
+            inner.executor = Some(executor);
+            inner.status = RuntimeStatus {
+                state: RuntimeState::Running,
+                pid: Some(pid),
+                detail: None,
+            };
         }
         self.publish(&app, "started", None);
         self.spawn_writer(stdin, writer_rx, app.clone());
@@ -109,140 +236,515 @@ impl PiHost {
     }
 
     fn stop(&self, app: AppHandle) -> Result<RuntimeStatus, String> {
-        let (child, executor) = { let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?; if inner.child.is_none() { return Ok(inner.status.clone()); } inner.status.state = RuntimeState::Stopping; (inner.child.clone().unwrap(), inner.executor.take()) };
+        let (child, executor) = {
+            let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
+            if inner.child.is_none() {
+                return Ok(inner.status.clone());
+            }
+            inner.status.state = RuntimeState::Stopping;
+            (inner.child.clone().unwrap(), inner.executor.take())
+        };
         self.publish(&app, "stopping", None);
-        if let Some(executor) = executor { executor.stop(); }
-        child.lock().map_err(|_| "child lock poisoned")?.kill().map_err(|e| format!("cannot stop Pi runtime: {e}"))?;
+        if let Some(executor) = executor {
+            executor.stop();
+        }
+        child
+            .lock()
+            .map_err(|_| "child lock poisoned")?
+            .kill()
+            .map_err(|e| format!("cannot stop Pi runtime: {e}"))?;
         Ok(self.status())
     }
 
     fn request(&self, payload: Value, timeout: Duration) -> Result<Value, String> {
-        if !payload.is_object() { return Err("RPC payload must be a JSON object".into()); }
+        if !payload.is_object() {
+            return Err("RPC payload must be a JSON object".into());
+        }
         let id = format!("foliomind-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
-        let mut payload = payload; payload["id"] = Value::String(id.clone());
+        let mut payload = payload;
+        payload["id"] = Value::String(id.clone());
         let (reply_tx, reply_rx) = mpsc::channel();
         let writer = {
             let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-            if inner.status.state != RuntimeState::Running { return Err("Pi runtime is not running".into()); }
+            if inner.status.state != RuntimeState::Running {
+                return Err("Pi runtime is not running".into());
+            }
             inner.pending.insert(id.clone(), reply_tx);
-            inner.writer.clone().ok_or("Pi runtime writer is unavailable")?
+            inner
+                .writer
+                .clone()
+                .ok_or("Pi runtime writer is unavailable")?
         };
-        if writer.send(payload).is_err() { self.remove_pending(&id); return Err("Pi runtime stdin is closed".into()); }
-        match reply_rx.recv_timeout(timeout) { Ok(result) => result, Err(mpsc::RecvTimeoutError::Timeout) => { self.remove_pending(&id); Err("Pi RPC request timed out".into()) }, Err(_) => Err("Pi runtime closed before replying".into()) }
+        if writer.send(payload).is_err() {
+            self.remove_pending(&id);
+            return Err("Pi runtime stdin is closed".into());
+        }
+        match reply_rx.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.remove_pending(&id);
+                Err("Pi RPC request timed out".into())
+            }
+            Err(_) => Err("Pi runtime closed before replying".into()),
+        }
     }
 
-    fn remove_pending(&self, id: &str) { if let Ok(mut inner) = self.inner.lock() { inner.pending.remove(id); } }
-    fn resolve(&self, id: &str, frame: Value) { if let Ok(mut inner) = self.inner.lock() { if let Some(reply) = inner.pending.remove(id) { let _ = reply.send(Ok(frame)); } } }
-    fn fail_all(&self, reason: &str) { if let Ok(mut inner) = self.inner.lock() { for (_, reply) in inner.pending.drain() { let _ = reply.send(Err(reason.into())); } inner.writer = None; } }
-    fn set_status(&self, app: &AppHandle, state: RuntimeState, pid: Option<u32>, detail: Option<String>, kind: &str) { if let Ok(mut inner) = self.inner.lock() { inner.status = RuntimeStatus { state, pid, detail }; } self.publish(app, kind, None); }
+    fn remove_pending(&self, id: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.pending.remove(id);
+        }
+    }
+    fn resolve(&self, id: &str, frame: Value) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(reply) = inner.pending.remove(id) {
+                let _ = reply.send(Ok(frame));
+            }
+        }
+    }
+    fn fail_all(&self, reason: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            for (_, reply) in inner.pending.drain() {
+                let _ = reply.send(Err(reason.into()));
+            }
+            inner.writer = None;
+        }
+    }
+    fn set_status(
+        &self,
+        app: &AppHandle,
+        state: RuntimeState,
+        pid: Option<u32>,
+        detail: Option<String>,
+        kind: &str,
+    ) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.status = RuntimeStatus { state, pid, detail };
+        }
+        self.publish(app, kind, None);
+    }
 
-    fn spawn_writer(&self, mut stdin: impl Write + Send + 'static, rx: mpsc::Receiver<Value>, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for value in rx { let encoded = match encode_jsonl(&value) { Ok(v) => v, Err(e) => { host.publish(&app, "protocol_error", Some(Value::String(e))); continue; } }; if stdin.write_all(&encoded).and_then(|_| stdin.flush()).is_err() { host.fail_all("Pi runtime stdin write failed"); host.publish(&app, "transport_error", None); break; } } }); }
-    fn spawn_stdout(&self, stdout: impl std::io::Read + Send + 'static, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for line in BufReader::new(stdout).split(b'\n') { match line { Ok(raw) => match decode_jsonl(&raw) { Ok(frame) => { if let Some(id) = frame.get("id").and_then(Value::as_str).map(str::to_owned) { host.resolve(&id, frame); } else { host.publish(&app, "event", Some(frame)); } }, Err(error) => host.publish(&app, "protocol_error", Some(Value::String(error))), }, Err(_) => break, } } }); }
-    fn spawn_stderr(&self, stderr: impl std::io::Read + Send + 'static, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for line in BufReader::new(stderr).lines().map_while(Result::ok) { host.publish(&app, "diagnostic", Some(Value::String(line.chars().take(4096).collect()))); } }); }
-    fn spawn_watcher(&self, child: Arc<Mutex<Child>>, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || loop { std::thread::sleep(Duration::from_millis(100)); let exit = child.lock().ok().and_then(|mut child| child.try_wait().ok()).flatten(); if let Some(status) = exit { let next_state = state_after_process_exit(host.status().state); host.fail_all("Pi runtime exited"); if let Ok(mut inner) = host.inner.lock() { inner.child = None; if let Some(executor) = inner.executor.take() { executor.stop(); } } if next_state == RuntimeState::Stopped { host.set_status(&app, RuntimeState::Stopped, None, None, "stopped"); } else { host.set_status(&app, RuntimeState::Crashed, None, Some(status.to_string()), "crash"); } break; } }); }
+    fn spawn_writer(
+        &self,
+        mut stdin: impl Write + Send + 'static,
+        rx: mpsc::Receiver<Value>,
+        app: AppHandle,
+    ) {
+        let host = self.clone();
+        std::thread::spawn(move || {
+            for value in rx {
+                let encoded = match encode_jsonl(&value) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        host.publish(&app, "protocol_error", Some(Value::String(e)));
+                        continue;
+                    }
+                };
+                if stdin
+                    .write_all(&encoded)
+                    .and_then(|_| stdin.flush())
+                    .is_err()
+                {
+                    host.fail_all("Pi runtime stdin write failed");
+                    host.publish(&app, "transport_error", None);
+                    break;
+                }
+            }
+        });
+    }
+    fn spawn_stdout(&self, stdout: impl std::io::Read + Send + 'static, app: AppHandle) {
+        let host = self.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).split(b'\n') {
+                match line {
+                    Ok(raw) => match decode_jsonl(&raw) {
+                        Ok(frame) => {
+                            if let Some(id) =
+                                frame.get("id").and_then(Value::as_str).map(str::to_owned)
+                            {
+                                host.resolve(&id, frame);
+                            } else {
+                                host.publish(&app, "event", Some(frame));
+                            }
+                        }
+                        Err(error) => {
+                            host.publish(&app, "protocol_error", Some(Value::String(error)))
+                        }
+                    },
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+    fn spawn_stderr(&self, stderr: impl std::io::Read + Send + 'static, app: AppHandle) {
+        let host = self.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                host.publish(
+                    &app,
+                    "diagnostic",
+                    Some(Value::String(line.chars().take(4096).collect())),
+                );
+            }
+        });
+    }
+    fn spawn_watcher(&self, child: Arc<Mutex<Child>>, app: AppHandle) {
+        let host = self.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(100));
+            let exit = child
+                .lock()
+                .ok()
+                .and_then(|mut child| child.try_wait().ok())
+                .flatten();
+            if let Some(status) = exit {
+                let next_state = state_after_process_exit(host.status().state);
+                host.fail_all("Pi runtime exited");
+                if let Ok(mut inner) = host.inner.lock() {
+                    inner.child = None;
+                    if let Some(executor) = inner.executor.take() {
+                        executor.stop();
+                    }
+                }
+                if next_state == RuntimeState::Stopped {
+                    host.set_status(&app, RuntimeState::Stopped, None, None, "stopped");
+                } else {
+                    host.set_status(
+                        &app,
+                        RuntimeState::Crashed,
+                        None,
+                        Some(status.to_string()),
+                        "crash",
+                    );
+                }
+                break;
+            }
+        });
+    }
 }
 
 fn resolve_pi_binary(app: &AppHandle) -> PathBuf {
-    if let Some(path) = std::env::var_os("FOLIOMIND_PI_BINARY") { return path.into(); }
+    if let Some(path) = std::env::var_os("FOLIOMIND_PI_BINARY") {
+        return path.into();
+    }
     let name = if cfg!(windows) { "pi.exe" } else { "pi" };
-    app.path().resource_dir().ok().map(|dir| dir.join("pi").join(name)).filter(|path| path.is_file()).unwrap_or_else(|| name.into())
+    app.path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join("pi").join(name))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| name.into())
 }
 
 fn resolve_bridge_extension(app: &AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
-    if let Some(path) = std::env::var_os("FOLIOMIND_BRIDGE_EXTENSION") { candidates.push(PathBuf::from(path)); }
-    if let Ok(resources) = app.path().resource_dir() { candidates.push(resources.join("extensions").join("qveris-bridge.mjs")); }
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("packages").join("qveris-bridge").join("index.mjs"));
-    candidates.into_iter().find(|path| path.is_file()).ok_or_else(|| "QVeris bridge extension is missing from the application bundle".into())
+    if let Some(path) = std::env::var_os("FOLIOMIND_BRIDGE_EXTENSION") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("extensions").join("qveris-bridge.mjs"));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("packages")
+            .join("qveris-bridge")
+            .join("index.mjs"),
+    );
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| "QVeris bridge extension is missing from the application bundle".into())
 }
 
 fn resolve_finance_skill(app: &AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
-    if let Ok(resources) = app.path().resource_dir() { candidates.push(resources.join("skills").join("qveris-finance-research")); }
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("skills").join("qveris-finance-research"));
-    candidates.into_iter().find(|path| path.join("SKILL.md").is_file()).ok_or_else(|| "QVeris finance Skill is missing from the application bundle".into())
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("skills").join("qveris-finance-research"));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("skills")
+            .join("qveris-finance-research"),
+    );
+    candidates
+        .into_iter()
+        .find(|path| path.join("SKILL.md").is_file())
+        .ok_or_else(|| "QVeris finance Skill is missing from the application bundle".into())
 }
 
 fn resolve_bundled_bash(app: &AppHandle) -> Result<Option<PathBuf>, String> {
-    if !cfg!(target_os = "windows") { return Ok(None); }
+    if !cfg!(target_os = "windows") {
+        return Ok(None);
+    }
     let mut candidates = Vec::new();
-    if let Ok(resources) = app.path().resource_dir() { candidates.push(resources.join("portable-git").join("bin").join("bash.exe")); }
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("portable-git").join("bin").join("bash.exe"));
-    candidates.into_iter().find(|path| path.is_file()).map(Some).ok_or_else(|| "Bundled Bash is missing; reinstall FolioMind or run npm run fetch:bash".into())
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("portable-git").join("bin").join("bash.exe"));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("portable-git")
+            .join("bin")
+            .join("bash.exe"),
+    );
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .map(Some)
+        .ok_or_else(|| {
+            "Bundled Bash is missing; reinstall FolioMind or run npm run fetch:bash".into()
+        })
 }
 
-fn sanitized_environment(command: &mut Command, bridge: &BridgeEnvironment, agent_dir: &std::path::Path, bundled_bash: Option<&std::path::Path>) {
+fn sanitized_environment(
+    command: &mut Command,
+    bridge: &BridgeEnvironment,
+    agent_dir: &std::path::Path,
+    bundled_bash: Option<&std::path::Path>,
+) {
     command.env_clear();
     // Keep only OS essentials. In particular, no QVERIS_* credential is inherited by Pi.
-    for key in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LANG"] { if let Some(value) = std::env::var_os(key) { command.env(key, value); } }
-    let mut paths = bundled_bash.and_then(|path| path.parent()?.parent()).map(|root| vec![root.join("cmd"), root.join("bin"), root.join("usr").join("bin")]).unwrap_or_default();
-    if let Some(ambient) = std::env::var_os("PATH") { paths.extend(std::env::split_paths(&ambient)); }
-    if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
-    command.env("PI_CODING_AGENT_DIR", agent_dir).env("QVERIS_EXECUTOR_URL", &bridge.url).env("QVERIS_MANAGED_CAPABILITY", &bridge.capability).env("QVERIS_PI_RUN_ID", &bridge.run_id).env("QVERIS_PRODUCT_RUN_ID", &bridge.product_run_id).env("QVERIS_EXECUTOR_TIMEOUT_MS", "30000").env("FOLIOMIND_MODEL_TOKEN", &bridge.model_capability);
+    for key in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "SYSTEMROOT",
+        "COMSPEC",
+        "PATHEXT",
+        "LANG",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let mut paths = bundled_bash
+        .and_then(|path| path.parent()?.parent())
+        .map(|root| {
+            vec![
+                root.join("cmd"),
+                root.join("bin"),
+                root.join("usr").join("bin"),
+            ]
+        })
+        .unwrap_or_default();
+    if let Some(ambient) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&ambient));
+    }
+    if let Ok(path) = std::env::join_paths(paths) {
+        command.env("PATH", path);
+    }
+    command
+        .env("PI_CODING_AGENT_DIR", agent_dir)
+        .env("QVERIS_EXECUTOR_URL", &bridge.url)
+        .env("QVERIS_MANAGED_CAPABILITY", &bridge.capability)
+        .env("QVERIS_PI_RUN_ID", &bridge.run_id)
+        .env("QVERIS_PRODUCT_RUN_ID", &bridge.product_run_id)
+        .env("QVERIS_EXECUTOR_TIMEOUT_MS", "30000")
+        .env("FOLIOMIND_MODEL_TOKEN", &bridge.model_capability);
 }
 
-fn state_after_process_exit(previous: RuntimeState) -> RuntimeState { if previous == RuntimeState::Stopping { RuntimeState::Stopped } else { RuntimeState::Crashed } }
+fn state_after_process_exit(previous: RuntimeState) -> RuntimeState {
+    if previous == RuntimeState::Stopping {
+        RuntimeState::Stopped
+    } else {
+        RuntimeState::Crashed
+    }
+}
 
-fn encode_jsonl(value: &Value) -> Result<Vec<u8>, String> { let mut bytes = serde_json::to_vec(value).map_err(|e| format!("cannot encode RPC JSON: {e}"))?; if bytes.iter().any(|b| *b == b'\n' || *b == b'\r') { return Err("RPC JSON must be a single line".into()); } bytes.push(b'\n'); Ok(bytes) }
-fn decode_jsonl(raw: &[u8]) -> Result<Value, String> { if raw.len() > MAX_JSONL_BYTES { return Err("Pi JSONL frame exceeds 1 MiB".into()); } if raw.is_empty() { return Err("Pi emitted an empty JSONL frame".into()); } serde_json::from_slice(raw).map_err(|e| format!("invalid Pi JSONL frame: {e}")) }
+fn encode_jsonl(value: &Value) -> Result<Vec<u8>, String> {
+    let mut bytes =
+        serde_json::to_vec(value).map_err(|e| format!("cannot encode RPC JSON: {e}"))?;
+    if bytes.iter().any(|b| *b == b'\n' || *b == b'\r') {
+        return Err("RPC JSON must be a single line".into());
+    }
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+fn decode_jsonl(raw: &[u8]) -> Result<Value, String> {
+    if raw.len() > MAX_JSONL_BYTES {
+        return Err("Pi JSONL frame exceeds 1 MiB".into());
+    }
+    if raw.is_empty() {
+        return Err("Pi emitted an empty JSONL frame".into());
+    }
+    serde_json::from_slice(raw).map_err(|e| format!("invalid Pi JSONL frame: {e}"))
+}
 
 #[tauri::command]
-fn runtime_status(host: State<'_, PiHost>) -> RuntimeStatus { host.status() }
+fn runtime_status(host: State<'_, PiHost>) -> RuntimeStatus {
+    host.status()
+}
 #[tauri::command]
-fn runtime_start(host: State<'_, PiHost>, app: AppHandle) -> Result<RuntimeStatus, String> { host.start(app) }
+fn runtime_start(host: State<'_, PiHost>, app: AppHandle) -> Result<RuntimeStatus, String> {
+    host.start(app)
+}
 #[tauri::command]
-fn runtime_stop(host: State<'_, PiHost>, app: AppHandle) -> Result<RuntimeStatus, String> { host.stop(app) }
+fn runtime_stop(host: State<'_, PiHost>, app: AppHandle) -> Result<RuntimeStatus, String> {
+    host.stop(app)
+}
 #[tauri::command]
-async fn runtime_send_rpc(host: State<'_, PiHost>, payload: Value, timeout_ms: Option<u64>) -> Result<Value, String> { let host = host.inner().clone(); tauri::async_runtime::spawn_blocking(move || host.request(payload, Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).clamp(1, 120_000)))).await.map_err(|e| format!("RPC task failed: {e}"))? }
+async fn runtime_send_rpc(
+    host: State<'_, PiHost>,
+    payload: Value,
+    timeout_ms: Option<u64>,
+) -> Result<Value, String> {
+    let host = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        host.request(
+            payload,
+            Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).clamp(1, 120_000)),
+        )
+    })
+    .await
+    .map_err(|e| format!("RPC task failed: {e}"))?
+}
 #[tauri::command]
-fn qveris_credential_configured(host: State<'_, PiHost>) -> Result<bool, String> { Ok(host.credentials.read_qveris_key()?.is_some()) }
+fn qveris_credential_configured(host: State<'_, PiHost>) -> Result<bool, String> {
+    Ok(host.credentials.read_qveris_key()?.is_some())
+}
 #[tauri::command]
-fn qveris_credential_save(host: State<'_, PiHost>, api_key: String) -> Result<(), String> { host.credentials.write_qveris_key(&api_key) }
+fn qveris_credential_save(host: State<'_, PiHost>, api_key: String) -> Result<(), String> {
+    host.credentials.write_qveris_key(&api_key)
+}
 #[tauri::command]
-fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> { host.credentials.delete_qveris_key() }
+fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> {
+    host.credentials.delete_qveris_key()
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct IntegrationStatus { credential_configured: bool, settings: IntegrationSettings }
+struct IntegrationStatus {
+    credential_configured: bool,
+    settings: IntegrationSettings,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SettingsInput { capability_base_url: String, model_gateway_base_url: String, model_id: String }
-
-#[tauri::command]
-fn integration_status(host: State<'_, PiHost>, app: AppHandle) -> Result<IntegrationStatus, String> {
-    Ok(IntegrationStatus { credential_configured: host.credentials.read_qveris_key()?.is_some(), settings: config::load(&app)? })
+struct SettingsInput {
+    capability_base_url: String,
+    model_gateway_base_url: String,
+    model_id: String,
 }
 
 #[tauri::command]
-fn integration_settings_save(app: AppHandle, input: SettingsInput) -> Result<IntegrationSettings, String> {
+fn integration_status(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+) -> Result<IntegrationStatus, String> {
+    Ok(IntegrationStatus {
+        credential_configured: host.credentials.read_qveris_key()?.is_some(),
+        settings: config::load(&app)?,
+    })
+}
+
+#[tauri::command]
+fn integration_settings_save(
+    app: AppHandle,
+    input: SettingsInput,
+) -> Result<IntegrationSettings, String> {
     let mut settings = config::load(&app)?;
     settings.capability_base_url = input.capability_base_url.trim_end_matches('/').to_owned();
-    settings.model_gateway_base_url = input.model_gateway_base_url.trim_end_matches('/').to_owned();
+    settings.model_gateway_base_url = input
+        .model_gateway_base_url
+        .trim_end_matches('/')
+        .to_owned();
     settings.model_id = input.model_id.trim().to_owned();
     config::save(&app, &settings)?;
     Ok(settings)
 }
 
 #[tauri::command]
-async fn qveris_model_catalog_sync(host: State<'_, PiHost>, app: AppHandle) -> Result<IntegrationSettings, String> {
-    let key = host.credentials.read_qveris_key()?.ok_or("QVeris credential is not configured")?;
+async fn qveris_model_catalog_sync(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+) -> Result<IntegrationSettings, String> {
+    let key = host
+        .credentials
+        .read_qveris_key()?
+        .ok_or("QVeris credential is not configured")?;
     let mut settings = config::load(&app)?;
     let base_url = settings.model_gateway_base_url.clone();
-    let models = tauri::async_runtime::spawn_blocking(move || executor::fetch_model_catalog(&key, &base_url)).await.map_err(|error| format!("model catalog task failed: {error}"))??;
+    let models = tauri::async_runtime::spawn_blocking(move || {
+        executor::fetch_model_catalog(&key, &base_url)
+    })
+    .await
+    .map_err(|error| format!("model catalog task failed: {error}"))??;
     settings.models = models;
-    if settings.model_id.is_empty() { settings.model_id = settings.models.first().and_then(|model| model.get("id")).and_then(Value::as_str).unwrap_or_default().to_owned(); }
+    if settings.model_id.is_empty() {
+        settings.model_id = settings
+            .models
+            .first()
+            .and_then(|model| model.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+    }
     config::save(&app, &settings)?;
     Ok(settings)
 }
 
-fn main() { tauri::Builder::default().manage(PiHost::default()).invoke_handler(tauri::generate_handler![runtime_status, runtime_start, runtime_stop, runtime_send_rpc, qveris_credential_configured, qveris_credential_save, qveris_credential_clear, integration_status, integration_settings_save, qveris_model_catalog_sync]).run(tauri::generate_context!()).expect("error while running FolioMind"); }
+fn main() {
+    tauri::Builder::default()
+        .manage(PiHost::default())
+        .invoke_handler(tauri::generate_handler![
+            runtime_status,
+            runtime_start,
+            runtime_stop,
+            runtime_send_rpc,
+            qveris_credential_configured,
+            qveris_credential_save,
+            qveris_credential_clear,
+            integration_status,
+            integration_settings_save,
+            qveris_model_catalog_sync
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running FolioMind");
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn jsonl_round_trip_is_single_line() { let input = serde_json::json!({"id":"1","method":"ping"}); let wire = encode_jsonl(&input).unwrap(); assert_eq!(wire.last(), Some(&b'\n')); assert_eq!(decode_jsonl(&wire[..wire.len() - 1]).unwrap(), input); }
-    #[test] fn jsonl_rejects_empty_and_oversized_frames() { assert!(decode_jsonl(b"").is_err()); assert!(decode_jsonl(&vec![b'x'; MAX_JSONL_BYTES + 1]).is_err()); }
-    #[test] fn status_defaults_to_stopped_and_request_needs_runtime() { let host = PiHost::default(); assert_eq!(host.status().state, RuntimeState::Stopped); assert!(host.request(serde_json::json!({"method":"ping"}), Duration::from_millis(1)).is_err()); }
-    #[test] fn process_exit_is_crash_unless_stop_was_requested() { assert_eq!(state_after_process_exit(RuntimeState::Running), RuntimeState::Crashed); assert_eq!(state_after_process_exit(RuntimeState::Starting), RuntimeState::Crashed); assert_eq!(state_after_process_exit(RuntimeState::Stopping), RuntimeState::Stopped); }
+    #[test]
+    fn jsonl_round_trip_is_single_line() {
+        let input = serde_json::json!({"id":"1","method":"ping"});
+        let wire = encode_jsonl(&input).unwrap();
+        assert_eq!(wire.last(), Some(&b'\n'));
+        assert_eq!(decode_jsonl(&wire[..wire.len() - 1]).unwrap(), input);
+    }
+    #[test]
+    fn jsonl_rejects_empty_and_oversized_frames() {
+        assert!(decode_jsonl(b"").is_err());
+        assert!(decode_jsonl(&vec![b'x'; MAX_JSONL_BYTES + 1]).is_err());
+    }
+    #[test]
+    fn status_defaults_to_stopped_and_request_needs_runtime() {
+        let host = PiHost::default();
+        assert_eq!(host.status().state, RuntimeState::Stopped);
+        assert!(host
+            .request(
+                serde_json::json!({"method":"ping"}),
+                Duration::from_millis(1)
+            )
+            .is_err());
+    }
+    #[test]
+    fn process_exit_is_crash_unless_stop_was_requested() {
+        assert_eq!(
+            state_after_process_exit(RuntimeState::Running),
+            RuntimeState::Crashed
+        );
+        assert_eq!(
+            state_after_process_exit(RuntimeState::Starting),
+            RuntimeState::Crashed
+        );
+        assert_eq!(
+            state_after_process_exit(RuntimeState::Stopping),
+            RuntimeState::Stopped
+        );
+    }
 }

@@ -14,7 +14,9 @@ pub fn new_command(program: impl AsRef<OsStr>) -> Command {
 }
 
 #[cfg(target_os = "windows")]
-fn configure(command: &mut Command) { command.creation_flags(CREATE_NO_WINDOW); }
+fn configure(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW);
+}
 
 #[cfg(not(target_os = "windows"))]
 fn configure(_command: &mut Command) {}
@@ -23,5 +25,7 @@ fn configure(_command: &mut Command) {}
 mod tests {
     #[cfg(target_os = "windows")]
     #[test]
-    fn create_no_window_flag_matches_windows_api() { assert_eq!(super::CREATE_NO_WINDOW, 0x0800_0000); }
+    fn create_no_window_flag_matches_windows_api() {
+        assert_eq!(super::CREATE_NO_WINDOW, 0x0800_0000);
+    }
 }
