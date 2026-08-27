@@ -1098,15 +1098,18 @@ mod tests {
         )
         .unwrap();
         let mut client = TcpStream::connect(executor.address).unwrap();
-        client
-            .write_all(b"POST /execute HTTP/1.1\r\nContent-Length: 100\r\n\r\npartial")
-            .unwrap();
 
-        let deadline = Instant::now() + Duration::from_secs(1);
+        // Synchronize with the accept loop before starting the incomplete request. On
+        // loaded CI hosts the executor thread may not be scheduled within one second.
+        let deadline = Instant::now() + Duration::from_secs(3);
         while executor.connections.active_count() != 1 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(executor.connections.active_count(), 1);
+
+        client
+            .write_all(b"POST /execute HTTP/1.1\r\nContent-Length: 100\r\n\r\npartial")
+            .unwrap();
 
         executor.stop();
         client
