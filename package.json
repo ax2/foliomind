@@ -21,10 +21,13 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-opener": "2.5.4",
     "@vitejs/plugin-react": "5.0.4",
     "lightweight-charts": "^5.2.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "vite": "6.4.3",
     "zustand": "^5.0.15"
   },

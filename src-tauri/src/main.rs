@@ -688,6 +688,7 @@ async fn qveris_model_catalog_sync(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(PiHost::default())
         .invoke_handler(tauri::generate_handler![
             runtime_status,

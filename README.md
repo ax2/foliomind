@@ -11,7 +11,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 个股盯盘规则、事件时间线和开关状态。
 - 市场行情总览与跨市场自选列表。
 - Skill 市场及安装状态管理。
-- FolioMind Agent 对话支持逐步显示 Pi 流式回答，并保留工具调用记录、数据截至时间与免责声明。
+- FolioMind Agent 对话支持逐步显示 Pi 流式回答，并以安全的 Markdown 展示标题、列表、表格、代码和来源链接，同时保留工具调用记录、数据截至时间与免责声明。
 - Tauri 2 Rust Host 管理 `pi --mode rpc` JSONL 子进程。
 - 固定并校验 Pi 0.84.2，桌面构建自动下载对应 Windows/macOS Runtime 并随安装包分发。
 - Run-scoped QVeris executor bridge，仅向 Pi 暴露 `qveris_search`、`qveris_inspect`、`qveris_call`。

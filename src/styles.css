@@ -506,18 +506,99 @@ textarea:focus-visible {
 .answer-title svg {
   color: var(--blue);
 }
-.assistant-message p {
+.assistant-stream-text {
   margin: 9px 0 12px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-.assistant-message h4 {
-  margin: 0 0 7px;
-  font-size: 12px;
+.assistant-content {
+  margin: 9px 0 12px;
+  overflow-wrap: anywhere;
 }
-.assistant-message ul {
-  margin: 0;
+.assistant-content > :first-child {
+  margin-top: 0;
+}
+.assistant-content > :last-child {
+  margin-bottom: 0;
+}
+.assistant-content p {
+  margin: 0 0 9px;
+}
+.assistant-content h1,
+.assistant-content h2,
+.assistant-content h3,
+.assistant-content h4,
+.assistant-content h5,
+.assistant-content h6 {
+  margin: 16px 0 8px;
+  color: #1d2632;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.assistant-content h1,
+.assistant-content h2 {
+  font-size: 15px;
+}
+.assistant-content ul,
+.assistant-content ol {
+  margin: 0 0 10px;
   padding-left: 19px;
+}
+.assistant-content li + li {
+  margin-top: 3px;
+}
+.assistant-content blockquote {
+  margin: 10px 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid #b9d3ff;
+  color: #657080;
+}
+.assistant-content code {
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: #f1f4f8;
+  color: #263447;
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.assistant-content pre {
+  overflow: auto;
+  margin: 10px 0;
+  border-radius: 7px;
+  padding: 10px 11px;
+  background: #f1f4f8;
+}
+.assistant-content pre code {
+  padding: 0;
+  background: transparent;
+}
+.assistant-content a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.assistant-link-disabled {
+  color: #657080;
+}
+.assistant-table-scroll {
+  overflow-x: auto;
+  margin: 10px 0;
+}
+.assistant-content table {
+  width: 100%;
+  min-width: 320px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.assistant-content th,
+.assistant-content td {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.assistant-content th {
+  background: #f5f7fa;
+  color: #344054;
 }
 .tool-run {
   margin-top: 20px;
