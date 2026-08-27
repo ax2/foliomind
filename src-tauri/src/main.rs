@@ -26,6 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const EVENT_NAME: &str = "pi-runtime://event";
 const MAX_JSONL_BYTES: usize = 1024 * 1024;
+const MAX_DIAGNOSTIC_LINE_BYTES: usize = 16 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const SETTINGS_APPLY_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -117,21 +118,14 @@ impl PiHost {
     }
 
     fn start(&self, app: AppHandle) -> Result<RuntimeStatus, String> {
-        {
-            let inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-            if !matches!(
-                inner.status.state,
-                RuntimeState::Stopped | RuntimeState::Crashed
-            ) {
-                return Err("Pi runtime is already active".into());
-            }
-        }
+        self.ensure_startable()?;
         let binary = resolve_pi_binary(&app);
         let extension = resolve_bridge_extension(&app)?;
         let finance_skill = resolve_finance_skill(&app)?;
         let bundled_bash = resolve_bundled_bash(&app)?;
         let settings = config::load(&app)?;
-        self.set_status(&app, RuntimeState::Starting, None, None, "status");
+        self.reserve_start()?;
+        self.publish(&app, "status", None);
         let audit_app = app.clone();
         let audit = Arc::new(move |event: AuditEvent| {
             let _ = audit_app.emit(
@@ -233,6 +227,34 @@ impl PiHost {
         self.spawn_stderr(stderr, app.clone());
         self.spawn_watcher(child, app);
         Ok(self.status())
+    }
+
+    fn ensure_startable(&self) -> Result<(), String> {
+        let inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
+        if matches!(
+            inner.status.state,
+            RuntimeState::Stopped | RuntimeState::Crashed
+        ) {
+            Ok(())
+        } else {
+            Err("Pi runtime is already active".into())
+        }
+    }
+
+    fn reserve_start(&self) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
+        if !matches!(
+            inner.status.state,
+            RuntimeState::Stopped | RuntimeState::Crashed
+        ) {
+            return Err("Pi runtime is already active".into());
+        }
+        inner.status = RuntimeStatus {
+            state: RuntimeState::Starting,
+            pid: None,
+            detail: None,
+        };
+        Ok(())
     }
 
     fn stop(&self, app: AppHandle) -> Result<RuntimeStatus, String> {
@@ -376,6 +398,13 @@ impl PiHost {
             inner.writer = None;
         }
     }
+    fn fail_pending(&self, reason: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            for (_, reply) in inner.pending.drain() {
+                let _ = reply.send(Err(reason.into()));
+            }
+        }
+    }
     fn set_status(
         &self,
         app: &AppHandle,
@@ -421,9 +450,10 @@ impl PiHost {
     fn spawn_stdout(&self, stdout: impl std::io::Read + Send + 'static, app: AppHandle) {
         let host = self.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).split(b'\n') {
-                match line {
-                    Ok(raw) => match decode_jsonl(&raw) {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                match read_bounded_line(&mut reader, MAX_JSONL_BYTES) {
+                    Ok(BoundedLine::Line(raw)) => match decode_jsonl(&raw) {
                         Ok(frame) => {
                             if let Some(id) =
                                 frame.get("id").and_then(Value::as_str).map(str::to_owned)
@@ -434,10 +464,24 @@ impl PiHost {
                             }
                         }
                         Err(error) => {
-                            host.publish(&app, "protocol_error", Some(Value::String(error)))
+                            host.fail_pending("Pi runtime emitted invalid JSONL");
+                            host.publish(&app, "protocol_error", Some(Value::String(error)));
                         }
                     },
-                    Err(_) => break,
+                    Ok(BoundedLine::TooLong) => {
+                        host.fail_pending("Pi runtime emitted an oversized JSONL frame");
+                        host.publish(
+                            &app,
+                            "protocol_error",
+                            Some(Value::String("Pi JSONL frame exceeds 1 MiB".into())),
+                        );
+                    }
+                    Ok(BoundedLine::Eof) => break,
+                    Err(_) => {
+                        host.fail_all("Pi runtime stdout read failed");
+                        host.publish(&app, "transport_error", None);
+                        break;
+                    }
                 }
             }
         });
@@ -445,12 +489,25 @@ impl PiHost {
     fn spawn_stderr(&self, stderr: impl std::io::Read + Send + 'static, app: AppHandle) {
         let host = self.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                host.publish(
-                    &app,
-                    "diagnostic",
-                    Some(Value::String(line.chars().take(4096).collect())),
-                );
+            let mut reader = BufReader::new(stderr);
+            loop {
+                match read_bounded_line(&mut reader, MAX_DIAGNOSTIC_LINE_BYTES) {
+                    Ok(BoundedLine::Line(raw)) => host.publish(
+                        &app,
+                        "diagnostic",
+                        Some(Value::String(
+                            String::from_utf8_lossy(&raw).chars().take(4096).collect(),
+                        )),
+                    ),
+                    Ok(BoundedLine::TooLong) => host.publish(
+                        &app,
+                        "diagnostic",
+                        Some(Value::String(
+                            "Pi stderr line exceeded 16 KiB and was discarded".into(),
+                        )),
+                    ),
+                    Ok(BoundedLine::Eof) | Err(_) => break,
+                }
             }
         });
     }
@@ -625,6 +682,9 @@ fn state_after_process_exit(previous: RuntimeState) -> RuntimeState {
 fn encode_jsonl(value: &Value) -> Result<Vec<u8>, String> {
     let mut bytes =
         serde_json::to_vec(value).map_err(|e| format!("cannot encode RPC JSON: {e}"))?;
+    if bytes.len() > MAX_JSONL_BYTES {
+        return Err("Pi JSONL frame exceeds 1 MiB".into());
+    }
     if bytes.iter().any(|b| *b == b'\n' || *b == b'\r') {
         return Err("RPC JSON must be a single line".into());
     }
@@ -639,6 +699,52 @@ fn decode_jsonl(raw: &[u8]) -> Result<Value, String> {
         return Err("Pi emitted an empty JSONL frame".into());
     }
     serde_json::from_slice(raw).map_err(|e| format!("invalid Pi JSONL frame: {e}"))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BoundedLine {
+    Line(Vec<u8>),
+    TooLong,
+    Eof,
+}
+
+fn read_bounded_line(
+    reader: &mut impl BufRead,
+    max_bytes: usize,
+) -> std::io::Result<BoundedLine> {
+    let mut line = Vec::with_capacity(max_bytes.min(8192));
+    let mut too_long = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(if too_long {
+                BoundedLine::TooLong
+            } else if line.is_empty() {
+                BoundedLine::Eof
+            } else {
+                BoundedLine::Line(line)
+            });
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let content_len = newline.unwrap_or(available.len());
+        if !too_long {
+            if line.len().saturating_add(content_len) <= max_bytes {
+                line.extend_from_slice(&available[..content_len]);
+            } else {
+                too_long = true;
+                line.clear();
+            }
+        }
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(if too_long {
+                BoundedLine::TooLong
+            } else {
+                BoundedLine::Line(line)
+            });
+        }
+    }
 }
 
 #[tauri::command]
@@ -865,6 +971,10 @@ mod tests {
     fn jsonl_rejects_empty_and_oversized_frames() {
         assert!(decode_jsonl(b"").is_err());
         assert!(decode_jsonl(&vec![b'x'; MAX_JSONL_BYTES + 1]).is_err());
+        assert!(encode_jsonl(&serde_json::json!({
+            "payload": "x".repeat(MAX_JSONL_BYTES)
+        }))
+        .is_err());
     }
     #[test]
     fn status_defaults_to_stopped_and_request_needs_runtime() {
@@ -876,6 +986,34 @@ mod tests {
                 Duration::from_millis(1)
             )
             .is_err());
+    }
+    #[test]
+    fn runtime_start_reservation_is_atomic() {
+        let host = PiHost::default();
+        let successes = (0..8)
+            .map(|_| {
+                let host = host.clone();
+                std::thread::spawn(move || host.reserve_start().is_ok())
+            })
+            .map(|thread| thread.join().unwrap())
+            .filter(|success| *success)
+            .count();
+        assert_eq!(successes, 1);
+        assert_eq!(host.status().state, RuntimeState::Starting);
+    }
+    #[test]
+    fn bounded_line_reader_discards_oversized_frames_without_losing_the_next_line() {
+        let mut input = BufReader::with_capacity(3, &b"123456\nok\nlast"[..]);
+        assert_eq!(read_bounded_line(&mut input, 4).unwrap(), BoundedLine::TooLong);
+        assert_eq!(
+            read_bounded_line(&mut input, 4).unwrap(),
+            BoundedLine::Line(b"ok".to_vec())
+        );
+        assert_eq!(
+            read_bounded_line(&mut input, 4).unwrap(),
+            BoundedLine::Line(b"last".to_vec())
+        );
+        assert_eq!(read_bounded_line(&mut input, 4).unwrap(), BoundedLine::Eof);
     }
     #[test]
     fn process_exit_is_crash_unless_stop_was_requested() {

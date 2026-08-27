@@ -20,6 +20,8 @@ WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex`
 
 应用收到 Tauri `ExitRequested` 或 `Exit` 事件时会幂等关闭本轮回环代理、拒绝尚未完成的 RPC，并显式终止和回收 Pi 子进程，避免桌面窗口退出后遗留孤儿进程或短期能力端口。
 
+Runtime 启动前由 Host 在同一把状态锁内完成 `Stopped/Crashed → Starting` 预约，多个并发启动请求只有一个能够继续创建 executor 与 Pi 子进程。Host 对出站 JSONL 也执行 1 MiB 上限；Pi 的 stdout JSONL 与 stderr 诊断均由有界逐段读取器处理，超长单行会在固定内存内被丢弃和报告，不会先无限扩张缓冲区再做长度检查。
+
 模型网关地址与 `/models` 目录作为一次原子配置同步：远端请求成功且目录有效后才落盘。网关地址变化时禁止直接复用旧目录；刷新后若原默认模型已下线，Host 会回退到首个可用模型，并在生成 Pi 配置前再次校验所选模型确实属于当前目录。Host 会丢弃非聊天、空 ID、超长或含控制字符的模型项，去除重复 ID，并限制目录条目数与配置文件体积，避免异常上游目录污染 UI 或 Pi 配置。
 
 “保存并应用”由单个 Host command 完成：先校验候选配置并等待旧 Runtime 完全停止，再写入并启动新 Runtime。新配置无法启动时，Host 会恢复旧配置并尝试恢复旧 Runtime，避免前端跨多个 command 编排造成磁盘配置与运行状态分裂。
