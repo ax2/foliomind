@@ -1118,11 +1118,11 @@ mod tests {
         client
             .write_all(b"POST /execute HTTP/1.1\r\nContent-Length: 100\r\n\r\npartial")
             .unwrap();
-
-        executor.stop();
         client
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
+
+        executor.stop();
         assert!(socket_is_closed(&mut client));
 
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -1162,6 +1162,9 @@ mod tests {
         )
         .unwrap();
         let mut client = TcpStream::connect(executor.address).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
         let (path, capability, body) = if model_request {
             (
                 "/model/v1/chat/completions",
@@ -1195,9 +1198,6 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("upstream should receive the request");
         executor.stop();
-        client
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
         assert!(socket_is_closed(&mut client));
         assert!(connection_closed_rx
             .recv_timeout(Duration::from_secs(2))
