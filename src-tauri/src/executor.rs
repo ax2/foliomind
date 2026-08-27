@@ -25,6 +25,7 @@ const MAX_QUERY_BYTES: usize = 4 * 1024;
 const MAX_IDENTIFIER_BYTES: usize = 256;
 const MAX_TOOL_IDS: usize = 5;
 const MAX_PARAMETERS_BYTES: usize = 256 * 1024;
+const STREAM_CHUNK_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -532,13 +533,21 @@ fn proxy_model_request(
         .header("Content-Type", "application/json")
         .send()
         .map_err(|_| "QVeris model request failed or timed out")?;
-    let status = response.status().as_u16();
+    let status = response.status();
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("application/json")
         .to_owned();
+    if status.is_success() && is_event_stream(&content_type) {
+        write_streaming_response_head(stream, status.as_u16(), &content_type)
+            .map_err(|_| "cannot write model stream headers".to_string())?;
+        // Headers are already visible to Pi. On an upstream/read/size failure, close the
+        // response instead of appending a second HTTP response to the SSE byte stream.
+        let _ = copy_stream_limited(response, stream, MAX_MODEL_RESPONSE_BYTES);
+        return Ok(());
+    }
     let mut limited = response.take((MAX_MODEL_RESPONSE_BYTES + 1) as u64);
     let mut bytes = Vec::new();
     limited
@@ -547,8 +556,52 @@ fn proxy_model_request(
     if bytes.len() > MAX_MODEL_RESPONSE_BYTES {
         return Err("QVeris model response exceeds size limit".into());
     }
-    write_raw_response(stream, status, &content_type, &bytes)
+    write_raw_response(stream, status.as_u16(), &content_type, &bytes)
         .map_err(|_| "cannot write model response".to_string())
+}
+
+fn is_event_stream(content_type: &str) -> bool {
+    content_type
+        .split(';')
+        .next()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
+}
+
+fn write_streaming_response_head(
+    stream: &mut impl Write,
+    status: u16,
+    content_type: &str,
+) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 {status} \r\nContent-Type: {content_type}\r\nCache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n"
+    )?;
+    stream.flush()
+}
+
+fn copy_stream_limited(
+    mut source: impl Read,
+    target: &mut impl Write,
+    max_bytes: usize,
+) -> Result<usize, String> {
+    let mut total = 0;
+    let mut buffer = [0_u8; STREAM_CHUNK_BYTES];
+    loop {
+        let size = source
+            .read(&mut buffer)
+            .map_err(|_| "cannot read model stream")?;
+        if size == 0 {
+            return Ok(total);
+        }
+        if total.saturating_add(size) > max_bytes {
+            return Err("QVeris model stream exceeds size limit".into());
+        }
+        target
+            .write_all(&buffer[..size])
+            .and_then(|_| target.flush())
+            .map_err(|_| "cannot write model stream")?;
+        total += size;
+    }
 }
 
 struct HttpRequest {
@@ -648,6 +701,7 @@ fn redact(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     fn environment() -> BridgeEnvironment {
         BridgeEnvironment {
             url: "http://127.0.0.1:1/execute".into(),
@@ -753,5 +807,40 @@ mod tests {
         assert_eq!(model["id"], "q-model");
         assert_eq!(model["reasoning"], true);
         assert_eq!(model["contextWindow"], 200000);
+    }
+    #[test]
+    fn recognizes_sse_content_types_only() {
+        assert!(is_event_stream("text/event-stream"));
+        assert!(is_event_stream("Text/Event-Stream; charset=utf-8"));
+        assert!(!is_event_stream("application/json"));
+        assert!(!is_event_stream("text/event-streaming"));
+    }
+    #[test]
+    fn streams_and_flushes_with_a_hard_size_limit() {
+        let payload = b"data: {\"delta\":\"first\"}\n\ndata: [DONE]\n\n";
+        let mut output = Vec::new();
+        assert_eq!(
+            copy_stream_limited(Cursor::new(payload), &mut output, payload.len()).unwrap(),
+            payload.len()
+        );
+        assert_eq!(output, payload);
+
+        let mut limited = Vec::new();
+        assert!(
+            copy_stream_limited(Cursor::new(payload), &mut limited, payload.len() - 1).is_err()
+        );
+        assert!(limited.len() < payload.len());
+    }
+    #[test]
+    fn streaming_headers_are_close_delimited_and_disable_sniffing() {
+        let mut output = Vec::new();
+        write_streaming_response_head(&mut output, 200, "text/event-stream").unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.starts_with("HTTP/1.1 200 "));
+        assert!(text.contains("Content-Type: text/event-stream\r\n"));
+        assert!(text.contains("Cache-Control: no-cache\r\n"));
+        assert!(text.contains("X-Content-Type-Options: nosniff\r\n"));
+        assert!(text.contains("Connection: close\r\n\r\n"));
+        assert!(!text.contains("Content-Length"));
     }
 }
