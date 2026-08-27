@@ -121,6 +121,12 @@ impl RunExecutor {
     }
 }
 
+impl Drop for RunExecutor {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 fn handle_connection(
     mut stream: TcpStream,
     store: Arc<dyn CredentialStore>,

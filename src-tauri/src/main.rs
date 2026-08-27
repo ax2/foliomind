@@ -255,6 +255,47 @@ impl PiHost {
         Ok(self.status())
     }
 
+    fn shutdown(&self) {
+        let (child, executor, pending) = {
+            let Ok(mut inner) = self.inner.lock() else {
+                return;
+            };
+            inner.status = RuntimeStatus {
+                state: RuntimeState::Stopping,
+                pid: inner.status.pid,
+                detail: None,
+            };
+            inner.writer = None;
+            (
+                inner.child.take(),
+                inner.executor.take(),
+                inner
+                    .pending
+                    .drain()
+                    .map(|(_, reply)| reply)
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        for reply in pending {
+            let _ = reply.send(Err("Pi runtime is shutting down".into()));
+        }
+        if let Some(executor) = executor {
+            executor.stop();
+        }
+        if let Some(child) = child {
+            if let Ok(mut child) = child.lock() {
+                if matches!(child.try_wait(), Ok(None)) {
+                    let _ = child.kill();
+                }
+                let _ = child.wait();
+            }
+        }
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.status = RuntimeStatus::default();
+        }
+    }
+
     fn request(&self, payload: Value, timeout: Duration) -> Result<Value, String> {
         if !payload.is_object() {
             return Err("RPC payload must be a JSON object".into());
@@ -547,7 +588,7 @@ fn sanitized_environment(
 }
 
 fn state_after_process_exit(previous: RuntimeState) -> RuntimeState {
-    if previous == RuntimeState::Stopping {
+    if matches!(previous, RuntimeState::Stopping | RuntimeState::Stopped) {
         RuntimeState::Stopped
     } else {
         RuntimeState::Crashed
@@ -687,7 +728,7 @@ async fn qveris_model_catalog_sync(
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(PiHost::default())
         .invoke_handler(tauri::generate_handler![
@@ -702,8 +743,16 @@ fn main() {
             integration_settings_save,
             qveris_model_catalog_sync
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running FolioMind");
+        .build(tauri::generate_context!())
+        .expect("error while building FolioMind");
+    app.run(|app_handle, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+        ) {
+            app_handle.state::<PiHost>().shutdown();
+        }
+    });
 }
 
 #[cfg(test)]
@@ -746,5 +795,55 @@ mod tests {
             state_after_process_exit(RuntimeState::Stopping),
             RuntimeState::Stopped
         );
+        assert_eq!(
+            state_after_process_exit(RuntimeState::Stopped),
+            RuntimeState::Stopped
+        );
+    }
+
+    #[test]
+    fn shutdown_terminates_the_child_and_fails_pending_requests() {
+        let mut command = process_command::new_command(
+            std::env::current_exe().expect("test executable should resolve"),
+        );
+        command.args([
+            "tests::shutdown_child_fixture",
+            "--ignored",
+            "--exact",
+        ]);
+        let child = Arc::new(Mutex::new(
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("test child should start"),
+        ));
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(child.lock().unwrap().try_wait().unwrap().is_none());
+        let (reply, response) = mpsc::channel();
+        let host = PiHost::default();
+        {
+            let mut inner = host.inner.lock().expect("host lock should be available");
+            inner.status = RuntimeStatus {
+                state: RuntimeState::Running,
+                pid: child.lock().ok().map(|child| child.id()),
+                detail: None,
+            };
+            inner.child = Some(child.clone());
+            inner.pending.insert("pending".into(), reply);
+        }
+
+        host.shutdown();
+
+        assert_eq!(host.status(), RuntimeStatus::default());
+        assert!(response.recv_timeout(Duration::from_secs(1)).unwrap().is_err());
+        assert!(child.lock().unwrap().try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    #[ignore = "spawned by shutdown cleanup test"]
+    fn shutdown_child_fixture() {
+        std::thread::sleep(Duration::from_secs(30));
     }
 }
