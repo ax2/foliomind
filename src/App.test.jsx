@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
-import { useLabStore } from "./store/useLabStore.js";
+import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
@@ -17,7 +17,12 @@ vi.mock("lightweight-charts", () => ({
 afterEach(cleanup);
 
 beforeEach(() => {
-  useLabStore.setState({ activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时" });
+  useLabStore.setState({
+    ...initialLabState,
+    skillItems: initialLabState.skillItems.map((item) => ({ ...item })),
+    messages: initialLabState.messages.map((message) => ({ ...message })),
+    rules: initialLabState.rules.map((rule) => ({ ...rule })),
+  });
 });
 
 describe("FolioMind core flows", () => {
@@ -38,11 +43,29 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByRole("button", { name: "已安装" }).length).toBeGreaterThan(2);
   });
 
+  it("filters Skills by name and reports an empty result", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /^技能$/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索 Skills" }), { target: { value: "组合风险" } });
+    expect(screen.getByRole("heading", { name: "组合风险" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "宏观日历" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索 Skills" }), { target: { value: "不存在的能力" } });
+    expect(screen.getByRole("status")).toHaveTextContent("没有匹配");
+  });
+
   it("creates and toggles a monitor rule", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
     fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
     expect(screen.getByText("成交量异常监控")).toBeInTheDocument();
+  });
+
+  it("routes a sample monitor signal to QVeris verification", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: "核实并分析" })[0]);
+    expect(await screen.findByText(/待核实线索/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "对话" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows real integration controls without claiming a missing credential is configured", async () => {

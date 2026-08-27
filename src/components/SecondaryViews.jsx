@@ -13,13 +13,22 @@ export function MonitorView() {
   const rules = useLabStore((state) => state.rules);
   const toggleRule = useLabStore((state) => state.toggleRule);
   const addRule = useLabStore((state) => state.addRule);
-  return <div className="secondary-page"><header><div><h1>个股盯盘</h1><p>持续追踪价格、成交量与关键事件</p></div><button className="primary-action" onClick={() => addRule("600519")}><Plus size={17} />新建盯盘</button></header><section className="rule-list"><h2>运行中的规则</h2>{rules.map((rule) => <article key={rule.id}><Bell size={20} /><div><strong>{rule.name}</strong><small>{rule.symbol} · 最近检查 15:00:18</small></div><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label="切换规则"><span /></button></article>)}</section><section className="event-list"><h2>今日信号</h2>{monitorEvents.map((event) => <article key={event.id}><time>{event.time}</time><span className="timeline-dot" /><div><strong>{event.title}</strong><p>{event.detail}</p></div><button>交给助手分析</button></article>)}</section></div>;
+  const setActiveView = useLabStore((state) => state.setActiveView);
+  const sendMessage = useLabStore((state) => state.sendMessage);
+  const analyzeEvent = (event) => {
+    setActiveView("chat");
+    void sendMessage(`请把以下界面示例信号作为待核实线索，不要直接当作事实：${event.title}——${event.detail}。请使用 qveris-finance-research Skill 按 Search → Inspect → Call 查询最新真实数据，给出来源、截至时间，并判断该信号是否成立。`);
+  };
+  return <div className="secondary-page"><header><div><h1>个股盯盘</h1><p>持续追踪价格、成交量与关键事件</p></div><button className="primary-action" onClick={() => addRule("600519")}><Plus size={17} />新建盯盘</button></header><section className="rule-list"><h2>运行中的规则</h2>{rules.map((rule) => <article key={rule.id}><Bell size={20} /><div><strong>{rule.name}</strong><small>{rule.symbol} · 示例规则</small></div><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${rule.name}`} aria-pressed={rule.enabled}><span /></button></article>)}</section><section className="event-list"><h2>示例信号</h2>{monitorEvents.map((event) => <article key={event.id}><time>{event.time}</time><span className="timeline-dot" /><div><strong>{event.title}</strong><p>{event.detail}</p></div><button onClick={() => analyzeEvent(event)}>核实并分析</button></article>)}</section></div>;
 }
 
 export function SkillsView() {
+  const [query, setQuery] = useState("");
   const items = useLabStore((state) => state.skillItems);
   const toggleSkill = useLabStore((state) => state.toggleSkill);
-  return <div className="secondary-page"><header><div><h1>Skill 市场</h1><p>为 Pi 安装经过审核的金融研究能力</p></div><label className="search-box"><MagnifyingGlass size={18} /><input placeholder="搜索 Skills…" /></label></header><div className="skill-grid">{items.map((skill) => <article key={skill.id}><div className="skill-icon"><CheckCircle size={24} weight={skill.installed ? "fill" : "regular"} /></div><div><span>{skill.category}</span><h2>{skill.name}</h2><p>{skill.description}</p></div><button className={skill.installed ? "installed" : ""} onClick={() => toggleSkill(skill.id)}>{skill.installed ? "已安装" : "安装"}</button></article>)}</div><p className="security-note">第三方 Skill 在安装前会显示权限、来源和签名状态；工具调用由 Host 白名单控制。</p></div>;
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const filteredItems = normalizedQuery ? items.filter((skill) => `${skill.name} ${skill.description} ${skill.category}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery)) : items;
+  return <div className="secondary-page"><header><div><h1>Skill 市场</h1><p>为 Pi 安装经过审核的金融研究能力</p></div><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Skills…" aria-label="搜索 Skills" /></label></header><div className="skill-grid">{filteredItems.map((skill) => <article key={skill.id}><div className="skill-icon"><CheckCircle size={24} weight={skill.installed ? "fill" : "regular"} /></div><div><span>{skill.category}</span><h2>{skill.name}</h2><p>{skill.description}</p></div><button className={skill.installed ? "installed" : ""} aria-pressed={skill.installed} onClick={() => toggleSkill(skill.id)}>{skill.installed ? "已安装" : "安装"}</button></article>)}</div>{filteredItems.length === 0 && <p className="security-note" role="status">没有匹配“{query.trim()}”的 Skill。</p>}<p className="security-note">第三方 Skill 在安装前会显示权限、来源和签名状态；工具调用由 Host 白名单控制。</p></div>;
 }
 
 export function SettingsView() {
