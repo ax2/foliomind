@@ -1,0 +1,12 @@
+node_modules/
+.cache/
+src-tauri/resources/pi/*
+!src-tauri/resources/pi/.gitkeep
+dist/
+src-tauri/target/
+.DS_Store
+*.log
+.env
+.env.*
+!/.env.example
+.qa/

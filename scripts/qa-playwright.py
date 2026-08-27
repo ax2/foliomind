@@ -1,0 +1,86 @@
+import asyncio
+import json
+from pathlib import Path
+
+from playwright.async_api import expect, async_playwright
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT = ROOT / ".qa"
+CHROMIUM = "/home/alex/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome"
+
+
+async def main() -> None:
+    OUTPUT.mkdir(exist_ok=True)
+    console_errors: list[str] = []
+    page_errors: list[str] = []
+    checks: list[dict[str, object]] = []
+
+    viewport = {"width": 1487, "height": 1058}
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True, executable_path=CHROMIUM)
+        context = await browser.new_context(viewport=viewport, device_scale_factor=1)
+        page = await context.new_page()
+        page.set_default_timeout(6_000)
+        page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        await page.goto("http://127.0.0.1:4173", wait_until="networkidle")
+        await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
+
+        async def click_and_capture(label: str, filename: str, expected: str) -> None:
+            await page.get_by_role("button", name=label, exact=True).click()
+            await page.get_by_text(expected, exact=True).first.wait_for()
+            await page.screenshot(path=OUTPUT / filename)
+            checks.append({"flow": label, "passed": True})
+
+        await click_and_capture("行情", "implementation-market.png", "市场行情")
+        await click_and_capture("盯盘", "implementation-monitor.png", "个股盯盘")
+        await page.get_by_role("button", name="新建盯盘").click()
+        await page.get_by_text("成交量异常监控", exact=True).wait_for()
+        checks.append({"flow": "新建盯盘规则", "passed": True})
+
+        await click_and_capture("技能", "implementation-skills.png", "Skill 市场")
+        skill_card = page.locator(".skill-grid article").filter(has_text="公告与舆情")
+        install_button = skill_card.get_by_role("button", name="安装")
+        await install_button.click()
+        await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible()
+        checks.append({"flow": "安装 Skill", "passed": True})
+
+        await click_and_capture("对话", "implementation-chat.png", "分析摘要")
+        composer = page.get_by_placeholder("向 FolioMind 提问或下达分析指令…")
+        await composer.fill("分析贵州茅台近期风险")
+        await composer.press("Enter")
+        await page.get_by_text("分析贵州茅台近期风险", exact=True).wait_for()
+        checks.append({"flow": "发送对话", "passed": True})
+
+        await page.get_by_role("button", name="自选", exact=True).click()
+        await page.get_by_text("贵州茅台", exact=True).first.wait_for()
+        await page.locator(".watch-row").filter(has_text="宁德时代").click()
+        await page.get_by_role("heading", name="宁德时代 300750").wait_for()
+        checks.append({"flow": "切换自选股", "passed": True})
+        await page.locator(".watch-row").filter(has_text="贵州茅台").click()
+        await page.get_by_role("heading", name="贵州茅台 600519").wait_for()
+        await page.reload(wait_until="networkidle")
+        await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
+        layout = await page.evaluate("""() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+          scrollHeight: document.documentElement.scrollHeight,
+          clientHeight: document.documentElement.clientHeight,
+          columns: getComputedStyle(document.querySelector('.app-shell')).gridTemplateColumns,
+        })""")
+        checks.append({"flow": "视口无溢出", "passed": layout["scrollWidth"] == layout["clientWidth"] and layout["scrollHeight"] == layout["clientHeight"], "detail": layout})
+        await browser.close()
+
+    report = {
+        "viewport": {**viewport, "deviceScaleFactor": 1},
+        "checks": checks,
+        "consoleErrors": console_errors,
+        "pageErrors": page_errors,
+    }
+    (OUTPUT / "playwright-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

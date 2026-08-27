@@ -1,0 +1,59 @@
+name: build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --bundles nsis,msi
+            artifact: FolioMind-Windows
+            paths: |
+              src-tauri/target/release/bundle/nsis/*
+              src-tauri/target/release/bundle/msi/*
+          - os: macos-14
+            args: --bundles app,dmg
+            artifact: FolioMind-macOS
+            paths: |
+              src-tauri/target/release/bundle/macos/*
+              src-tauri/target/release/bundle/dmg/*
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run fetch:pi
+      - run: npm run smoke:pi
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run desktop:build -- ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
