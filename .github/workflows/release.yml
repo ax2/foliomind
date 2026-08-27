@@ -85,6 +85,7 @@ jobs:
       - run: npm ci
       - run: npm run audit:security
       - run: npm test
+      - run: npm run build
       - run: npm run test:sites
       - run: npm run fetch:pi
       - run: npm run fetch:bash
