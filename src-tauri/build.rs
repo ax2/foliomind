@@ -1,5 +1,5 @@
 fn main() {
-    tauri_build::build()
+    tauri_build::build();
 
     println!("cargo:rerun-if-changed=resources/portable-git/.version");
     println!("cargo:rerun-if-changed=../scripts/portable-git-version.json");
