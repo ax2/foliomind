@@ -191,6 +191,14 @@ impl RunExecutor {
             while !worker_shutdown.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((stream, peer)) if peer.ip().is_loopback() => {
+                        // The listener is non-blocking so the accept loop can observe
+                        // shutdown. Accepted sockets can inherit that mode on some
+                        // platforms (notably macOS), while request handlers require
+                        // bounded blocking reads and writes.
+                        if stream.set_nonblocking(false).is_err() {
+                            let _ = stream.shutdown(Shutdown::Both);
+                            continue;
+                        }
                         let Some(slot) = try_acquire_connection_slot(&active_connections) else {
                             let _ = write_response(
                                 stream,
