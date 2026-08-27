@@ -1,4 +1,4 @@
-import { BookmarkSimple, DotsThree, SlidersHorizontal } from "@phosphor-icons/react";
+import { BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
 import { stocks } from "../data/market.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { MarketChart } from "./MarketChart.jsx";
@@ -9,12 +9,14 @@ export function StockWorkspace() {
   const symbol = useLabStore((state) => state.selectedSymbol);
   const chartRange = useLabStore((state) => state.chartRange);
   const setChartRange = useLabStore((state) => state.setChartRange);
+  const sendMessage = useLabStore((state) => state.sendMessage);
+  const setActiveView = useLabStore((state) => state.setActiveView);
   const stock = stocks[symbol] ?? stocks["600519"];
   return (
     <main className="stock-workspace">
       <header className="stock-header">
         <div><div className="stock-mark">{stock.name.slice(0, 1)}</div><h1>{stock.name}<span>{stock.symbol}</span></h1><small>{stock.market}</small><small>{stock.category}</small></div>
-        <div><button aria-label="收藏"><BookmarkSimple size={20} /></button><button aria-label="更多"><DotsThree size={22} /></button></div>
+        <div><button className="live-data-button" aria-label="用 QVeris 获取实时数据" onClick={() => { setActiveView("chat"); void sendMessage(`请使用内置 qveris-finance-research Skill，严格按 Search → Inspect → Call 查询 ${stock.name}（${stock.symbol}）的最新行情、数据截至时间和来源，并明确区分实时或延迟数据。`); }}><Sparkle size={18} />实时数据</button><button aria-label="收藏"><BookmarkSimple size={20} /></button><button aria-label="更多"><DotsThree size={22} /></button></div>
       </header>
       <section className="quote-overview">
         <div className={stock.change >= 0 ? "primary-price up" : "primary-price down"}>{stock.price.toFixed(2)} <span>{stock.change >= 0 ? "+" : ""}{(stock.price * stock.change / 100).toFixed(2)}　{stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%</span><small>已收盘　08-27 15:00:00 CST</small></div>
@@ -30,7 +32,7 @@ export function StockWorkspace() {
       </section>
       <section className="fundamentals"><h3>关键指标</h3><div>{[["营业收入(元)", "1,742.28亿", "+16.27%"], ["净利润(元)", "862.28亿", "+15.73%"], ["毛利率", "92.51%", "+0.68pp"], ["净利率", "49.53%", "-0.15pp"], ["ROE", "33.58%", "-0.42pp"]].map(([label, value, delta]) => <dl key={label}><dt>{label}</dt><dd>{value}</dd><small>同比 {delta}</small></dl>)}</div></section>
       <section className="company-intro"><h3>公司简介</h3><p>贵州茅台酒股份有限公司主要从事茅台酒系列产品的生产与销售，主营产品贵州茅台酒是中国高端白酒的代表，享有“国酒”美誉。</p><button>展开</button></section>
-      <footer className="source-line">数据来自 QVeris　　截至 2026-08-27 15:00 CST</footer>
+      <footer className="source-line">当前图表为界面示例 · 点击“实时数据”由 QVeris 工具查询并返回来源与截至时间</footer>
     </main>
   );
 }

@@ -46,6 +46,11 @@ async def main() -> None:
         await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible()
         checks.append({"flow": "安装 Skill", "passed": True})
 
+        await click_and_capture("设置", "implementation-settings.png", "QVeris 数据与模型凭证")
+        await expect(page.get_by_label("Gateway Base URL")).to_have_value("https://aigateway.qveris.ai/v1")
+        await expect(page.get_by_text("未配置", exact=True)).to_be_visible()
+        checks.append({"flow": "真实数据与模型设置", "passed": True})
+
         await click_and_capture("对话", "implementation-chat.png", "分析摘要")
         composer = page.get_by_placeholder("向 FolioMind 提问或下达分析指令…")
         await composer.fill("分析贵州茅台近期风险")

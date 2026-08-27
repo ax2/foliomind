@@ -35,7 +35,8 @@
     "resources": {
       "../packages/qveris-bridge/index.mjs": "extensions/qveris-bridge.mjs",
       "../skills/qveris-finance-research": "skills/qveris-finance-research",
-      "resources/pi": "pi"
+      "resources/pi": "pi",
+      "resources/portable-git": "portable-git"
     },
     "macOS": { "minimumSystemVersion": "10.15" },
     "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" } }

@@ -921,25 +921,25 @@ textarea:focus-visible {
   font-size: 10px;
   margin-top: 18px;
 }
-.settings-page > article {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 19px 4px;
-  border-bottom: 1px solid var(--line);
-}
-.settings-page > article div {
-  display: grid;
-  gap: 5px;
-}
-.settings-page > article strong {
-  font-size: 13px;
-}
-.settings-page > article small,
-.settings-page > article span {
-  color: var(--muted);
-  font-size: 11px;
-}
+.settings-card { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 15px; }
+.settings-card-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.settings-card-title > div { display: grid; gap: 5px; }
+.settings-card strong { font-size: 13px; }
+.settings-card small, .settings-actions span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.settings-card label { display: grid; gap: 6px; color: #59616d; font-size: 11px; }
+.settings-card input, .settings-card select { height: 38px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 11px; background: #fff; color: var(--text); outline: none; }
+.settings-card input:focus, .settings-card select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(22,119,255,.08); }
+.settings-inline, .settings-actions { display: flex; align-items: center; gap: 9px; }
+.settings-inline input { flex: 1; }
+.settings-card button { border: 0; border-radius: 7px; padding: 9px 13px; background: var(--blue); color: #fff; cursor: pointer; font-size: 11px; white-space: nowrap; }
+.settings-card button:disabled { opacity: .48; cursor: not-allowed; }
+.settings-card .secondary-button { border: 1px solid #d9dde4; background: #fff; color: #59616d; }
+.settings-actions { justify-content: space-between; border-top: 1px solid var(--line); padding-top: 14px; }
+.status-pill { border-radius: 999px; padding: 4px 9px; background: #f3f4f6; color: #7b8490; font-size: 10px; }
+.status-pill.ok { background: #eaf8f2; color: #16805b; }
+.settings-notice { margin: 14px 2px; color: #526071; font-size: 11px; }
+.live-data-button { width: auto !important; padding: 0 10px !important; gap: 5px; color: var(--blue) !important; font-size: 11px; }
+.audit-empty { display: flex; align-items: center; gap: 7px; margin: 4px 0 12px; border: 1px dashed #d9dee7; border-radius: 8px; padding: 10px 11px; color: #7b8490; font-size: 10px; }
 @media (max-width: 1280px) {
   .app-shell {
     grid-template-columns: 64px 220px minmax(500px, 1fr) 390px;

@@ -1,6 +1,6 @@
 {
   "name": "foliomind",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,9 +9,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "fetch:pi": "node scripts/fetch-pi-runtime.mjs",
+    "fetch:bash": "node scripts/fetch-portable-git.mjs",
     "smoke:pi": "node scripts/smoke-pi-runtime.mjs",
-    "desktop:dev": "npm run fetch:pi && tauri dev",
-    "desktop:build": "npm run fetch:pi && tauri build",
+    "desktop:dev": "npm run fetch:pi && npm run fetch:bash && tauri dev",
+    "desktop:build": "npm run fetch:pi && npm run fetch:bash && tauri build",
     "test": "vitest run && node --test packages/qveris-bridge/index.test.mjs",
     "test:watch": "vitest",
     "test:sites": "node --test tests/sites-worker.test.mjs"

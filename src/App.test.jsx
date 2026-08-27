@@ -44,4 +44,20 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
     expect(screen.getByText("成交量异常监控")).toBeInTheDocument();
   });
+
+  it("shows real integration controls without claiming a missing credential is configured", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByLabelText("QVeris API Key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Gateway Base URL")).toHaveValue("https://aigateway.qveris.ai/v1");
+    expect(screen.getByText("未配置")).toBeInTheDocument();
+  });
+
+  it("routes a live-data request through the agent conversation", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "用 QVeris 获取实时数据" }));
+    expect(await screen.findByText(/qveris-finance-research Skill/)).toBeInTheDocument();
+    expect(screen.getAllByText("分析摘要").length).toBeGreaterThan(0);
+  });
 });

@@ -8,8 +8,7 @@ export const useLabStore = create((set) => ({
   chartRange: "分时",
   skillItems: skills,
   messages: [
-    { id: "u1", role: "user", text: "让 FolioMind 分析这只股票" },
-    { id: "a1", role: "assistant", text: "公司基本面稳健，高端白酒龙头地位巩固。短期受消费情绪和动销节奏影响，建议结合批价、库存与现金流持续观察。" },
+    { id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过 QVeris Search → Inspect → Call 查询，并返回来源与截至时间。", mode: "onboarding", audits: [] },
   ],
   rules: [{ id: "r1", symbol: "600519", name: "批价波动监控", enabled: true }],
   runtimeMode: "ready",
@@ -24,7 +23,7 @@ export const useLabStore = create((set) => ({
     set((state) => ({ runtimeMode: "running", messages: [...state.messages, { id: userId, role: "user", text }] }));
     try {
       const reply = await askPi(text);
-      set((state) => ({ runtimeMode: reply.mode, messages: [...state.messages, { id: crypto.randomUUID(), role: "assistant", text: reply.text }] }));
+      set((state) => ({ runtimeMode: reply.mode, messages: [...state.messages, { id: crypto.randomUUID(), role: "assistant", text: reply.text, mode: reply.mode, audits: reply.audits ?? [] }] }));
     } catch (error) {
       set((state) => ({ runtimeMode: "error", messages: [...state.messages, { id: crypto.randomUUID(), role: "assistant", text: `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}` }] }));
     }

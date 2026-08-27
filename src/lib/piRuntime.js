@@ -20,9 +20,11 @@ export async function askPi(message) {
   if (status.state === "stopped" || status.state === "crashed") await invoke("runtime_start");
 
   let latestText = "";
+  const audits = [];
   let finish;
   const settled = new Promise((resolve) => { finish = resolve; });
   const unlisten = await listen("pi-runtime://event", ({ payload }) => {
+    if (payload?.kind === "qveris_audit" && payload.audit) audits.push(payload.audit);
     const frame = payload?.frame;
     const nextText = textFromFrame(frame);
     if (nextText) latestText = nextText;
@@ -31,7 +33,7 @@ export async function askPi(message) {
   try {
     await invoke("runtime_send_rpc", { payload: { type: "prompt", message }, timeoutMs: 30_000 });
     await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, 120_000))]);
-    return { text: latestText || "Pi 已完成本轮分析；详细执行事件已保留在本地审计流中。", mode: "pi-rpc" };
+    return { text: latestText || "Pi 已完成本轮分析；详细执行事件已保留在本地审计流中。", mode: "pi-rpc", audits };
   } finally {
     unlisten();
   }

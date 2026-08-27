@@ -49,6 +49,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
       - run: npm run fetch:pi
+      - run: npm run fetch:bash
       - run: npm run smoke:pi
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npm run desktop:build -- ${{ matrix.args }}

@@ -1,11 +1,15 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Local-only Pi RPC host. The only listener is a run-scoped loopback executor.
 
 mod credentials;
+mod config;
 mod executor;
+mod process_command;
 
 use credentials::{CredentialStore, OsCredentialStore};
 use executor::{AuditEvent, BridgeEnvironment, RunExecutor};
-use serde::Serialize;
+use config::IntegrationSettings;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -72,14 +76,19 @@ impl PiHost {
         }
         let binary = resolve_pi_binary(&app);
         let extension = resolve_bridge_extension(&app)?;
+        let finance_skill = resolve_finance_skill(&app)?;
+        let bundled_bash = resolve_bundled_bash(&app)?;
+        let settings = config::load(&app)?;
         self.set_status(&app, RuntimeState::Starting, None, None, "status");
         let audit_app = app.clone();
         let audit = Arc::new(move |event: AuditEvent| { let _ = audit_app.emit(EVENT_NAME, serde_json::json!({ "kind": "qveris_audit", "audit": event })); });
-        let base_url = std::env::var("QVERIS_BASE_URL").unwrap_or_else(|_| "https://qveris.ai/api/v1".into());
-        let (executor, bridge) = RunExecutor::start(self.credentials.clone(), base_url, audit).map_err(|error| { self.set_status(&app, RuntimeState::Crashed, None, Some(error.clone()), "crash"); error })?;
-        let mut command = Command::new(binary);
-        command.arg("--extension").arg(extension).args(["--mode", "rpc", "--no-session"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        sanitized_environment(&mut command, &bridge);
+        let (executor, bridge) = RunExecutor::start(self.credentials.clone(), settings.capability_base_url.clone(), settings.model_gateway_base_url.clone(), audit).map_err(|error| { self.set_status(&app, RuntimeState::Crashed, None, Some(error.clone()), "crash"); error })?;
+        let agent_dir = match config::write_pi_config(&app, &settings, &bridge.model_base_url, bundled_bash.as_deref()) { Ok(path) => path, Err(error) => { executor.stop(); self.set_status(&app, RuntimeState::Crashed, None, Some(error.clone()), "crash"); return Err(error); } };
+        let mut command = process_command::new_command(binary);
+        command.arg("--extension").arg(extension).arg("--skill").arg(finance_skill).args(["--mode", "rpc", "--no-session", "--no-extensions", "--no-context-files", "--tools", "bash,qveris_search,qveris_inspect,qveris_call"]);
+        if !settings.model_id.trim().is_empty() { command.args(["--provider", "qveris", "--model", settings.model_id.trim()]); }
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        sanitized_environment(&mut command, &bridge, &agent_dir, bundled_bash.as_deref());
         let mut child = match command.spawn() { Ok(child) => child, Err(error) => { executor.stop(); self.set_status(&app, RuntimeState::Crashed, None, Some(error.to_string()), "crash"); return Err(format!("cannot start Pi RPC runtime: {error}")); } };
         let pid = child.id();
         let stdin = child.stdin.take().ok_or("Pi stdin was not piped")?;
@@ -147,11 +156,29 @@ fn resolve_bridge_extension(app: &AppHandle) -> Result<PathBuf, String> {
     candidates.into_iter().find(|path| path.is_file()).ok_or_else(|| "QVeris bridge extension is missing from the application bundle".into())
 }
 
-fn sanitized_environment(command: &mut Command, bridge: &BridgeEnvironment) {
+fn resolve_finance_skill(app: &AppHandle) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(resources) = app.path().resource_dir() { candidates.push(resources.join("skills").join("qveris-finance-research")); }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("skills").join("qveris-finance-research"));
+    candidates.into_iter().find(|path| path.join("SKILL.md").is_file()).ok_or_else(|| "QVeris finance Skill is missing from the application bundle".into())
+}
+
+fn resolve_bundled_bash(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    if !cfg!(target_os = "windows") { return Ok(None); }
+    let mut candidates = Vec::new();
+    if let Ok(resources) = app.path().resource_dir() { candidates.push(resources.join("portable-git").join("bin").join("bash.exe")); }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("portable-git").join("bin").join("bash.exe"));
+    candidates.into_iter().find(|path| path.is_file()).map(Some).ok_or_else(|| "Bundled Bash is missing; reinstall FolioMind or run npm run fetch:bash".into())
+}
+
+fn sanitized_environment(command: &mut Command, bridge: &BridgeEnvironment, agent_dir: &std::path::Path, bundled_bash: Option<&std::path::Path>) {
     command.env_clear();
     // Keep only OS essentials. In particular, no QVERIS_* credential is inherited by Pi.
-    for key in ["PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LANG"] { if let Some(value) = std::env::var_os(key) { command.env(key, value); } }
-    command.env("QVERIS_EXECUTOR_URL", &bridge.url).env("QVERIS_MANAGED_CAPABILITY", &bridge.capability).env("QVERIS_PI_RUN_ID", &bridge.run_id).env("QVERIS_PRODUCT_RUN_ID", &bridge.product_run_id).env("QVERIS_EXECUTOR_TIMEOUT_MS", "15000");
+    for key in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC", "PATHEXT", "LANG"] { if let Some(value) = std::env::var_os(key) { command.env(key, value); } }
+    let mut paths = bundled_bash.and_then(|path| path.parent()?.parent()).map(|root| vec![root.join("cmd"), root.join("bin"), root.join("usr").join("bin")]).unwrap_or_default();
+    if let Some(ambient) = std::env::var_os("PATH") { paths.extend(std::env::split_paths(&ambient)); }
+    if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
+    command.env("PI_CODING_AGENT_DIR", agent_dir).env("QVERIS_EXECUTOR_URL", &bridge.url).env("QVERIS_MANAGED_CAPABILITY", &bridge.capability).env("QVERIS_PI_RUN_ID", &bridge.run_id).env("QVERIS_PRODUCT_RUN_ID", &bridge.product_run_id).env("QVERIS_EXECUTOR_TIMEOUT_MS", "30000").env("FOLIOMIND_MODEL_TOKEN", &bridge.model_capability);
 }
 
 fn state_after_process_exit(previous: RuntimeState) -> RuntimeState { if previous == RuntimeState::Stopping { RuntimeState::Stopped } else { RuntimeState::Crashed } }
@@ -174,7 +201,42 @@ fn qveris_credential_save(host: State<'_, PiHost>, api_key: String) -> Result<()
 #[tauri::command]
 fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> { host.credentials.delete_qveris_key() }
 
-fn main() { tauri::Builder::default().manage(PiHost::default()).invoke_handler(tauri::generate_handler![runtime_status, runtime_start, runtime_stop, runtime_send_rpc, qveris_credential_configured, qveris_credential_save, qveris_credential_clear]).run(tauri::generate_context!()).expect("error while running FolioMind"); }
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IntegrationStatus { credential_configured: bool, settings: IntegrationSettings }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsInput { capability_base_url: String, model_gateway_base_url: String, model_id: String }
+
+#[tauri::command]
+fn integration_status(host: State<'_, PiHost>, app: AppHandle) -> Result<IntegrationStatus, String> {
+    Ok(IntegrationStatus { credential_configured: host.credentials.read_qveris_key()?.is_some(), settings: config::load(&app)? })
+}
+
+#[tauri::command]
+fn integration_settings_save(app: AppHandle, input: SettingsInput) -> Result<IntegrationSettings, String> {
+    let mut settings = config::load(&app)?;
+    settings.capability_base_url = input.capability_base_url.trim_end_matches('/').to_owned();
+    settings.model_gateway_base_url = input.model_gateway_base_url.trim_end_matches('/').to_owned();
+    settings.model_id = input.model_id.trim().to_owned();
+    config::save(&app, &settings)?;
+    Ok(settings)
+}
+
+#[tauri::command]
+async fn qveris_model_catalog_sync(host: State<'_, PiHost>, app: AppHandle) -> Result<IntegrationSettings, String> {
+    let key = host.credentials.read_qveris_key()?.ok_or("QVeris credential is not configured")?;
+    let mut settings = config::load(&app)?;
+    let base_url = settings.model_gateway_base_url.clone();
+    let models = tauri::async_runtime::spawn_blocking(move || executor::fetch_model_catalog(&key, &base_url)).await.map_err(|error| format!("model catalog task failed: {error}"))??;
+    settings.models = models;
+    if settings.model_id.is_empty() { settings.model_id = settings.models.first().and_then(|model| model.get("id")).and_then(Value::as_str).unwrap_or_default().to_owned(); }
+    config::save(&app, &settings)?;
+    Ok(settings)
+}
+
+fn main() { tauri::Builder::default().manage(PiHost::default()).invoke_handler(tauri::generate_handler![runtime_status, runtime_start, runtime_stop, runtime_send_rpc, qveris_credential_configured, qveris_credential_save, qveris_credential_clear, integration_status, integration_settings_save, qveris_model_catalog_sync]).run(tauri::generate_context!()).expect("error while running FolioMind"); }
 
 #[cfg(test)]
 mod tests {
