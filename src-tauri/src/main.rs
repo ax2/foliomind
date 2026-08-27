@@ -144,7 +144,7 @@ impl PiHost {
             settings.model_gateway_base_url.clone(),
             audit,
         )
-        .map_err(|error| {
+        .inspect_err(|error| {
             self.set_status(
                 &app,
                 RuntimeState::Crashed,
@@ -152,7 +152,6 @@ impl PiHost {
                 Some(error.clone()),
                 "crash",
             );
-            error
         })?;
         let agent_dir = match config::write_pi_config(
             &app,

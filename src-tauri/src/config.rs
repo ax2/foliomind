@@ -170,8 +170,10 @@ mod tests {
 
     #[test]
     fn rejects_credentials_in_endpoint_urls() {
-        let mut value = IntegrationSettings::default();
-        value.model_gateway_base_url = "https://token@example.com/v1".into();
+        let value = IntegrationSettings {
+            model_gateway_base_url: "https://token@example.com/v1".into(),
+            ..IntegrationSettings::default()
+        };
         assert!(validate(&value).is_err());
     }
 }

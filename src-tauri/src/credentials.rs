@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
+#[cfg(test)]
+use std::{collections::HashMap, sync::Mutex};
 
 pub const SERVICE: &str = "app.foliomind.desktop";
 pub const ACCOUNT: &str = "qveris-api-key";
