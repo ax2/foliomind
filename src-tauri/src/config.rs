@@ -2,17 +2,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use tauri::{AppHandle, Manager};
 use url::{Host, Url};
+use uuid::Uuid;
+
+#[cfg(unix)]
+use std::fs::File;
 
 pub const DEFAULT_CAPABILITY_URL: &str = "https://qveris.ai/api/v1";
 pub const DEFAULT_MODEL_GATEWAY_URL: &str = "https://aigateway.qveris.ai/v1";
 pub const MAX_MODEL_CATALOG_ITEMS: usize = 500;
 pub const MAX_MODEL_ID_BYTES: usize = 256;
 const MAX_SETTINGS_BYTES: u64 = 2 * 1024 * 1024;
+static CONFIG_IO_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -35,14 +42,18 @@ impl Default for IntegrationSettings {
 }
 
 pub fn load(app: &AppHandle) -> Result<IntegrationSettings, String> {
+    let _guard = CONFIG_IO_LOCK
+        .lock()
+        .map_err(|_| "configuration I/O lock poisoned")?;
     let path = settings_path(app)?;
+    recover_backup(&path, "integration settings")?;
     if !path.is_file() {
         let mut settings = IntegrationSettings::default();
         if let Ok(value) = std::env::var("QVERIS_BASE_URL") {
-            settings.capability_base_url = value;
+            settings.capability_base_url = normalize_base_url(&value);
         }
         if let Ok(value) = std::env::var("QVERIS_MODEL_GATEWAY_BASE_URL") {
-            settings.model_gateway_base_url = value;
+            settings.model_gateway_base_url = normalize_base_url(&value);
         }
         validate(&settings)?;
         return Ok(settings);
@@ -63,14 +74,15 @@ pub fn load(app: &AppHandle) -> Result<IntegrationSettings, String> {
 
 pub fn save(app: &AppHandle, settings: &IntegrationSettings) -> Result<(), String> {
     validate(settings)?;
-    let path = settings_path(app)?;
-    ensure_parent(&path)?;
     let bytes = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("cannot encode integration settings: {error}"))?;
     if bytes.len() as u64 > MAX_SETTINGS_BYTES {
         return Err("integration settings exceed size limit".into());
     }
-    fs::write(path, bytes).map_err(|error| format!("cannot save integration settings: {error}"))
+    let _guard = CONFIG_IO_LOCK
+        .lock()
+        .map_err(|_| "configuration I/O lock poisoned")?;
+    atomic_write(&settings_path(app)?, &bytes, "integration settings")
 }
 
 pub fn write_pi_config(
@@ -80,6 +92,9 @@ pub fn write_pi_config(
     shell_path: Option<&Path>,
 ) -> Result<PathBuf, String> {
     validate_model_selection(settings)?;
+    let _guard = CONFIG_IO_LOCK
+        .lock()
+        .map_err(|_| "configuration I/O lock poisoned")?;
     let agent_dir = pi_agent_dir(app)?;
     fs::create_dir_all(&agent_dir)
         .map_err(|error| format!("cannot create Pi config directory: {error}"))?;
@@ -97,8 +112,9 @@ pub fn write_pi_config(
     let path = agent_dir.join("models.json");
     let bytes = serde_json::to_vec_pretty(&document)
         .map_err(|error| format!("cannot encode Pi model config: {error}"))?;
-    fs::write(&path, bytes).map_err(|error| format!("cannot write Pi model config: {error}"))?;
+    atomic_write(&path, &bytes, "Pi model config")?;
     let settings_path = agent_dir.join("settings.json");
+    recover_backup(&settings_path, "Pi settings")?;
     let mut pi_settings = if settings_path.is_file() {
         serde_json::from_slice::<Value>(
             &fs::read(&settings_path)
@@ -119,8 +135,7 @@ pub fn write_pi_config(
     }
     let bytes = serde_json::to_vec_pretty(&pi_settings)
         .map_err(|error| format!("cannot encode Pi settings: {error}"))?;
-    fs::write(settings_path, bytes)
-        .map_err(|error| format!("cannot write Pi settings: {error}"))?;
+    atomic_write(&settings_path, &bytes, "Pi settings")?;
     Ok(agent_dir)
 }
 
@@ -195,7 +210,10 @@ pub fn validate_model_selection(settings: &IntegrationSettings) -> Result<(), St
 }
 
 fn validate_url(value: &str, label: &str) -> Result<(), String> {
-    let url = Url::parse(value.trim()).map_err(|_| format!("{label} is invalid"))?;
+    if value != value.trim() {
+        return Err(format!("{label} must not contain surrounding whitespace"));
+    }
+    let url = Url::parse(value).map_err(|_| format!("{label} is invalid"))?;
     if !matches!(url.scheme(), "http" | "https")
         || url.username() != ""
         || url.password().is_some()
@@ -233,6 +251,96 @@ fn ensure_parent(path: &Path) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|error| format!("cannot create settings directory: {error}"))
 }
 
+fn normalize_base_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_owned()
+}
+
+fn sibling_with_suffix(path: &Path, suffix: &str) -> Result<PathBuf, String> {
+    let mut name = path
+        .file_name()
+        .ok_or("configuration path has no file name")?
+        .to_os_string();
+    name.push(suffix);
+    Ok(path.with_file_name(name))
+}
+
+fn backup_path(path: &Path) -> Result<PathBuf, String> {
+    sibling_with_suffix(path, ".backup")
+}
+
+fn recover_backup(path: &Path, label: &str) -> Result<(), String> {
+    if path.is_file() {
+        return Ok(());
+    }
+    let backup = backup_path(path)?;
+    if backup.is_file() {
+        fs::rename(&backup, path)
+            .map_err(|error| format!("cannot recover {label} backup: {error}"))?;
+    }
+    Ok(())
+}
+
+fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
+    ensure_parent(path)?;
+    let temporary = sibling_with_suffix(path, &format!(".tmp-{}", Uuid::new_v4()))?;
+    let backup = backup_path(path)?;
+    let write_result = (|| -> Result<(), String> {
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(|error| format!("cannot create temporary {label}: {error}"))?;
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|error| format!("cannot write temporary {label}: {error}"))?;
+        drop(file);
+
+        if backup.exists() {
+            fs::remove_file(&backup)
+                .map_err(|error| format!("cannot remove stale {label} backup: {error}"))?;
+        }
+        let had_previous = path.is_file();
+        if had_previous {
+            fs::rename(path, &backup)
+                .map_err(|error| format!("cannot back up previous {label}: {error}"))?;
+        }
+        if let Err(error) = fs::rename(&temporary, path) {
+            let recovery = if had_previous {
+                fs::rename(&backup, path).err()
+            } else {
+                None
+            };
+            return Err(match recovery {
+                Some(recovery) => format!(
+                    "cannot replace {label}: {error}; previous file recovery failed: {recovery}"
+                ),
+                None => format!("cannot replace {label}: {error}"),
+            });
+        }
+        if had_previous {
+            let _ = fs::remove_file(&backup);
+        }
+        if let Some(parent) = path.parent() {
+            sync_directory(parent);
+        }
+        Ok(())
+    })();
+    if temporary.exists() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) {
+    if let Ok(directory) = File::open(path) {
+        let _ = directory.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +376,7 @@ mod tests {
     fn rejects_endpoint_query_and_fragment_components() {
         assert!(validate_url("https://api.example.com/v1?token=value", "endpoint").is_err());
         assert!(validate_url("https://api.example.com/v1#fragment", "endpoint").is_err());
+        assert!(validate_url(" https://api.example.com/v1 ", "endpoint").is_err());
     }
 
     #[test]
@@ -318,5 +427,29 @@ mod tests {
         };
         assert!(validate(&settings).is_ok());
         assert!(validate_model_selection(&settings).is_ok());
+    }
+
+    #[test]
+    fn atomic_write_replaces_complete_files_without_leaving_a_backup() {
+        let directory = std::env::temp_dir().join(format!("foliomind-config-{}", Uuid::new_v4()));
+        let path = directory.join("integrations.json");
+        atomic_write(&path, b"first", "test config").unwrap();
+        atomic_write(&path, b"second", "test config").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+        assert!(!backup_path(&path).unwrap().exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn missing_primary_file_recovers_the_last_backup() {
+        let directory = std::env::temp_dir().join(format!("foliomind-config-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("integrations.json");
+        let backup = backup_path(&path).unwrap();
+        fs::write(&backup, b"last-known-good").unwrap();
+        recover_backup(&path, "test config").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"last-known-good");
+        assert!(!backup.exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 }
