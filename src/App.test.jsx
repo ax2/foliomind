@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
+const integrationMocks = vi.hoisted(() => ({ loadIntegrationStatus: vi.fn() }));
 
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
@@ -16,9 +17,24 @@ vi.mock("lightweight-charts", () => ({
   }),
 }));
 
+vi.mock("./lib/integrations.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  loadIntegrationStatus: integrationMocks.loadIntegrationStatus,
+}));
+
 afterEach(cleanup);
 
 beforeEach(() => {
+  integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
+    credentialConfigured: false,
+    settings: {
+      capabilityBaseUrl: "https://qveris.ai/api/v1",
+      modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+      modelId: "",
+      models: [],
+    },
+    demo: true,
+  });
   useLabStore.setState({
     ...initialLabState,
     skillItems: initialLabState.skillItems.map((item) => ({ ...item })),
@@ -75,6 +91,7 @@ describe("FolioMind core flows", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(await screen.findByText("浏览器预览")).toBeInTheDocument();
     expect(screen.getByLabelText("QVeris API Key")).toBeInTheDocument();
     expect(screen.getByLabelText("Gateway Base URL")).toHaveValue("https://aigateway.qveris.ai/v1");
     expect(screen.getByText("未配置")).toBeInTheDocument();
@@ -83,10 +100,41 @@ describe("FolioMind core flows", () => {
   it("requires a fresh model sync after changing the gateway", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("浏览器预览")).toBeInTheDocument();
     const gateway = await screen.findByLabelText("Gateway Base URL");
     fireEvent.change(gateway, { target: { value: "https://gateway.example.com/v1" } });
     expect(screen.getByText("网关地址已变化，请先同步模型")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存并应用" })).toBeDisabled();
+  });
+
+  it("reports a desktop settings load failure and recovers on retry", async () => {
+    integrationMocks.loadIntegrationStatus
+      .mockRejectedValueOnce(new Error("系统凭据库暂时不可用"))
+      .mockResolvedValueOnce({
+        credentialConfigured: true,
+        settings: {
+          capabilityBaseUrl: "https://qveris.ai/api/v1",
+          modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+          modelId: "model-a",
+          models: [{ id: "model-a", name: "Model A" }],
+        },
+        demo: false,
+      });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("设置加载失败：系统凭据库暂时不可用");
+    expect(screen.getByText("加载失败")).toBeInTheDocument();
+    expect(screen.getByText("状态未知")).toBeInTheDocument();
+    expect(screen.queryByText("浏览器预览")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Gateway Base URL")).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试加载" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Gateway Base URL")).toBeEnabled();
+    expect(screen.getByLabelText("默认模型")).toHaveValue("model-a");
+    expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(2);
   });
 
   it("routes a live-data request through the agent conversation", async () => {

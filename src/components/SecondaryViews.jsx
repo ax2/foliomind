@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CheckCircle, MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import { monitorEvents, skills, watchGroups } from "../data/market.js";
 import { applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
@@ -6,6 +6,7 @@ import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
+const errorMessage = (error) => error instanceof Error ? error.message : String(error);
 
 export function MarketView() {
   return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><span>界面示例 · 实时数据请交给 Agent 查询</span></header><div className="index-board">{["上证指数", "深证成指", "创业板指", "恒生指数", "标普 500", "纳斯达克"].map((name, index) => <article key={name}><span>{name}</span><strong>{[3856.12, 12844.7, 2752.08, 25862.53, 6501.86, 21713.14][index].toLocaleString()}</strong><small className={index < 3 ? "up" : "down"}>{index < 3 ? "+0.68%" : "-0.41%"}</small></article>)}</div><section className="market-table"><h2>自选行情</h2><div className="table-head"><span>名称 / 代码</span><span>最新价</span><span>涨跌幅</span><span>市场</span></div>{watchGroups.flatMap((g) => g.items).slice(0, 7).map((item) => <div className="table-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span>{item.price.toFixed(2)}</span><span className={item.change >= 0 ? "up" : "down"}>{item.change >= 0 ? "+" : ""}{item.change.toFixed(2)}%</span><span>{item.market}</span></div>)}</section></div>;
@@ -34,22 +35,37 @@ export function SkillsView() {
 }
 
 export function SettingsView() {
-  const [status, setStatus] = useState({ credentialConfigured: false, settings: defaultIntegrationSettings, demo: true });
+  const [status, setStatus] = useState({ credentialConfigured: false, settings: defaultIntegrationSettings, demo: false });
   const [form, setForm] = useState(defaultIntegrationSettings);
   const [apiKey, setApiKey] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadState, setLoadState] = useState("loading");
+  const [loadError, setLoadError] = useState("");
+  const loadRequest = useRef(0);
+
+  const loadSettings = useCallback(async () => {
+    const request = ++loadRequest.current;
+    setLoadState("loading"); setLoadError("");
+    try {
+      const value = await loadIntegrationStatus();
+      if (request !== loadRequest.current) return;
+      setStatus(value); setForm(value.settings); setLoadState("ready");
+    } catch (error) {
+      if (request !== loadRequest.current) return;
+      setLoadError(errorMessage(error)); setLoadState("error");
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    loadIntegrationStatus().then((value) => { if (active) { setStatus(value); setForm(value.settings); } }).catch((error) => { if (active) setNotice(String(error)); });
-    return () => { active = false; };
-  }, []);
+    void loadSettings();
+    return () => { loadRequest.current += 1; };
+  }, [loadSettings]);
 
   const run = async (action, success) => {
     setBusy(true); setNotice("");
     try { const value = await action(); if (value?.models) setForm(value); setNotice(success); }
-    catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
+    catch (error) { setNotice(errorMessage(error)); }
     finally { setBusy(false); }
   };
   const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); setApiKey(""); setStatus((value) => ({ ...value, credentialConfigured: true })); }, "QVeris API Key 已保存到系统凭据库");
@@ -61,10 +77,14 @@ export function SettingsView() {
   const gatewayChanged = normalizeEndpoint(form.modelGatewayBaseUrl) !== normalizeEndpoint(status.settings.modelGatewayBaseUrl);
   const selectedModelAvailable = modelOptions.some((model) => model.id === form.modelId);
   const modelStatus = gatewayChanged ? "网关地址已变化，请先同步模型" : modelOptions.length ? `${modelOptions.length} 个可用模型` : "尚未同步模型";
-  return <div className="secondary-page settings-page"><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{status.demo ? "浏览器预览" : "桌面端"}</span></header>
-    <section className="settings-card"><div className="settings-card-title"><div><strong>QVeris 数据与模型凭证</strong><small>同一个 API Key 可用于工具 API 与模型网关；密钥只保存在系统凭据库。</small></div><span className={status.credentialConfigured ? "status-pill ok" : "status-pill"}>{status.credentialConfigured ? "已配置" : "未配置"}</span></div><div className="settings-inline"><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="粘贴 QVeris API Key" aria-label="QVeris API Key" /><button disabled={busy || !apiKey.trim()} onClick={saveKey}>保存密钥</button>{status.credentialConfigured && <button className="secondary-button" disabled={busy} onClick={clearKey}>清除</button>}</div></section>
-    <section className="settings-card"><div className="settings-card-title"><div><strong>QVeris 工具</strong><small>金融 Skill 内置 Search → Inspect → Call，真实数据调用由本机 Host 审计与转发。</small></div><span className="status-pill ok">内置 Skill</span></div><label>Capability API<input value={form.capabilityBaseUrl} onChange={(event) => setForm((value) => ({ ...value, capabilityBaseUrl: event.target.value }))} aria-label="Capability API" /></label></section>
-    <section className="settings-card"><div className="settings-card-title"><div><strong>Pi 模型 · QVeris Model Gateway</strong><small>通过运行时短期令牌访问本机回环代理，长期 API Key 不会交给 Pi。</small></div><button className="secondary-button" disabled={busy || !status.credentialConfigured} onClick={syncModels}>同步模型</button></div><label>Gateway Base URL<input value={form.modelGatewayBaseUrl} onChange={(event) => setForm((value) => ({ ...value, modelGatewayBaseUrl: event.target.value }))} aria-label="Gateway Base URL" /></label><label>默认模型<select value={form.modelId} onChange={(event) => setForm((value) => ({ ...value, modelId: event.target.value }))} aria-label="默认模型"><option value="">请先同步模型目录</option>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></label><div className="settings-actions"><span>{modelStatus}</span><button disabled={busy || status.demo || gatewayChanged || !selectedModelAvailable} onClick={saveAll}>{busy ? "处理中…" : "保存并应用"}</button></div></section>
+  const formDisabled = busy || loadState !== "ready";
+  const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : "桌面端";
+  const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? "已配置" : "未配置";
+  return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>
+    {loadError && <div className="settings-notice error" role="alert"><span>设置加载失败：{loadError}</span><button className="secondary-button" onClick={() => { void loadSettings(); }}>重试加载</button></div>}
+    <section className="settings-card"><div className="settings-card-title"><div><strong>QVeris 数据与模型凭证</strong><small>同一个 API Key 可用于工具 API 与模型网关；密钥只保存在系统凭据库。</small></div><span className={loadState === "ready" && status.credentialConfigured ? "status-pill ok" : "status-pill"}>{credentialLabel}</span></div><div className="settings-inline"><input type="password" autoComplete="new-password" value={apiKey} disabled={formDisabled} onChange={(event) => setApiKey(event.target.value)} placeholder="粘贴 QVeris API Key" aria-label="QVeris API Key" /><button disabled={formDisabled || !apiKey.trim()} onClick={saveKey}>保存密钥</button>{status.credentialConfigured && <button className="secondary-button" disabled={formDisabled} onClick={clearKey}>清除</button>}</div></section>
+    <section className="settings-card"><div className="settings-card-title"><div><strong>QVeris 工具</strong><small>金融 Skill 内置 Search → Inspect → Call，真实数据调用由本机 Host 审计与转发。</small></div><span className="status-pill ok">内置 Skill</span></div><label>Capability API<input value={form.capabilityBaseUrl} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, capabilityBaseUrl: event.target.value }))} aria-label="Capability API" /></label></section>
+    <section className="settings-card"><div className="settings-card-title"><div><strong>Pi 模型 · QVeris Model Gateway</strong><small>通过运行时短期令牌访问本机回环代理，长期 API Key 不会交给 Pi。</small></div><button className="secondary-button" disabled={formDisabled || !status.credentialConfigured} onClick={syncModels}>同步模型</button></div><label>Gateway Base URL<input value={form.modelGatewayBaseUrl} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, modelGatewayBaseUrl: event.target.value }))} aria-label="Gateway Base URL" /></label><label>默认模型<select value={form.modelId} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, modelId: event.target.value }))} aria-label="默认模型"><option value="">请先同步模型目录</option>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></label><div className="settings-actions"><span>{modelStatus}</span><button disabled={formDisabled || status.demo || gatewayChanged || !selectedModelAvailable} onClick={saveAll}>{busy ? "处理中…" : "保存并应用"}</button></div></section>
     {notice && <p className="settings-notice" role="status">{notice}</p>}
   </div>;
 }
