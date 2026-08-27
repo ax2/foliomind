@@ -2,11 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs,
-    net::IpAddr,
     path::{Path, PathBuf},
 };
 use tauri::{AppHandle, Manager};
-use url::Url;
+use url::{Host, Url};
 
 pub const DEFAULT_CAPABILITY_URL: &str = "https://qveris.ai/api/v1";
 pub const DEFAULT_MODEL_GATEWAY_URL: &str = "https://aigateway.qveris.ai/v1";
@@ -145,11 +144,12 @@ fn validate_url(value: &str, label: &str) -> Result<(), String> {
     if url.query().is_some() || url.fragment().is_some() {
         return Err(format!("{label} must not contain a query or fragment"));
     }
-    let host = url.host_str().unwrap_or_default();
-    let loopback = host.eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<IpAddr>()
-            .is_ok_and(|address| address.is_loopback());
+    let loopback = match url.host() {
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
     if url.scheme() != "https" && !loopback {
         return Err(format!("{label} must use HTTPS unless it is loopback"));
     }
