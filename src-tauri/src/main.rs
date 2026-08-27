@@ -5,7 +5,7 @@ mod executor;
 
 use credentials::{CredentialStore, OsCredentialStore};
 use executor::{AuditEvent, BridgeEnvironment, RunExecutor};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -128,7 +128,7 @@ impl PiHost {
     fn set_status(&self, app: &AppHandle, state: RuntimeState, pid: Option<u32>, detail: Option<String>, kind: &str) { if let Ok(mut inner) = self.inner.lock() { inner.status = RuntimeStatus { state, pid, detail }; } self.publish(app, kind, None); }
 
     fn spawn_writer(&self, mut stdin: impl Write + Send + 'static, rx: mpsc::Receiver<Value>, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for value in rx { let encoded = match encode_jsonl(&value) { Ok(v) => v, Err(e) => { host.publish(&app, "protocol_error", Some(Value::String(e))); continue; } }; if stdin.write_all(&encoded).and_then(|_| stdin.flush()).is_err() { host.fail_all("Pi runtime stdin write failed"); host.publish(&app, "transport_error", None); break; } } }); }
-    fn spawn_stdout(&self, stdout: impl std::io::Read + Send + 'static, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for line in BufReader::new(stdout).split(b'\n') { match line { Ok(raw) => match decode_jsonl(&raw) { Ok(frame) => { if let Some(id) = frame.get("id").and_then(Value::as_str) { host.resolve(id, frame); } else { host.publish(&app, "event", Some(frame)); } }, Err(error) => host.publish(&app, "protocol_error", Some(Value::String(error))), }, Err(_) => break, } } }); }
+    fn spawn_stdout(&self, stdout: impl std::io::Read + Send + 'static, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for line in BufReader::new(stdout).split(b'\n') { match line { Ok(raw) => match decode_jsonl(&raw) { Ok(frame) => { if let Some(id) = frame.get("id").and_then(Value::as_str).map(str::to_owned) { host.resolve(&id, frame); } else { host.publish(&app, "event", Some(frame)); } }, Err(error) => host.publish(&app, "protocol_error", Some(Value::String(error))), }, Err(_) => break, } } }); }
     fn spawn_stderr(&self, stderr: impl std::io::Read + Send + 'static, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || { for line in BufReader::new(stderr).lines().map_while(Result::ok) { host.publish(&app, "diagnostic", Some(Value::String(line.chars().take(4096).collect()))); } }); }
     fn spawn_watcher(&self, child: Arc<Mutex<Child>>, app: AppHandle) { let host = self.clone(); std::thread::spawn(move || loop { std::thread::sleep(Duration::from_millis(100)); let exit = child.lock().ok().and_then(|mut child| child.try_wait().ok()).flatten(); if let Some(status) = exit { let next_state = state_after_process_exit(host.status().state); host.fail_all("Pi runtime exited"); if let Ok(mut inner) = host.inner.lock() { inner.child = None; if let Some(executor) = inner.executor.take() { executor.stop(); } } if next_state == RuntimeState::Stopped { host.set_status(&app, RuntimeState::Stopped, None, None, "stopped"); } else { host.set_status(&app, RuntimeState::Crashed, None, Some(status.to_string()), "crash"); } break; } }); }
 }
