@@ -2,6 +2,7 @@ use crate::credentials::CredentialStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     sync::{
@@ -20,6 +21,10 @@ const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_MODEL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
 const MODEL_TIMEOUT: Duration = Duration::from_secs(120);
+const MAX_QUERY_BYTES: usize = 4 * 1024;
+const MAX_IDENTIFIER_BYTES: usize = 256;
+const MAX_TOOL_IDS: usize = 5;
+const MAX_PARAMETERS_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,39 +213,76 @@ fn validate_bridge_request(
     if !request.input.is_object() {
         return Err("operation input must be an object".into());
     }
-    let text = |key: &str| {
+    let text = |key: &str, max_bytes: usize| {
         request
             .input
             .get(key)
             .and_then(Value::as_str)
-            .is_some_and(|value| !value.trim().is_empty())
+            .is_some_and(|value| !value.trim().is_empty() && value.len() <= max_bytes)
     };
+    let allowed_fields: &[&str] = match request.operation.as_str() {
+        "search" => &["query", "limit"],
+        "inspect" => &["search_id", "tool_ids"],
+        "call" => &["search_id", "tool_id", "parameters"],
+        _ => unreachable!(),
+    };
+    if request.input.as_object().is_some_and(|input| {
+        input
+            .keys()
+            .any(|key| !allowed_fields.contains(&key.as_str()))
+    }) {
+        return Err("operation input contains unsupported fields".into());
+    }
     match request.operation.as_str() {
-        "search" if !text("query") => return Err("search requires query".into()),
-        "inspect"
-            if !text("search_id")
+        "search"
+            if !text("query", MAX_QUERY_BYTES)
                 || request
                     .input
-                    .get("tool_ids")
-                    .and_then(Value::as_array)
-                    .map(|items| items.is_empty())
-                    .unwrap_or(true) =>
+                    .get("limit")
+                    .is_some_and(|limit| !matches!(limit.as_u64(), Some(1..=20))) =>
+        {
+            return Err("search requires a valid query and optional limit from 1 to 20".into())
+        }
+        "inspect"
+            if !text("search_id", MAX_IDENTIFIER_BYTES)
+                || !valid_tool_ids(request.input.get("tool_ids")) =>
         {
             return Err("inspect requires search_id and tool_ids".into())
         }
         "call"
-            if !text("search_id")
-                || !text("tool_id")
-                || !request
-                    .input
-                    .get("parameters")
-                    .is_some_and(Value::is_object) =>
+            if !text("search_id", MAX_IDENTIFIER_BYTES)
+                || !text("tool_id", MAX_IDENTIFIER_BYTES)
+                || !valid_parameters(request.input.get("parameters")) =>
         {
             return Err("call requires search_id, tool_id and parameters".into())
         }
         _ => {}
     }
     Ok(())
+}
+
+fn valid_tool_ids(value: Option<&Value>) -> bool {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return false;
+    };
+    if items.is_empty() || items.len() > MAX_TOOL_IDS {
+        return false;
+    }
+    let mut unique = HashSet::with_capacity(items.len());
+    items.iter().all(|item| {
+        item.as_str().is_some_and(|id| {
+            let id = id.trim();
+            !id.is_empty() && id.len() <= MAX_IDENTIFIER_BYTES && unique.insert(id)
+        })
+    })
+}
+
+fn valid_parameters(value: Option<&Value>) -> bool {
+    value.is_some_and(|parameters| {
+        parameters.is_object()
+            && serde_json::to_vec(parameters)
+                .is_ok_and(|encoded| encoded.len() <= MAX_PARAMETERS_BYTES)
+    })
 }
 
 fn has_capability(headers: &std::collections::HashMap<String, String>, capability: &str) -> bool {
@@ -281,16 +323,22 @@ fn execute_official_api(
         endpoint.query_pairs_mut().append_pair("tool_id", tool_id);
     }
     let body = match request.operation.as_str() {
-        "search" => with_defaults(
-            &request.input,
-            &[
-                ("limit", json!(8)),
-                ("session_id", json!(request.product_run_id.clone())),
-                ("view", json!("routing")),
-                ("lang", json!("zh")),
-            ],
-        ),
-        "inspect" => with_defaults(
+        "search" => {
+            let mut body = with_policy_fields(
+                &request.input,
+                &[
+                    ("session_id", json!(request.product_run_id.clone())),
+                    ("view", json!("routing")),
+                    ("lang", json!("zh")),
+                ],
+            );
+            body.as_object_mut()
+                .expect("validated object")
+                .entry("limit")
+                .or_insert(json!(8));
+            body
+        }
+        "inspect" => with_policy_fields(
             &request.input,
             &[
                 ("session_id", json!(request.product_run_id.clone())),
@@ -298,7 +346,7 @@ fn execute_official_api(
             ],
         ),
         "call" => {
-            let mut body = with_defaults(
+            let mut body = with_policy_fields(
                 &request.input,
                 &[
                     ("session_id", json!(request.product_run_id.clone())),
@@ -338,13 +386,11 @@ fn execute_official_api(
     serde_json::from_slice(&bytes).map_err(|_| "QVeris API returned invalid JSON".into())
 }
 
-fn with_defaults(input: &Value, defaults: &[(&str, Value)]) -> Value {
+fn with_policy_fields(input: &Value, fields: &[(&str, Value)]) -> Value {
     let mut result = input.clone();
     let object = result.as_object_mut().expect("validated object");
-    for (key, value) in defaults {
-        object
-            .entry((*key).to_owned())
-            .or_insert_with(|| value.clone());
+    for (key, value) in fields {
+        object.insert((*key).to_owned(), value.clone());
     }
     result
 }
@@ -635,6 +681,16 @@ mod tests {
     #[test]
     fn accepts_exact_run_identity_and_valid_operation() {
         assert!(validate_bridge_request(&request(), &environment()).is_ok());
+        let mut inspect = request();
+        inspect.operation = "inspect".into();
+        inspect.input = json!({"search_id":"search", "tool_ids":["tool-1", "tool-2"]});
+        assert!(validate_bridge_request(&inspect, &environment()).is_ok());
+
+        let mut call = request();
+        call.operation = "call".into();
+        call.input =
+            json!({"search_id":"search", "tool_id":"tool-1", "parameters":{"symbol":"AAPL"}});
+        assert!(validate_bridge_request(&call, &environment()).is_ok());
     }
     #[test]
     fn rejects_operation_payload_missing_required_fields() {
@@ -642,6 +698,43 @@ mod tests {
         item.operation = "call".into();
         item.input = json!({"tool_id":"tool"});
         assert!(validate_bridge_request(&item, &environment()).is_err());
+    }
+    #[test]
+    fn rejects_policy_fields_and_out_of_bounds_inputs() {
+        let env = environment();
+        let mut item = request();
+        item.input = json!({"query":"quote", "session_id":"caller-controlled"});
+        assert!(validate_bridge_request(&item, &env).is_err());
+
+        item.input = json!({"query":"quote", "limit":21});
+        assert!(validate_bridge_request(&item, &env).is_err());
+        item.input = json!({"query":"x".repeat(MAX_QUERY_BYTES + 1)});
+        assert!(validate_bridge_request(&item, &env).is_err());
+
+        item.operation = "inspect".into();
+        item.input = json!({"search_id":"search", "tool_ids":["same", "same"]});
+        assert!(validate_bridge_request(&item, &env).is_err());
+        item.input = json!({"search_id":"search", "tool_ids":["1", "2", "3", "4", "5", "6"]});
+        assert!(validate_bridge_request(&item, &env).is_err());
+
+        item.operation = "call".into();
+        item.input = json!({"search_id":"search", "tool_id":"tool", "parameters":{"blob":"x".repeat(MAX_PARAMETERS_BYTES)}});
+        assert!(validate_bridge_request(&item, &env).is_err());
+    }
+    #[test]
+    fn host_policy_fields_override_caller_values() {
+        let input = json!({"session_id":"caller", "view":"verbose", "respond_with":"raw"});
+        let body = with_policy_fields(
+            &input,
+            &[
+                ("session_id", json!("product-run")),
+                ("view", json!("lean")),
+                ("respond_with", json!("full")),
+            ],
+        );
+        assert_eq!(body["session_id"], "product-run");
+        assert_eq!(body["view"], "lean");
+        assert_eq!(body["respond_with"], "full");
     }
     #[test]
     fn requires_exact_bearer_capability() {

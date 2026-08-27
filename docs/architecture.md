@@ -8,6 +8,8 @@
 4. 数据调用遵循 `Search → Inspect → Call`；调用结果必须保留 source、as-of、execution ID 和费用字段。
 5. 第一版不连接真实券商，不提供自动交易，不承诺收益。
 
+QVeris 的 `session_id`、响应视图、返回模式和最大响应大小属于 Host 策略字段，不向模型暴露，也不接受 Skill 覆盖。Host 会对查询、标识符、候选工具数量和调用参数体设置独立上限，再写入本轮 `product_run_id`。
+
 ## 进程与信任边界
 
 ```text

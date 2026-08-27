@@ -207,7 +207,7 @@ export default function qverisExtension(pi) {
     name: "qveris_search",
     label: "QVeris Search",
     description: "搜索 QVeris 数据能力。外部、实时或专业数据先搜索，随后必须 Inspect。",
-    parameters: objectSchema({ query: textSchema("描述数据能力、标的、市场和时间范围。"), limit: { type: "integer", minimum: 1, maximum: 20 }, session_id: textSchema("可选搜索会话。") }, ["query"]),
+    parameters: objectSchema({ query: textSchema("描述数据能力、标的、市场和时间范围。"), limit: { type: "integer", minimum: 1, maximum: 20 } }, ["query"]),
     executionMode: "sequential",
     execute(toolCallId, params, signal) { return executeQVeris("search", params, toolCallId, signal); },
   });
@@ -215,7 +215,7 @@ export default function qverisExtension(pi) {
     name: "qveris_inspect",
     label: "QVeris Inspect",
     description: "检查 Search 返回的候选工具参数；Call 前必需。",
-    parameters: objectSchema({ tool_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5, uniqueItems: true }, search_id: textSchema("Search 返回的 search_id。"), session_id: textSchema("可选搜索会话。") }, ["tool_ids", "search_id"]),
+    parameters: objectSchema({ tool_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5, uniqueItems: true }, search_id: textSchema("Search 返回的 search_id。") }, ["tool_ids", "search_id"]),
     executionMode: "sequential",
     execute(toolCallId, params, signal) { return executeQVeris("inspect", params, toolCallId, signal); },
   });
@@ -223,7 +223,7 @@ export default function qverisExtension(pi) {
     name: "qveris_call",
     label: "QVeris Call",
     description: "调用已 Search 且 Inspect 的 QVeris 工具；参数必须匹配 Inspect schema。",
-    parameters: objectSchema({ tool_id: textSchema("已经 Inspect 的 tool_id。"), parameters: { type: "object", additionalProperties: true }, search_id: textSchema("对应 Search 的 search_id。"), session_id: textSchema("可选搜索会话。"), max_response_size: { type: "integer", minimum: 1024 } }, ["tool_id", "parameters", "search_id"]),
+    parameters: objectSchema({ tool_id: textSchema("已经 Inspect 的 tool_id。"), parameters: { type: "object", additionalProperties: true }, search_id: textSchema("对应 Search 的 search_id。") }, ["tool_id", "parameters", "search_id"]),
     executionMode: "sequential",
     execute(toolCallId, params, signal) { return executeQVeris("call", params, toolCallId, signal); },
   });
