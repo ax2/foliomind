@@ -16,7 +16,7 @@ WebView (untrusted presentation)
        └─ Rust Host (trusted product boundary)
             ├─ Credential store
             ├─ Runtime manager
-            ├─ Audit log
+            ├─ Per-conversation audit stream
             └─ Pi child process (restricted environment)
                  └─ qveris-bridge extension
                       └─ loopback executor (run-scoped capability)

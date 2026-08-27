@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs,
+    net::IpAddr,
     path::{Path, PathBuf},
 };
 use tauri::{AppHandle, Manager};
@@ -132,11 +133,25 @@ pub fn validate(settings: &IntegrationSettings) -> Result<(), String> {
 
 fn validate_url(value: &str, label: &str) -> Result<(), String> {
     let url = Url::parse(value.trim()).map_err(|_| format!("{label} is invalid"))?;
-    if !matches!(url.scheme(), "http" | "https") || url.username() != "" || url.password().is_some()
+    if !matches!(url.scheme(), "http" | "https")
+        || url.username() != ""
+        || url.password().is_some()
+        || url.host_str().is_none()
     {
         return Err(format!(
             "{label} must be an HTTP(S) URL without credentials"
         ));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(format!("{label} must not contain a query or fragment"));
+    }
+    let host = url.host_str().unwrap_or_default();
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    if url.scheme() != "https" && !loopback {
+        return Err(format!("{label} must use HTTPS unless it is loopback"));
     }
     Ok(())
 }
@@ -175,5 +190,19 @@ mod tests {
             ..IntegrationSettings::default()
         };
         assert!(validate(&value).is_err());
+    }
+
+    #[test]
+    fn requires_https_for_remote_endpoints_but_allows_loopback_http() {
+        assert!(validate_url("http://api.example.com/v1", "endpoint").is_err());
+        assert!(validate_url("http://127.0.0.1:9002/v1", "endpoint").is_ok());
+        assert!(validate_url("http://[::1]:9002/v1", "endpoint").is_ok());
+        assert!(validate_url("https://api.example.com/v1", "endpoint").is_ok());
+    }
+
+    #[test]
+    fn rejects_endpoint_query_and_fragment_components() {
+        assert!(validate_url("https://api.example.com/v1?token=value", "endpoint").is_err());
+        assert!(validate_url("https://api.example.com/v1#fragment", "endpoint").is_err());
     }
 }

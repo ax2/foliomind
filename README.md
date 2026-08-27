@@ -53,6 +53,8 @@ Rust Host
 
 行情页面中的预置数字仅用于界面布局演示，并有明确标注；Agent 查询结果才是实时外部数据。
 
+为避免长期凭据通过明文链路泄露，远程 QVeris 地址必须使用 HTTPS；只有 `localhost`、`127.0.0.0/8` 和 `::1` 回环地址允许使用 HTTP。基础地址不能包含 query 或 fragment。
+
 ## 本地开发
 
 ```bash
@@ -71,11 +73,15 @@ npm run desktop:build
 
 ```bash
 npm test
+npm run audit:security
 npm run fetch:pi
 npm run fetch:bash
 npm run smoke:pi
 npm run build
 npm run test:sites
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
 ## 发布安装包
