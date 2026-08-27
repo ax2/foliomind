@@ -43,7 +43,19 @@ function normalizedPrompt(message) {
   return value;
 }
 
-export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS } = {}) {
+function updateStreamingText(blocks, frame) {
+  if (frame?.type !== "message_update") return undefined;
+  const event = frame.assistantMessageEvent;
+  const index = event?.contentIndex;
+  if (!Number.isInteger(index) || index < 0) return undefined;
+  if (event.type === "text_start") blocks.set(index, "");
+  else if (event.type === "text_delta" && typeof event.delta === "string") blocks.set(index, `${blocks.get(index) ?? ""}${event.delta}`);
+  else if (event.type === "text_end" && typeof event.content === "string") blocks.set(index, event.content);
+  else return undefined;
+  return [...blocks.entries()].sort(([left], [right]) => left - right).map(([, text]) => text).join("");
+}
+
+export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS, onProgress } = {}) {
   const prompt = normalizedPrompt(message);
   if (!isDesktopRuntime()) return { text: DEMO_REPLY, mode: "browser-demo" };
   const [{ invoke }, { listen }] = await Promise.all([
@@ -54,8 +66,19 @@ export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_
   if (status.state === "stopped" || status.state === "crashed") await invoke("runtime_start");
 
   let latestText = "";
+  let lastReportedText = null;
   let terminalError = null;
   const audits = [];
+  const streamingBlocks = new Map();
+  const reportProgress = (text) => {
+    if (!text || text === lastReportedText || typeof onProgress !== "function") return;
+    lastReportedText = text;
+    try {
+      onProgress({ text });
+    } catch {
+      // Rendering callbacks must not interrupt the runtime protocol lifecycle.
+    }
+  };
   let finish;
   let fail;
   let timeout;
@@ -63,8 +86,22 @@ export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_
   const unlisten = await listen("pi-runtime://event", ({ payload }) => {
     if (payload?.kind === "qveris_audit" && payload.audit) audits.push(payload.audit);
     const frame = payload?.frame;
-    const nextText = textFromFrame(frame);
-    if (nextText) latestText = nextText;
+    if (frame?.type === "message_start" && frame.message?.role === "assistant") {
+      streamingBlocks.clear();
+      lastReportedText = null;
+    }
+    const streamingText = updateStreamingText(streamingBlocks, frame);
+    if (streamingText) {
+      latestText = streamingText;
+      reportProgress(streamingText);
+    }
+    if (frame?.type === "message_end" && frame.message?.role === "assistant") {
+      const finalText = textFromFrame(frame);
+      if (finalText) {
+        latestText = finalText;
+        reportProgress(finalText);
+      }
+    }
     const frameError = runtimeErrorFromFrame(frame);
     if (frameError !== undefined) terminalError = frameError;
     if (frame?.type === "agent_settled") {
@@ -81,7 +118,10 @@ export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_
     const commandError = rejectedCommandError(response);
     if (commandError) throw commandError;
     const responseText = textFromFrame(response);
-    if (responseText) latestText = responseText;
+    if (responseText) {
+      latestText = responseText;
+      reportProgress(responseText);
+    }
     const timeoutMs = Math.max(1, Number(settleTimeoutMs) || DEFAULT_SETTLE_TIMEOUT_MS);
     const timedOut = new Promise((_, reject) => {
       timeout = setTimeout(() => {

@@ -51,6 +51,29 @@ describe("Pi runtime client", () => {
     expect(tauri.unlisten).toHaveBeenCalledOnce();
   });
 
+  it("assembles indexed text deltas and reports the authoritative final message", async () => {
+    const onProgress = vi.fn();
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "runtime_status") return { state: "running" };
+      if (command === "runtime_send_rpc") {
+        queueMicrotask(() => {
+          tauri.eventHandler?.({ payload: { frame: { type: "message_start", message: { role: "assistant", content: [] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "第一段" } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 1 } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "第二" } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 1, content: "第二段" } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "最终答案" }] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "agent_settled" } } });
+        });
+        return { type: "response", success: true };
+      }
+      return undefined;
+    });
+
+    await expect(askPi("流式分析", { settleTimeoutMs: 100, onProgress })).resolves.toMatchObject({ text: "最终答案" });
+    expect(onProgress.mock.calls.map(([update]) => update.text)).toEqual(["第一段", "第一段第二", "第一段第二段", "最终答案"]);
+  });
+
   it("reports a real timeout instead of claiming the analysis completed", async () => {
     tauri.invoke.mockImplementation(async (command, args) => {
       if (command === "runtime_status") return { state: "running" };

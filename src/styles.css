@@ -508,6 +508,8 @@ textarea:focus-visible {
 }
 .assistant-message p {
   margin: 9px 0 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .assistant-message h4 {
   margin: 0 0 7px;

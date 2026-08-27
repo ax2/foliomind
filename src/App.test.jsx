@@ -83,4 +83,14 @@ describe("FolioMind core flows", () => {
     expect(await screen.findByText(/qveris-finance-research Skill/)).toBeInTheDocument();
     expect(screen.getAllByText("分析摘要").length).toBeGreaterThan(0);
   });
+
+  it("announces an in-progress assistant response", () => {
+    useLabStore.setState((state) => ({
+      messages: [...state.messages, { id: "streaming", role: "assistant", text: "正在生成第一段", streaming: true }],
+      runtimeMode: "running",
+    }));
+    render(<App />);
+    expect(screen.getByText("正在分析").closest(".assistant-message")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("正在生成第一段")).toBeInTheDocument();
+  });
 });

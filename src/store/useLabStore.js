@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { skills } from "../data/market.js";
 import { askPi } from "../lib/piRuntime.js";
 
+const RUNNING_REPLY = "Pi 正在分析…";
+
 export const initialLabState = {
   activeView: "watchlist",
   selectedSymbol: "600519",
@@ -26,13 +28,37 @@ export const useLabStore = create((set, get) => ({
     const prompt = String(text ?? "").trim();
     if (!prompt || get().runtimeMode === "running") return false;
     const userId = crypto.randomUUID();
-    set((state) => ({ runtimeMode: "running", messages: [...state.messages, { id: userId, role: "user", text: prompt }] }));
+    const assistantId = crypto.randomUUID();
+    set((state) => ({
+      runtimeMode: "running",
+      messages: [
+        ...state.messages,
+        { id: userId, role: "user", text: prompt },
+        { id: assistantId, role: "assistant", text: RUNNING_REPLY, mode: "streaming", audits: [], streaming: true },
+      ],
+    }));
     try {
-      const reply = await askPi(prompt);
-      set((state) => ({ runtimeMode: reply.mode, messages: [...state.messages, { id: crypto.randomUUID(), role: "assistant", text: reply.text, mode: reply.mode, audits: reply.audits ?? [] }] }));
+      const reply = await askPi(prompt, {
+        onProgress: ({ text: partialText }) => set((state) => ({
+          messages: state.messages.map((message) => message.id === assistantId && message.streaming
+            ? { ...message, text: partialText }
+            : message),
+        })),
+      });
+      set((state) => ({
+        runtimeMode: reply.mode,
+        messages: state.messages.map((message) => message.id === assistantId
+          ? { ...message, text: reply.text, mode: reply.mode, audits: reply.audits ?? [], streaming: false }
+          : message),
+      }));
       return true;
     } catch (error) {
-      set((state) => ({ runtimeMode: "error", messages: [...state.messages, { id: crypto.randomUUID(), role: "assistant", text: `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}` }] }));
+      set((state) => ({
+        runtimeMode: "error",
+        messages: state.messages.map((message) => message.id === assistantId
+          ? { ...message, text: `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}`, mode: "error", streaming: false }
+          : message),
+      }));
       return false;
     }
   },

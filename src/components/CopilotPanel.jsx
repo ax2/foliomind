@@ -25,8 +25,8 @@ export function CopilotPanel({ standalone = false }) {
         {messages.map((message) => message.role === "user" ? (
           <div key={message.id} className="user-message-wrap"><div className="user-message">{message.text}</div></div>
         ) : (
-          <div key={message.id} className="assistant-message">
-            <div className="answer-title"><MagnifyingGlass size={18} />分析摘要</div>
+          <div key={message.id} className="assistant-message" aria-busy={message.streaming || undefined}>
+            <div className="answer-title"><MagnifyingGlass size={18} />{message.streaming ? "正在分析" : "分析摘要"}</div>
             <p>{message.text}</p>
             {message.audits?.length > 0 && <div className="tool-run"><div className="tool-run-title">QVeris 审计记录（{message.audits.length}）</div>{message.audits.map((audit, index) => <div key={`${audit.toolCallId}-${index}`}><Check size={14} />{audit.operation.toUpperCase()} · {audit.outcome === "success" ? "成功" : "失败"}</div>)}</div>}
           </div>
