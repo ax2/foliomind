@@ -1,4 +1,4 @@
-use crate::credentials::CredentialStore;
+use crate::{config, credentials::CredentialStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -435,10 +435,24 @@ pub fn fetch_model_catalog(api_key: &str, base_url: &str) -> Result<Vec<Value>, 
         .get("data")
         .and_then(Value::as_array)
         .ok_or("QVeris model catalog is missing data")?;
+    normalize_model_catalog(values)
+}
+
+fn normalize_model_catalog(values: &[Value]) -> Result<Vec<Value>, String> {
+    let mut seen = HashSet::new();
     let mut models = values
         .iter()
         .filter_map(normalize_model)
+        .filter(|model| {
+            model
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| seen.insert(id.to_owned()))
+        })
         .collect::<Vec<_>>();
+    if models.len() > config::MAX_MODEL_CATALOG_ITEMS {
+        return Err("QVeris model catalog contains too many chat models".into());
+    }
     models.sort_by(|left, right| {
         left.get("id")
             .and_then(Value::as_str)
@@ -452,7 +466,10 @@ pub fn fetch_model_catalog(api_key: &str, base_url: &str) -> Result<Vec<Value>, 
 
 fn normalize_model(value: &Value) -> Option<Value> {
     let id = value.get("id")?.as_str()?.trim();
-    if id.is_empty() {
+    if id.is_empty()
+        || id.len() > config::MAX_MODEL_ID_BYTES
+        || id.chars().any(char::is_control)
+    {
         return None;
     }
     let capabilities = value
@@ -813,6 +830,31 @@ mod tests {
         assert_eq!(model["id"], "q-model");
         assert_eq!(model["reasoning"], true);
         assert_eq!(model["contextWindow"], 200000);
+    }
+    #[test]
+    fn model_catalog_normalization_drops_invalid_and_duplicate_ids() {
+        let models = normalize_model_catalog(&[
+            json!({"id":" model-b ","capabilities":["chat"]}),
+            json!({"id":"model-b","capabilities":["chat"]}),
+            json!({"id":"model-a","capabilities":["chat"]}),
+            json!({"id":"model\ncontrol","capabilities":["chat"]}),
+            json!({"id":"x".repeat(config::MAX_MODEL_ID_BYTES + 1),"capabilities":["chat"]}),
+            json!({"id":"embedding","capabilities":["embeddings"]}),
+        ])
+        .unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0]["id"], "model-a");
+        assert_eq!(models[1]["id"], "model-b");
+    }
+    #[test]
+    fn model_catalog_normalization_rejects_too_many_models() {
+        let values = (0..=config::MAX_MODEL_CATALOG_ITEMS)
+            .map(|index| json!({"id":format!("model-{index}"),"capabilities":["chat"]}))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            normalize_model_catalog(&values).unwrap_err(),
+            "QVeris model catalog contains too many chat models"
+        );
     }
     #[test]
     fn recognizes_sse_content_types_only() {

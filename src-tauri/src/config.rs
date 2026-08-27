@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -9,6 +10,9 @@ use url::{Host, Url};
 
 pub const DEFAULT_CAPABILITY_URL: &str = "https://qveris.ai/api/v1";
 pub const DEFAULT_MODEL_GATEWAY_URL: &str = "https://aigateway.qveris.ai/v1";
+pub const MAX_MODEL_CATALOG_ITEMS: usize = 500;
+pub const MAX_MODEL_ID_BYTES: usize = 256;
+const MAX_SETTINGS_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -43,6 +47,12 @@ pub fn load(app: &AppHandle) -> Result<IntegrationSettings, String> {
         validate(&settings)?;
         return Ok(settings);
     }
+    let size = fs::metadata(&path)
+        .map_err(|error| format!("cannot inspect integration settings: {error}"))?
+        .len();
+    if size > MAX_SETTINGS_BYTES {
+        return Err("integration settings exceed size limit".into());
+    }
     let bytes =
         fs::read(path).map_err(|error| format!("cannot read integration settings: {error}"))?;
     let settings: IntegrationSettings = serde_json::from_slice(&bytes)
@@ -57,6 +67,9 @@ pub fn save(app: &AppHandle, settings: &IntegrationSettings) -> Result<(), Strin
     ensure_parent(&path)?;
     let bytes = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("cannot encode integration settings: {error}"))?;
+    if bytes.len() as u64 > MAX_SETTINGS_BYTES {
+        return Err("integration settings exceed size limit".into());
+    }
     fs::write(path, bytes).map_err(|error| format!("cannot save integration settings: {error}"))
 }
 
@@ -122,11 +135,31 @@ pub fn pi_agent_dir(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn validate(settings: &IntegrationSettings) -> Result<(), String> {
     validate_url(&settings.capability_base_url, "QVeris capability URL")?;
     validate_url(&settings.model_gateway_base_url, "QVeris model gateway URL")?;
-    if settings.model_id.len() > 256 {
-        return Err("model ID is too long".into());
+    if settings.model_id.len() > MAX_MODEL_ID_BYTES
+        || settings.model_id != settings.model_id.trim()
+        || settings.model_id.chars().any(char::is_control)
+    {
+        return Err("model ID is invalid".into());
     }
-    if settings.models.len() > 500 {
+    if settings.models.len() > MAX_MODEL_CATALOG_ITEMS {
         return Err("model catalog is too large".into());
+    }
+    let mut model_ids = HashSet::with_capacity(settings.models.len());
+    for model in &settings.models {
+        let id = model
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("model catalog contains an invalid model")?;
+        if id.is_empty()
+            || id != id.trim()
+            || id.len() > MAX_MODEL_ID_BYTES
+            || id.chars().any(char::is_control)
+        {
+            return Err("model catalog contains an invalid model ID".into());
+        }
+        if !model_ids.insert(id) {
+            return Err("model catalog contains duplicate model IDs".into());
+        }
     }
     Ok(())
 }
@@ -258,5 +291,32 @@ mod tests {
             ..available
         };
         assert!(validate_model_selection(&stale).is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_and_duplicate_model_catalog_entries() {
+        for models in [
+            vec![json!({"name":"missing id"})],
+            vec![json!({"id":" model-a"})],
+            vec![json!({"id":"model\ncontrol"})],
+            vec![json!({"id":"model-a"}), json!({"id":"model-a"})],
+        ] {
+            let settings = IntegrationSettings {
+                models,
+                ..IntegrationSettings::default()
+            };
+            assert!(validate(&settings).is_err());
+        }
+    }
+
+    #[test]
+    fn accepts_a_unique_bounded_model_catalog() {
+        let settings = IntegrationSettings {
+            model_id: "model-b".into(),
+            models: vec![json!({"id":"model-a"}), json!({"id":"model-b"})],
+            ..IntegrationSettings::default()
+        };
+        assert!(validate(&settings).is_ok());
+        assert!(validate_model_selection(&settings).is_ok());
     }
 }
