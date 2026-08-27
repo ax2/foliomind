@@ -27,7 +27,8 @@ describe("Pi runtime client", () => {
       if (command === "runtime_status") return { state: "running" };
       if (command === "runtime_send_rpc") {
         queueMicrotask(() => {
-          tauri.eventHandler?.({ payload: { frame: { type: "agent_end", message: { content: [{ type: "text", text: "已完成分析" }] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "已完成分析" }] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "agent_settled" } } });
         });
         return { type: "response", success: true };
       }
@@ -51,8 +52,55 @@ describe("Pi runtime client", () => {
   });
 
   it("reports a real timeout instead of claiming the analysis completed", async () => {
-    tauri.invoke.mockImplementation(async (command) => command === "runtime_status" ? { state: "running" } : { type: "response", success: true });
-    await expect(askPi("分析超时", { settleTimeoutMs: 5 })).rejects.toThrow("等待超过 1 秒");
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "runtime_status") return { state: "running" };
+      if (args?.payload?.type === "abort") return { type: "response", success: true };
+      return { type: "response", success: true };
+    });
+    await expect(askPi("分析超时", { settleTimeoutMs: 5 })).rejects.toThrow("已取消本轮任务");
+    expect(tauri.invoke).toHaveBeenCalledWith("runtime_send_rpc", expect.objectContaining({ payload: { type: "abort" } }));
+    expect(tauri.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("waits for agent_settled across an automatic retry", async () => {
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "runtime_status") return { state: "running" };
+      if (command === "runtime_send_rpc") {
+        queueMicrotask(() => {
+          tauri.eventHandler?.({ payload: { frame: { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "temporary", content: [] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "agent_end", willRetry: true } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "重试后完成" }] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "agent_settled" } } });
+        });
+        return { type: "response", success: true };
+      }
+      return undefined;
+    });
+    await expect(askPi("自动重试", { settleTimeoutMs: 100 })).resolves.toMatchObject({ text: "重试后完成" });
+  });
+
+  it("surfaces a prompt rejected before acceptance", async () => {
+    tauri.invoke.mockImplementation(async (command) => command === "runtime_status"
+      ? { state: "running" }
+      : { type: "response", command: "prompt", success: false, error: "Agent is already streaming" });
+    await expect(askPi("重复请求", { settleTimeoutMs: 100 })).rejects.toThrow("Agent is already streaming");
+    expect(tauri.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces a final model error only after retries settle", async () => {
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "runtime_status") return { state: "running" };
+      if (command === "runtime_send_rpc") {
+        queueMicrotask(() => {
+          tauri.eventHandler?.({ payload: { frame: { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "模型额度不足", content: [] } } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "agent_end", willRetry: false } } });
+          tauri.eventHandler?.({ payload: { frame: { type: "agent_settled" } } });
+        });
+        return { type: "response", success: true };
+      }
+      return undefined;
+    });
+    await expect(askPi("最终失败", { settleTimeoutMs: 100 })).rejects.toThrow("模型额度不足");
     expect(tauri.unlisten).toHaveBeenCalledOnce();
   });
 

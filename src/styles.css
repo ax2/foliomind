@@ -21,9 +21,7 @@ body,
 #root {
   margin: 0;
   width: 100%;
-  min-width: 1180px;
   height: 100%;
-  min-height: 720px;
   overflow: hidden;
 }
 body {
@@ -961,6 +959,119 @@ textarea:focus-visible {
   }
   .secondary-page {
     padding-inline: 30px;
+  }
+}
+@media (max-width: 900px) {
+  .app-shell,
+  .app-shell:not(.view-watchlist) {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .view-watchlist .watchlist-sidebar,
+  .view-watchlist > .copilot-panel {
+    display: none;
+  }
+  .view-watchlist .stock-workspace {
+    grid-column: 2;
+  }
+  .secondary-page {
+    padding: 26px 24px 40px;
+  }
+  .index-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .index-board article + article {
+    border-left: 0;
+  }
+  .index-board article:nth-child(even) {
+    border-left: 1px solid var(--line);
+  }
+  .index-board article:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+  .market-table {
+    overflow-x: auto;
+  }
+  .table-head,
+  .table-row {
+    min-width: 700px;
+  }
+  .skill-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+  .copilot-panel.standalone {
+    width: calc(100% - 32px);
+    height: calc(100vh - 32px);
+    margin: 16px;
+  }
+}
+@media (max-width: 600px) {
+  .stock-workspace {
+    padding: 16px 14px 12px;
+  }
+  .stock-header {
+    align-items: flex-start;
+  }
+  .stock-header h1 {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .quote-stats {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .quote-stats dl,
+  .quote-stats dl + dl {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 10px 0 0;
+  }
+  .market-chart {
+    height: 280px;
+  }
+  .fundamentals > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .secondary-page {
+    padding: 20px 16px 36px;
+  }
+  .secondary-page > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .search-box {
+    width: 100%;
+  }
+  .skill-grid {
+    grid-template-columns: 1fr;
+  }
+  .event-list article {
+    grid-template-columns: 40px 12px minmax(0, 1fr);
+  }
+  .event-list article button {
+    grid-column: 3;
+    justify-self: start;
+  }
+  .settings-card-title,
+  .settings-inline,
+  .settings-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .settings-inline input {
+    flex: none;
+    width: 100%;
+  }
+  .copilot-heading {
+    padding-inline: 16px;
+  }
+  .conversation-feed {
+    padding-inline: 16px;
+  }
+  .composer {
+    margin-inline: 12px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

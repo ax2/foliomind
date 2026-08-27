@@ -21,7 +21,7 @@ export function CopilotPanel({ standalone = false }) {
   return (
     <aside className={standalone ? "copilot-panel standalone" : "copilot-panel"}>
       <div className="copilot-heading"><div><Sparkle size={20} weight="fill" />FolioMind Agent <Info size={16} /></div></div>
-      <div className="conversation-feed">
+      <div className="conversation-feed" role="log" aria-live="polite" aria-relevant="additions text">
         {messages.map((message) => message.role === "user" ? (
           <div key={message.id} className="user-message-wrap"><div className="user-message">{message.text}</div></div>
         ) : (
@@ -35,7 +35,7 @@ export function CopilotPanel({ standalone = false }) {
         <div ref={feedEnd} />
       </div>
       <div className="composer" aria-busy={running}>
-        <textarea value={draft} maxLength={32000} disabled={running} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={running ? "Pi 正在分析…" : "向 FolioMind 提问或下达分析指令…"} />
+        <textarea aria-label="分析问题" value={draft} maxLength={32000} disabled={running} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={running ? "Pi 正在分析…" : "向 FolioMind 提问或下达分析指令…"} />
         <div><button className="composer-tool" aria-label="添加内容" disabled={running}><Plus size={19} /></button><span className="mode-select">{running ? "分析中" : "深度分析"}</span><button className="send-button" disabled={running || !draft.trim()} onClick={submit} aria-label="发送"><ArrowUp size={19} weight="bold" /></button></div>
       </div>
       <div className="disclaimer">内容由 AI 生成，仅供参考，不构成投资建议。</div>

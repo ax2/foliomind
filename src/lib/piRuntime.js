@@ -1,6 +1,7 @@
 const DEMO_REPLY = "我会按 Search → Inspect → Call 流程调用 QVeris，并把数据来源、截至时间与执行记录一起返回。";
 const DEFAULT_SETTLE_TIMEOUT_MS = 120_000;
 const MAX_PROMPT_CHARS = 32_000;
+const SETTLE_TIMEOUT_CODE = "PI_SETTLE_TIMEOUT";
 
 export function isDesktopRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
@@ -10,6 +11,29 @@ export function textFromFrame(frame) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.filter((part) => part?.type === "text").map((part) => part.text || "").join("");
+}
+
+function runtimeErrorFromFrame(frame) {
+  const message = frame?.message;
+  if (frame?.type !== "message_end" || message?.role !== "assistant") return undefined;
+  if (message.stopReason === "error") return new Error(message.errorMessage || "模型请求失败");
+  if (message.stopReason === "aborted") return new Error("本轮分析已取消");
+  return null;
+}
+
+function rejectedCommandError(response) {
+  if (response?.type === "response" && response.success === false) {
+    return new Error(String(response.error || "Pi 拒绝了本轮分析请求"));
+  }
+  return null;
+}
+
+async function abortActiveRun(invoke) {
+  try {
+    await invoke("runtime_send_rpc", { payload: { type: "abort" }, timeoutMs: 5_000 });
+  } catch {
+    // Preserve the original timeout. Runtime crash/transport events already expose abort failures.
+  }
 }
 
 function normalizedPrompt(message) {
@@ -30,6 +54,7 @@ export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_
   if (status.state === "stopped" || status.state === "crashed") await invoke("runtime_start");
 
   let latestText = "";
+  let terminalError = null;
   const audits = [];
   let finish;
   let fail;
@@ -40,7 +65,12 @@ export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_
     const frame = payload?.frame;
     const nextText = textFromFrame(frame);
     if (nextText) latestText = nextText;
-    if (["agent_end", "agent_settled"].includes(frame?.type)) finish();
+    const frameError = runtimeErrorFromFrame(frame);
+    if (frameError !== undefined) terminalError = frameError;
+    if (frame?.type === "agent_settled") {
+      if (terminalError) fail(terminalError);
+      else finish();
+    }
     if (["crash", "transport_error", "protocol_error"].includes(payload?.kind)) {
       const detail = payload?.status?.detail || (typeof payload?.frame === "string" ? payload.frame : "");
       fail(new Error(detail || "Pi Runtime 在分析过程中异常退出"));
@@ -48,13 +78,24 @@ export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_
   });
   try {
     const response = await invoke("runtime_send_rpc", { payload: { type: "prompt", message: prompt }, timeoutMs: 30_000 });
+    const commandError = rejectedCommandError(response);
+    if (commandError) throw commandError;
     const responseText = textFromFrame(response);
     if (responseText) latestText = responseText;
     const timeoutMs = Math.max(1, Number(settleTimeoutMs) || DEFAULT_SETTLE_TIMEOUT_MS);
     const timedOut = new Promise((_, reject) => {
-      timeout = setTimeout(() => reject(new Error(`Pi 分析等待超过 ${Math.ceil(timeoutMs / 1000)} 秒，请重试`)), timeoutMs);
+      timeout = setTimeout(() => {
+        const error = new Error(`Pi 分析等待超过 ${Math.ceil(timeoutMs / 1000)} 秒，已取消本轮任务，请重试`);
+        error.code = SETTLE_TIMEOUT_CODE;
+        reject(error);
+      }, timeoutMs);
     });
-    await Promise.race([settled, timedOut]);
+    try {
+      await Promise.race([settled, timedOut]);
+    } catch (error) {
+      if (error?.code === SETTLE_TIMEOUT_CODE) await abortActiveRun(invoke);
+      throw error;
+    }
     return { text: latestText || "Pi 已完成本轮分析；详细执行事件已保留在本地审计流中。", mode: "pi-rpc", audits };
   } finally {
     clearTimeout(timeout);
