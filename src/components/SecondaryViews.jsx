@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Bell, CheckCircle, MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import { monitorEvents, skills, watchGroups } from "../data/market.js";
-import { clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, restartRuntime, saveIntegrationSettings, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
+import { applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 
@@ -55,7 +55,7 @@ export function SettingsView() {
   const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); setApiKey(""); setStatus((value) => ({ ...value, credentialConfigured: true })); }, "QVeris API Key 已保存到系统凭据库");
   const clearKey = () => run(async () => { await clearQVerisCredential(); setStatus((value) => ({ ...value, credentialConfigured: false })); }, "QVeris API Key 已清除");
   const syncModels = () => run(async () => { const value = await syncQVerisModels(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "模型目录已从 QVeris 网关同步");
-  const saveAll = () => run(async () => { const value = await saveIntegrationSettings(form); await restartRuntime(); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型");
+  const saveAll = () => run(async () => { const value = await applyIntegrationSettings(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型");
 
   const modelOptions = form.models ?? [];
   const gatewayChanged = normalizeEndpoint(form.modelGatewayBaseUrl) !== normalizeEndpoint(status.settings.modelGatewayBaseUrl);

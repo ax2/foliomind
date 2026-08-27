@@ -22,6 +22,8 @@ WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex`
 
 模型网关地址与 `/models` 目录作为一次原子配置同步：远端请求成功且目录有效后才落盘。网关地址变化时禁止直接复用旧目录；刷新后若原默认模型已下线，Host 会回退到首个可用模型，并在生成 Pi 配置前再次校验所选模型确实属于当前目录。Host 会丢弃非聊天、空 ID、超长或含控制字符的模型项，去除重复 ID，并限制目录条目数与配置文件体积，避免异常上游目录污染 UI 或 Pi 配置。
 
+“保存并应用”由单个 Host command 完成：先校验候选配置并等待旧 Runtime 完全停止，再写入并启动新 Runtime。新配置无法启动时，Host 会恢复旧配置并尝试恢复旧 Runtime，避免前端跨多个 command 编排造成磁盘配置与运行状态分裂。
+
 ## 进程与信任边界
 
 ```text

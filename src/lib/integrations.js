@@ -32,23 +32,7 @@ export async function syncQVerisModels(input) {
   return desktopInvoke("qveris_model_catalog_sync", { input });
 }
 
-export async function saveIntegrationSettings(input) {
+export async function applyIntegrationSettings(input) {
   if (!isDesktopRuntime()) throw new Error("集成设置仅在桌面端保存");
-  return desktopInvoke("integration_settings_save", { input });
-}
-
-export async function restartRuntime() {
-  if (!isDesktopRuntime()) return;
-  const { invoke } = await import("@tauri-apps/api/core");
-  const status = await invoke("runtime_status");
-  if (status.state !== "stopped") {
-    await invoke("runtime_stop");
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const next = await invoke("runtime_status");
-      if (next.state === "stopped") break;
-      if (attempt === 19) throw new Error("Pi Runtime 未能及时停止，请稍后重试");
-    }
-  }
-  await invoke("runtime_start");
+  return desktopInvoke("integration_settings_apply", { input });
 }

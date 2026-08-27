@@ -20,13 +20,14 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const EVENT_NAME: &str = "pi-runtime://event";
 const MAX_JSONL_BYTES: usize = 1024 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+const SETTINGS_APPLY_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -247,12 +248,38 @@ impl PiHost {
         if let Some(executor) = executor {
             executor.stop();
         }
-        child
-            .lock()
-            .map_err(|_| "child lock poisoned")?
-            .kill()
-            .map_err(|e| format!("cannot stop Pi runtime: {e}"))?;
+        let mut process = child.lock().map_err(|_| "child lock poisoned")?;
+        if process
+            .try_wait()
+            .map_err(|error| format!("cannot inspect Pi runtime: {error}"))?
+            .is_none()
+        {
+            process
+                .kill()
+                .map_err(|error| format!("cannot stop Pi runtime: {error}"))?;
+        }
         Ok(self.status())
+    }
+
+    fn stop_and_wait(&self, app: AppHandle, timeout: Duration) -> Result<(), String> {
+        match self.status().state {
+            RuntimeState::Stopped | RuntimeState::Crashed => return Ok(()),
+            RuntimeState::Starting => {
+                return Err("Pi runtime is still starting; retry settings apply shortly".into())
+            }
+            RuntimeState::Running => {
+                self.stop(app)?;
+            }
+            RuntimeState::Stopping => {}
+        }
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if self.status().state == RuntimeState::Stopped {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        Err("Pi runtime did not stop in time".into())
     }
 
     fn shutdown(&self) {
@@ -681,12 +708,11 @@ fn integration_status(
     })
 }
 
-#[tauri::command]
-fn integration_settings_save(
-    app: AppHandle,
+fn settings_from_input(
+    current: &IntegrationSettings,
     input: SettingsInput,
 ) -> Result<IntegrationSettings, String> {
-    let mut settings = config::load(&app)?;
+    let mut settings = current.clone();
     let capability_base_url = input
         .capability_base_url
         .trim()
@@ -703,9 +729,62 @@ fn integration_settings_save(
     settings.capability_base_url = capability_base_url;
     settings.model_gateway_base_url = model_gateway_base_url;
     settings.model_id = input.model_id.trim().to_owned();
+    config::validate(&settings)?;
     config::validate_model_selection(&settings)?;
-    config::save(&app, &settings)?;
     Ok(settings)
+}
+
+fn apply_integration_settings(
+    host: &PiHost,
+    app: AppHandle,
+    input: SettingsInput,
+) -> Result<IntegrationSettings, String> {
+    let previous = config::load(&app)?;
+    let settings = settings_from_input(&previous, input)?;
+    host.stop_and_wait(app.clone(), SETTINGS_APPLY_STOP_TIMEOUT)?;
+    if let Err(error) = config::save(&app, &settings) {
+        if let Err(restore) = config::save(&app, &previous) {
+            return Err(format!(
+                "cannot save integration settings: {error}; previous settings recovery failed: {restore}"
+            ));
+        }
+        return Err(match host.start(app) {
+            Ok(_) => {
+                format!("cannot save integration settings: {error}; previous Runtime restored")
+            }
+            Err(recovery) => format!(
+                "cannot save integration settings: {error}; previous settings restored, but Runtime recovery failed: {recovery}"
+            ),
+        });
+    }
+    if let Err(error) = host.start(app.clone()) {
+        if let Err(restore) = config::save(&app, &previous) {
+            return Err(format!(
+                "new settings failed to apply: {error}; previous settings recovery failed: {restore}"
+            ));
+        }
+        return Err(match host.start(app) {
+            Ok(_) => format!(
+                "new settings failed to apply: {error}; previous settings and Runtime restored"
+            ),
+            Err(recovery) => format!(
+                "new settings failed to apply: {error}; previous settings restored, but Runtime recovery failed: {recovery}"
+            ),
+        });
+    }
+    Ok(settings)
+}
+
+#[tauri::command]
+async fn integration_settings_apply(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+    input: SettingsInput,
+) -> Result<IntegrationSettings, String> {
+    let host = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || apply_integration_settings(&host, app, input))
+        .await
+        .map_err(|error| format!("settings apply task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -757,7 +836,7 @@ fn main() {
             qveris_credential_save,
             qveris_credential_clear,
             integration_status,
-            integration_settings_save,
+            integration_settings_apply,
             qveris_model_catalog_sync
         ])
         .build(tauri::generate_context!())
@@ -816,6 +895,36 @@ mod tests {
             state_after_process_exit(RuntimeState::Stopped),
             RuntimeState::Stopped
         );
+    }
+
+    #[test]
+    fn settings_input_is_normalized_and_must_keep_the_synced_gateway() {
+        let current = IntegrationSettings {
+            model_id: "model-a".into(),
+            models: vec![serde_json::json!({"id":"model-a"})],
+            ..IntegrationSettings::default()
+        };
+        let normalized = settings_from_input(
+            &current,
+            SettingsInput {
+                capability_base_url: " https://qveris.ai/api/v1/ ".into(),
+                model_gateway_base_url: " https://aigateway.qveris.ai/v1/ ".into(),
+                model_id: " model-a ".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(normalized.capability_base_url, "https://qveris.ai/api/v1");
+        assert_eq!(normalized.model_id, "model-a");
+
+        assert!(settings_from_input(
+            &current,
+            SettingsInput {
+                capability_base_url: "https://qveris.ai/api/v1".into(),
+                model_gateway_base_url: "https://other.example.com/v1".into(),
+                model_id: "model-a".into(),
+            },
+        )
+        .is_err());
     }
 
     #[test]
