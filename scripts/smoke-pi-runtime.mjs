@@ -4,6 +4,26 @@ import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+function waitForExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolveExit) => {
+    const finish = () => { clearTimeout(timer); resolveExit(true); };
+    const timer = setTimeout(() => { child.off("exit", finish); resolveExit(false); }, timeoutMs);
+    child.once("exit", finish);
+    if (child.exitCode !== null || child.signalCode !== null) finish();
+  });
+}
+
+async function terminateChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = waitForExit(child, 2_000);
+  child.kill();
+  if (await exited) return;
+  const forcedExit = waitForExit(child, 2_000);
+  child.kill("SIGKILL");
+  await forcedExit;
+}
+
 const root = resolve(import.meta.dirname, "..");
 const binary = join(root, "src-tauri/resources/pi", process.platform === "win32" ? "pi.exe" : "pi");
 const extension = join(root, "packages/qveris-bridge/index.mjs");
@@ -27,13 +47,23 @@ const child = spawn(binary, ["--extension", extension, "--skill", skill, "--mode
 });
 
 const lines = createInterface({ input: child.stdout });
-const timeout = setTimeout(() => child.kill(), 10_000);
+const stderr = [];
+let stderrLength = 0;
+child.stderr.setEncoding("utf8");
+child.stderr.on("data", (chunk) => {
+  if (stderrLength >= 8_192) return;
+  const bounded = chunk.slice(0, 8_192 - stderrLength);
+  stderr.push(bounded);
+  stderrLength += bounded.length;
+});
+let timedOut = false;
+const timeout = setTimeout(() => { timedOut = true; child.kill(); }, 10_000);
 child.stdin.write(`${JSON.stringify({ id: "smoke-1", type: "get_commands" })}\n`);
 child.stdin.write(`${JSON.stringify({ id: "smoke-2", type: "get_state" })}\n`);
 
+let commandReady = false;
+let modelReady = false;
 try {
-  let commandReady = false;
-  let modelReady = false;
   for await (const line of lines) {
     const frame = JSON.parse(line);
     if (frame.id !== "smoke-1" && frame.id !== "smoke-2") continue;
@@ -49,8 +79,14 @@ try {
     }
     if (commandReady && modelReady) { console.log("Pi RPC loaded the QVeris bridge, Skill flags, and managed model config"); break; }
   }
+  if (!commandReady || !modelReady) {
+    const reason = timedOut ? "timed out" : `exited before completing (code ${child.exitCode}, signal ${child.signalCode})`;
+    const detail = stderr.join("").trim();
+    throw new Error(`Pi smoke test ${reason}${detail ? `: ${detail}` : ""}`);
+  }
 } finally {
   clearTimeout(timeout);
-  child.kill();
-  rmSync(agentDir, { recursive: true, force: true });
+  lines.close();
+  await terminateChild(child);
+  rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

@@ -466,10 +466,7 @@ fn normalize_model_catalog(values: &[Value]) -> Result<Vec<Value>, String> {
 
 fn normalize_model(value: &Value) -> Option<Value> {
     let id = value.get("id")?.as_str()?.trim();
-    if id.is_empty()
-        || id.len() > config::MAX_MODEL_ID_BYTES
-        || id.chars().any(char::is_control)
-    {
+    if id.is_empty() || id.len() > config::MAX_MODEL_ID_BYTES || id.chars().any(char::is_control) {
         return None;
     }
     let capabilities = value
