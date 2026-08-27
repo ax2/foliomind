@@ -66,6 +66,7 @@ pub fn write_pi_config(
     local_base_url: &str,
     shell_path: Option<&Path>,
 ) -> Result<PathBuf, String> {
+    validate_model_selection(settings)?;
     let agent_dir = pi_agent_dir(app)?;
     fs::create_dir_all(&agent_dir)
         .map_err(|error| format!("cannot create Pi config directory: {error}"))?;
@@ -128,6 +129,36 @@ pub fn validate(settings: &IntegrationSettings) -> Result<(), String> {
         return Err("model catalog is too large".into());
     }
     Ok(())
+}
+
+pub fn reconcile_model_id(current: &str, models: &[Value]) -> String {
+    let current = current.trim();
+    if models
+        .iter()
+        .any(|model| model.get("id").and_then(Value::as_str) == Some(current))
+    {
+        return current.to_owned();
+    }
+    models
+        .first()
+        .and_then(|model| model.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+pub fn validate_model_selection(settings: &IntegrationSettings) -> Result<(), String> {
+    if settings.model_id.is_empty() {
+        return Ok(());
+    }
+    if settings
+        .models
+        .iter()
+        .any(|model| model.get("id").and_then(Value::as_str) == Some(settings.model_id.as_str()))
+    {
+        return Ok(());
+    }
+    Err("selected model is not available; sync the QVeris model catalog".into())
 }
 
 fn validate_url(value: &str, label: &str) -> Result<(), String> {
@@ -204,5 +235,28 @@ mod tests {
     fn rejects_endpoint_query_and_fragment_components() {
         assert!(validate_url("https://api.example.com/v1?token=value", "endpoint").is_err());
         assert!(validate_url("https://api.example.com/v1#fragment", "endpoint").is_err());
+    }
+
+    #[test]
+    fn keeps_an_available_model_and_falls_back_when_it_disappears() {
+        let models = vec![json!({"id":"model-a"}), json!({"id":"model-b"})];
+        assert_eq!(reconcile_model_id("model-b", &models), "model-b");
+        assert_eq!(reconcile_model_id("retired-model", &models), "model-a");
+        assert_eq!(reconcile_model_id("model-a", &[]), "");
+    }
+
+    #[test]
+    fn rejects_a_selected_model_outside_the_synced_catalog() {
+        let available = IntegrationSettings {
+            model_id: "model-a".into(),
+            models: vec![json!({"id":"model-a"})],
+            ..IntegrationSettings::default()
+        };
+        assert!(validate_model_selection(&available).is_ok());
+        let stale = IntegrationSettings {
+            model_id: "retired-model".into(),
+            ..available
+        };
+        assert!(validate_model_selection(&stale).is_err());
     }
 }

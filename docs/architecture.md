@@ -20,6 +20,8 @@ WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex`
 
 应用收到 Tauri `ExitRequested` 或 `Exit` 事件时会幂等关闭本轮回环代理、拒绝尚未完成的 RPC，并显式终止和回收 Pi 子进程，避免桌面窗口退出后遗留孤儿进程或短期能力端口。
 
+模型网关地址与 `/models` 目录作为一次原子配置同步：远端请求成功且目录有效后才落盘。网关地址变化时禁止直接复用旧目录；刷新后若原默认模型已下线，Host 会回退到首个可用模型，并在生成 Pi 配置前再次校验所选模型确实属于当前目录。
+
 ## 进程与信任边界
 
 ```text

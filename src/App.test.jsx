@@ -80,6 +80,15 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("未配置")).toBeInTheDocument();
   });
 
+  it("requires a fresh model sync after changing the gateway", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const gateway = await screen.findByLabelText("Gateway Base URL");
+    fireEvent.change(gateway, { target: { value: "https://gateway.example.com/v1" } });
+    expect(screen.getByText("网关地址已变化，请先同步模型")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存并应用" })).toBeDisabled();
+  });
+
   it("routes a live-data request through the agent conversation", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "用 QVeris 获取实时数据" }));

@@ -27,9 +27,9 @@ export async function clearQVerisCredential() {
   return desktopInvoke("qveris_credential_clear");
 }
 
-export async function syncQVerisModels() {
+export async function syncQVerisModels(input) {
   if (!isDesktopRuntime()) throw new Error("模型目录同步仅在桌面端可用");
-  return desktopInvoke("qveris_model_catalog_sync");
+  return desktopInvoke("qveris_model_catalog_sync", { input });
 }
 
 export async function saveIntegrationSettings(input) {

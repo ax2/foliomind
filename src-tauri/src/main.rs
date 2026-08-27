@@ -687,12 +687,28 @@ fn integration_settings_save(
     input: SettingsInput,
 ) -> Result<IntegrationSettings, String> {
     let mut settings = config::load(&app)?;
-    settings.capability_base_url = input.capability_base_url.trim_end_matches('/').to_owned();
-    settings.model_gateway_base_url = input
-        .model_gateway_base_url
+    let capability_base_url = input
+        .capability_base_url
+        .trim()
         .trim_end_matches('/')
         .to_owned();
+    let model_gateway_base_url = input
+        .model_gateway_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_owned();
+    if model_gateway_base_url
+        != settings
+            .model_gateway_base_url
+            .trim()
+            .trim_end_matches('/')
+    {
+        return Err("模型网关地址已更改，请先同步模型目录".into());
+    }
+    settings.capability_base_url = capability_base_url;
+    settings.model_gateway_base_url = model_gateway_base_url;
     settings.model_id = input.model_id.trim().to_owned();
+    config::validate_model_selection(&settings)?;
     config::save(&app, &settings)?;
     Ok(settings)
 }
@@ -701,12 +717,25 @@ fn integration_settings_save(
 async fn qveris_model_catalog_sync(
     host: State<'_, PiHost>,
     app: AppHandle,
+    input: SettingsInput,
 ) -> Result<IntegrationSettings, String> {
     let key = host
         .credentials
         .read_qveris_key()?
         .ok_or("QVeris credential is not configured")?;
     let mut settings = config::load(&app)?;
+    settings.capability_base_url = input
+        .capability_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_owned();
+    settings.model_gateway_base_url = input
+        .model_gateway_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_owned();
+    settings.model_id = input.model_id.trim().to_owned();
+    config::validate(&settings)?;
     let base_url = settings.model_gateway_base_url.clone();
     let models = tauri::async_runtime::spawn_blocking(move || {
         executor::fetch_model_catalog(&key, &base_url)
@@ -714,15 +743,8 @@ async fn qveris_model_catalog_sync(
     .await
     .map_err(|error| format!("model catalog task failed: {error}"))??;
     settings.models = models;
-    if settings.model_id.is_empty() {
-        settings.model_id = settings
-            .models
-            .first()
-            .and_then(|model| model.get("id"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-    }
+    settings.model_id = config::reconcile_model_id(&settings.model_id, &settings.models);
+    config::validate_model_selection(&settings)?;
     config::save(&app, &settings)?;
     Ok(settings)
 }
