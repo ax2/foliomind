@@ -806,11 +806,7 @@ mod tests {
         let mut command = process_command::new_command(
             std::env::current_exe().expect("test executable should resolve"),
         );
-        command.args([
-            "tests::shutdown_child_fixture",
-            "--ignored",
-            "--exact",
-        ]);
+        command.args(["tests::shutdown_child_fixture", "--ignored", "--exact"]);
         let child = Arc::new(Mutex::new(
             command
                 .stdin(Stdio::null())
@@ -837,7 +833,10 @@ mod tests {
         host.shutdown();
 
         assert_eq!(host.status(), RuntimeStatus::default());
-        assert!(response.recv_timeout(Duration::from_secs(1)).unwrap().is_err());
+        assert!(response
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .is_err());
         assert!(child.lock().unwrap().try_wait().unwrap().is_some());
     }
 
