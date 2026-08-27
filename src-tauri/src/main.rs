@@ -66,12 +66,19 @@ struct RuntimeEvent {
     frame: Option<Value>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct StagedModelCatalog {
+    model_gateway_base_url: String,
+    models: Vec<Value>,
+}
+
 struct Inner {
     child: Option<Arc<Mutex<Child>>>,
     writer: Option<mpsc::Sender<Value>>,
     pending: HashMap<String, mpsc::Sender<Result<Value, String>>>,
     status: RuntimeStatus,
     executor: Option<RunExecutor>,
+    staged_model_catalog: Option<StagedModelCatalog>,
 }
 
 #[derive(Clone)]
@@ -90,6 +97,7 @@ impl Default for PiHost {
                 pending: HashMap::new(),
                 status: RuntimeStatus::default(),
                 executor: None,
+                staged_model_catalog: None,
             })),
             next_id: Arc::new(AtomicU64::new(1)),
             credentials: Arc::new(OsCredentialStore),
@@ -104,6 +112,31 @@ impl PiHost {
             .expect("host lock poisoned")
             .status
             .clone()
+    }
+
+    fn staged_model_catalog(&self) -> Result<Option<StagedModelCatalog>, String> {
+        Ok(self
+            .inner
+            .lock()
+            .map_err(|_| "host lock poisoned")?
+            .staged_model_catalog
+            .clone())
+    }
+
+    fn stage_model_catalog(&self, catalog: StagedModelCatalog) -> Result<(), String> {
+        self.inner
+            .lock()
+            .map_err(|_| "host lock poisoned")?
+            .staged_model_catalog = Some(catalog);
+        Ok(())
+    }
+
+    fn discard_staged_model_catalog(&self, expected: Option<&StagedModelCatalog>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if expected.is_none() || inner.staged_model_catalog.as_ref() == expected {
+                inner.staged_model_catalog = None;
+            }
+        }
     }
 
     fn publish(&self, app: &AppHandle, kind: &str, frame: Option<Value>) {
@@ -778,11 +811,15 @@ fn qveris_credential_configured(host: State<'_, PiHost>) -> Result<bool, String>
 }
 #[tauri::command]
 fn qveris_credential_save(host: State<'_, PiHost>, api_key: String) -> Result<(), String> {
-    host.credentials.write_qveris_key(&api_key)
+    host.credentials.write_qveris_key(&api_key)?;
+    host.discard_staged_model_catalog(None);
+    Ok(())
 }
 #[tauri::command]
 fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> {
-    host.credentials.delete_qveris_key()
+    host.credentials.delete_qveris_key()?;
+    host.discard_staged_model_catalog(None);
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -813,6 +850,7 @@ fn integration_status(
 
 fn settings_from_input(
     current: &IntegrationSettings,
+    staged: Option<&StagedModelCatalog>,
     input: SettingsInput,
 ) -> Result<IntegrationSettings, String> {
     let mut settings = current.clone();
@@ -826,7 +864,12 @@ fn settings_from_input(
         .trim()
         .trim_end_matches('/')
         .to_owned();
-    if model_gateway_base_url != settings.model_gateway_base_url.trim().trim_end_matches('/') {
+    if let Some(catalog) =
+        staged.filter(|catalog| catalog.model_gateway_base_url == model_gateway_base_url)
+    {
+        settings.models.clone_from(&catalog.models);
+    } else if model_gateway_base_url != settings.model_gateway_base_url.trim().trim_end_matches('/')
+    {
         return Err("模型网关地址已更改，请先同步模型目录".into());
     }
     settings.capability_base_url = capability_base_url;
@@ -843,7 +886,10 @@ fn apply_integration_settings(
     input: SettingsInput,
 ) -> Result<IntegrationSettings, String> {
     let previous = config::load(&app)?;
-    let settings = settings_from_input(&previous, input)?;
+    let staged = host.staged_model_catalog()?;
+    let settings = settings_from_input(&previous, staged.as_ref(), input)?;
+    let used_staged =
+        staged.filter(|catalog| catalog.model_gateway_base_url == settings.model_gateway_base_url);
     host.stop_and_wait(app.clone(), SETTINGS_APPLY_STOP_TIMEOUT)?;
     if let Err(error) = config::save(&app, &settings) {
         if let Err(restore) = config::save(&app, &previous) {
@@ -875,6 +921,7 @@ fn apply_integration_settings(
             ),
         });
     }
+    host.discard_staged_model_catalog(used_staged.as_ref());
     Ok(settings)
 }
 
@@ -922,7 +969,10 @@ async fn qveris_model_catalog_sync(
     settings.models = models;
     settings.model_id = config::reconcile_model_id(&settings.model_id, &settings.models);
     config::validate_model_selection(&settings)?;
-    config::save(&app, &settings)?;
+    host.stage_model_catalog(StagedModelCatalog {
+        model_gateway_base_url: settings.model_gateway_base_url.clone(),
+        models: settings.models.clone(),
+    })?;
     Ok(settings)
 }
 
@@ -1044,6 +1094,7 @@ mod tests {
         };
         let normalized = settings_from_input(
             &current,
+            None,
             SettingsInput {
                 capability_base_url: " https://qveris.ai/api/v1/ ".into(),
                 model_gateway_base_url: " https://aigateway.qveris.ai/v1/ ".into(),
@@ -1056,6 +1107,7 @@ mod tests {
 
         assert!(settings_from_input(
             &current,
+            None,
             SettingsInput {
                 capability_base_url: "https://qveris.ai/api/v1".into(),
                 model_gateway_base_url: "https://other.example.com/v1".into(),
@@ -1063,6 +1115,75 @@ mod tests {
             },
         )
         .is_err());
+    }
+
+    #[test]
+    fn settings_input_accepts_only_the_matching_staged_catalog() {
+        let current = IntegrationSettings {
+            model_id: "model-a".into(),
+            models: vec![serde_json::json!({"id":"model-a"})],
+            ..IntegrationSettings::default()
+        };
+        let staged = StagedModelCatalog {
+            model_gateway_base_url: "https://models.example.com/v1".into(),
+            models: vec![serde_json::json!({"id":"model-b"})],
+        };
+        let input = || SettingsInput {
+            capability_base_url: "https://qveris.ai/api/v1".into(),
+            model_gateway_base_url: "https://models.example.com/v1".into(),
+            model_id: "model-b".into(),
+        };
+
+        let prepared = settings_from_input(&current, Some(&staged), input()).unwrap();
+        assert_eq!(
+            prepared.model_gateway_base_url,
+            "https://models.example.com/v1"
+        );
+        assert_eq!(prepared.models, staged.models);
+        assert_eq!(prepared.model_id, "model-b");
+
+        assert!(settings_from_input(&current, None, input()).is_err());
+        let wrong_staged = StagedModelCatalog {
+            model_gateway_base_url: "https://other.example.com/v1".into(),
+            models: vec![serde_json::json!({"id":"model-b"})],
+        };
+        assert!(settings_from_input(&current, Some(&wrong_staged), input()).is_err());
+
+        let refreshed = StagedModelCatalog {
+            model_gateway_base_url: current.model_gateway_base_url.clone(),
+            models: vec![serde_json::json!({"id":"model-c"})],
+        };
+        let refreshed_settings = settings_from_input(
+            &current,
+            Some(&refreshed),
+            SettingsInput {
+                capability_base_url: current.capability_base_url.clone(),
+                model_gateway_base_url: current.model_gateway_base_url.clone(),
+                model_id: "model-c".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(refreshed_settings.models, refreshed.models);
+    }
+
+    #[test]
+    fn staged_catalog_is_cleared_only_when_the_applied_candidate_matches() {
+        let host = PiHost::default();
+        let staged = StagedModelCatalog {
+            model_gateway_base_url: "https://models.example.com/v1".into(),
+            models: vec![serde_json::json!({"id":"model-a"})],
+        };
+        let newer = StagedModelCatalog {
+            model_gateway_base_url: "https://newer.example.com/v1".into(),
+            models: vec![serde_json::json!({"id":"model-b"})],
+        };
+        host.stage_model_catalog(newer.clone()).unwrap();
+
+        host.discard_staged_model_catalog(Some(&staged));
+        assert_eq!(host.staged_model_catalog().unwrap(), Some(newer.clone()));
+
+        host.discard_staged_model_catalog(Some(&newer));
+        assert_eq!(host.staged_model_catalog().unwrap(), None);
     }
 
     #[test]
