@@ -197,12 +197,10 @@ fn route_request(
 ) -> Result<Value, (u16, String)> {
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/api/integration/status") => {
+            let key = host.credentials.read_qveris_key().map_err(internal_error)?;
             let status = IntegrationStatus {
-                credential_configured: host
-                    .credentials
-                    .read_qveris_key()
-                    .map_err(internal_error)?
-                    .is_some(),
+                key_prefix: super::api_key_prefix(key.clone()),
+                credential_configured: key.is_some(),
                 settings: config::load(app).map_err(internal_error)?,
             };
             serde_json::to_value(status).map_err(internal_error)

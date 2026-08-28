@@ -8,6 +8,12 @@ export const defaultIntegrationSettings = {
   models: [],
 };
 
+export function apiKeyPrefix(value) {
+  const key = String(value || "").trim();
+  if (!key) return "";
+  return `${key.slice(0, 8)}${key.length > 8 ? "…" : ""}`;
+}
+
 async function desktopInvoke(command, args) {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke(command, args);

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, BellRinging, CheckCircle, MagnifyingGlass, Play, Plus, Trash, X } from "@phosphor-icons/react";
-import { monitorEvents, skills, watchGroups } from "../data/market.js";
+import { monitorEvents, skills } from "../data/market.js";
 import { monitorStrategies, strategyFor } from "../data/monitorStrategies.js";
-import { applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
+import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 
@@ -12,7 +12,10 @@ const errorMessage = (error) => error instanceof Error ? error.message : String(
 export function MarketView() {
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
-  return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><span>行情由 Pi Agent 通过 QVeris 查询</span></header><div className="index-board">{["上证指数", "深证成指", "创业板指", "恒生指数", "标普 500", "纳斯达克"].map((name, index) => <article key={name}><span>{name}</span><strong>{[3856.12, 12844.7, 2752.08, 25862.53, 6501.86, 21713.14][index].toLocaleString()}</strong><small className={index < 3 ? "up" : "down"}>{index < 3 ? "+0.68%" : "-0.41%"}</small></article>)}</div><section className="market-table"><h2>我的自选</h2><div className="table-head"><span>名称 / 代码</span><span>最新价</span><span>涨跌幅</span><span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol] || item; return <div className="table-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span>{Number.isFinite(quote.price) ? quote.price.toFixed(2) : "待查询"}</span><span className={quote.change >= 0 ? "up" : "down"}>{Number.isFinite(quote.change) ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : "—"}</span><span>{item.market}</span></div>; })}</section></div>;
+  const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const returnedQuotes = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price));
+  return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><span>{realDataMode ? "仅显示 QVeris 已返回的真实数据" : "配置模型后显示真实行情"}</span></header><div className="index-board">{realDataMode && returnedQuotes.length ? returnedQuotes.map((item) => { const quote = liveQuotes[item.symbol]; return <article key={item.symbol}><span>{item.name} <small>{item.symbol}</small></span><strong>{quote.price.toFixed(2)}</strong><small className={quote.change >= 0 ? "up" : "down"}>{Number.isFinite(quote.change) ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : "—"}</small><em>{quote.source || "QVeris"}{quote.asOf ? ` · ${quote.asOf}` : ""}</em></article>; }) : <div className="empty-state"><strong>{realDataMode ? "暂无已查询的市场数据" : "行情预览"}</strong><p>{realDataMode ? "请在对话中查询指数或标的行情，返回后将显示在这里。" : "当前未配置真实模型，预览数据不会用于投资判断。"}</p></div>}</div><section className="market-table"><h2>我的自选</h2><div className="table-head"><span>名称 / 代码</span><span>最新价</span><span>涨跌幅</span><span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol]; return <div className="table-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span>{Number.isFinite(quote?.price) ? quote.price.toFixed(2) : "—"}</span><span className={quote?.change >= 0 ? "up" : "down"}>{Number.isFinite(quote?.change) ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : "—"}</span><span>{item.market}</span></div>; })}</section></div>;
 }
 
 export function MonitorView() {
@@ -25,6 +28,8 @@ export function MonitorView() {
   const monitorBusy = useLabStore((state) => state.monitorBusy);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const sendMessage = useLabStore((state) => state.sendMessage);
+  const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ symbol: watchlist[0]?.symbol || "600519", strategyId: monitorStrategies[0].id, threshold: monitorStrategies[0].defaultThreshold, intervalSeconds: 300 });
   useEffect(() => { if (!watchlist.some((item) => item.symbol === form.symbol) && watchlist[0]) setForm((value) => ({ ...value, symbol: watchlist[0].symbol })); }, [watchlist, form.symbol]);
@@ -34,7 +39,7 @@ export function MonitorView() {
     setActiveView("chat");
     void sendMessage(`请把以下界面示例信号作为待核实线索，不要直接当作事实：${event.title}——${event.detail}。请使用 qveris-finance-research Skill 按 Search → Inspect → Call 查询最新真实数据，给出来源、截至时间，并判断该信号是否成立。`);
   };
-  return <div className="secondary-page"><header><div><h1>个股盯盘</h1><p>Pi Agent 按策略定时检查真实 QVeris 数据，并在消息中心提醒</p></div><button className="primary-action" onClick={() => setDialogOpen(true)}><Plus size={17} />新建盯盘</button></header><section className="strategy-strip"><strong>内置策略</strong>{monitorStrategies.map((strategy) => <span key={strategy.id}>{strategy.name}</span>)}</section><section className="rule-list"><h2>运行中的规则</h2>{rules.map((rule) => { const strategy = strategyFor(rule.strategyId); return <article key={rule.id}><Bell size={20} /><div><strong>{strategy.name}</strong><small>{rule.symbol} · 阈值 {rule.threshold}{strategy.unit} · {rule.intervalSeconds} 秒检查</small></div><button className="rule-run" disabled={monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id); }} aria-label={`立即检查${rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => { void deleteRule(rule.id); }}><Trash size={15} /></button></article>; })}</section><section className="event-list"><h2>示例信号（点击后会进入真实核实对话）</h2>{monitorEvents.map((event) => <article key={event.id}><time>{event.time}</time><span className="timeline-dot" /><div><strong>{event.title}</strong><p>{event.detail}</p></div><button onClick={() => analyzeEvent(event)}>核实并分析</button></article>)}</section>{dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘策略</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">默认策略包含成交量异常监控、价格异动和公告与舆情。</p><label>标的<select value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label><label>策略<select value={form.strategyId} onChange={(event) => { const next = strategyFor(event.target.value); setForm((value) => ({ ...value, strategyId: next.id, threshold: next.defaultThreshold })); }}>{monitorStrategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name} · {strategy.description}</option>)}</select></label><label>阈值<input type="number" min="0" step="0.1" value={form.threshold} onChange={(event) => setForm((value) => ({ ...value, threshold: event.target.value }))} /><small>{selectedStrategy.unit}</small></label><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}</div>;
+  return <div className="secondary-page"><header><div><h1>个股盯盘</h1><p>Pi Agent 按策略定时检查真实 QVeris 数据，并在消息中心提醒</p></div><button className="primary-action" disabled={!realDataMode} onClick={() => setDialogOpen(true)}><Plus size={17} />新建盯盘</button></header>{!realDataMode && <div className="settings-notice">请先配置 API Key、同步模型并保存，盯盘只接受真实数据。</div>}<section className="strategy-strip"><strong>内置策略</strong>{monitorStrategies.map((strategy) => <span key={strategy.id}>{strategy.name}</span>)}</section><section className="rule-list"><h2>运行中的规则</h2>{rules.map((rule) => { const strategy = strategyFor(rule.strategyId); return <article key={rule.id}><Bell size={20} /><div><strong>{strategy.name}</strong><small>{rule.symbol} · 阈值 {rule.threshold}{strategy.unit} · {rule.intervalSeconds} 秒检查</small></div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id); }} aria-label={`立即检查${rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => { void deleteRule(rule.id); }}><Trash size={15} /></button></article>; })}</section>{realDataMode ? <p className="security-note">没有已返回的真实信号。运行规则后，结果将出现在消息中心。</p> : <section className="event-list"><h2>预览线索（不会作为事实）</h2>{monitorEvents.map((event) => <article key={event.id}><time>{event.time}</time><span className="timeline-dot" /><div><strong>{event.title}</strong><p>{event.detail}</p></div><button onClick={() => analyzeEvent(event)}>核实并分析</button></article>)}</section>}{dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘策略</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">默认策略包含成交量异常监控、价格异动和公告与舆情。</p><label>标的<select value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label><label>策略<select value={form.strategyId} onChange={(event) => { const next = strategyFor(event.target.value); setForm((value) => ({ ...value, strategyId: next.id, threshold: next.defaultThreshold })); }}>{monitorStrategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name} · {strategy.description}</option>)}</select></label><label>阈值<input type="number" min="0" step="0.1" value={form.threshold} onChange={(event) => setForm((value) => ({ ...value, threshold: event.target.value }))} /><small>{selectedStrategy.unit}</small></label><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}</div>;
 }
 
 export function NotificationsView() {
@@ -60,6 +65,10 @@ export function SettingsView() {
   const beginRuntimeConfiguration = useLabStore((state) => state.beginRuntimeConfiguration);
   const endRuntimeConfiguration = useLabStore((state) => state.endRuntimeConfiguration);
   const setSettingsNotice = useLabStore((state) => state.setSettingsNotice);
+  const setIntegrationStatus = useLabStore((state) => state.setIntegrationStatus);
+  const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const integrationStatusLoading = useLabStore((state) => state.integrationStatusLoading);
+  const integrationStatusError = useLabStore((state) => state.integrationStatusError);
   const [status, setStatus] = useState({ credentialConfigured: false, settings: defaultIntegrationSettings, demo: false });
   const [form, setForm] = useState(defaultIntegrationSettings);
   const [apiKey, setApiKey] = useState("");
@@ -75,7 +84,7 @@ export function SettingsView() {
     try {
       const value = await loadIntegrationStatus();
       if (request !== loadRequest.current) return;
-      setStatus(value); setForm(value.settings); setLoadState("ready");
+      setStatus(value); setIntegrationStatus(value); setForm(value.settings); setLoadState("ready");
     } catch (error) {
       if (request !== loadRequest.current) return;
       setLoadError(errorMessage(error)); setLoadState("error");
@@ -83,9 +92,24 @@ export function SettingsView() {
   }, []);
 
   useEffect(() => {
+    if (integrationStatusLoading) {
+      setLoadState("loading");
+      return undefined;
+    }
+    if (integrationStatusError) {
+      setLoadError(integrationStatusError);
+      setLoadState("error");
+      return undefined;
+    }
+    if (integrationStatus) {
+      setStatus(integrationStatus);
+      setForm(integrationStatus.settings || defaultIntegrationSettings);
+      setLoadState("ready");
+      return undefined;
+    }
     void loadSettings();
     return () => { loadRequest.current += 1; };
-  }, [loadSettings]);
+  }, [integrationStatus, integrationStatusError, integrationStatusLoading, loadSettings]);
 
   const run = async (action, success, persistNotice = false) => {
     setBusy(true); setNotice("");
@@ -101,9 +125,9 @@ export function SettingsView() {
     }
     finally { setBusy(false); }
   };
-  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); setApiKey(""); setStatus((value) => ({ ...value, credentialConfigured: true })); }, "QVeris API Key 已保存到系统凭据库");
-  const clearKey = () => run(async () => { await clearQVerisCredential(); setStatus((value) => ({ ...value, credentialConfigured: false })); }, "QVeris API Key 已清除");
-  const syncModels = () => run(async () => { const value = await syncQVerisModels(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "模型目录已从 QVeris 网关同步");
+  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); const next = { ...status, credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next); }, "QVeris API Key 已保存");
+  const clearKey = () => run(async () => { await clearQVerisCredential(); const next = { ...status, credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next); }, "QVeris API Key 已清除");
+  const syncModels = () => run(async () => { const value = await syncQVerisModels(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); return value; }, "模型目录已从 QVeris 网关同步");
   const saveAll = async () => {
     if (!beginRuntimeConfiguration()) {
       const message = "当前分析尚未结束，请等待完成或停止后再应用设置";
@@ -112,7 +136,7 @@ export function SettingsView() {
       return;
     }
     try {
-      await run(async () => { const value = await applyIntegrationSettings(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型", true);
+      await run(async () => { const value = await applyIntegrationSettings(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); return value; }, "设置已保存，Pi Runtime 已应用新模型", true);
     } finally {
       endRuntimeConfiguration();
     }
@@ -126,7 +150,7 @@ export function SettingsView() {
   const formDisabled = busy || runtimeConfiguring || runtimeCancelPending || loadState !== "ready";
   const localDevHost = status.environment === "local-host";
   const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : localDevHost ? "本地开发 Host" : "桌面端";
-  const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? "已配置" : "未配置";
+  const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? `已配置 · ${status.keyPrefix || "前缀未知"}` : "未配置";
   return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy || runtimeConfiguring}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>
     {loadError && <div className="settings-notice error" role="alert"><span>设置加载失败：{loadError}</span><button className="secondary-button" onClick={() => { void loadSettings(); }}>重试加载</button></div>}
     <section className="settings-card"><div className="settings-card-title"><div><strong>QVeris 数据与模型凭证</strong><small>{localDevHost ? "本地开发 Host 将密钥保存到用户配置目录（权限 0600）；浏览器不保存长期密钥。" : "同一个 API Key 可用于工具 API 与模型网关；密钥只保存在系统凭据库。"}</small></div><span className={loadState === "ready" && status.credentialConfigured ? "status-pill ok" : "status-pill"}>{credentialLabel}</span></div><div className="settings-inline"><input type="password" autoComplete="new-password" value={apiKey} disabled={formDisabled} onChange={(event) => setApiKey(event.target.value)} placeholder="粘贴 QVeris API Key" aria-label="QVeris API Key" /><button disabled={formDisabled || !apiKey.trim()} onClick={saveKey}>保存密钥</button>{status.credentialConfigured && <button className="secondary-button" disabled={formDisabled} onClick={clearKey}>清除</button>}</div></section>
