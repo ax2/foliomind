@@ -7,6 +7,8 @@ import { useLabStore } from "./store/useLabStore.js";
 
 export function App() {
   const activeView = useLabStore((state) => state.activeView);
+  const settingsNotice = useLabStore((state) => state.settingsNotice);
+  const clearSettingsNotice = useLabStore((state) => state.clearSettingsNotice);
   const renderView = () => {
     if (activeView === "market") return <MarketView />;
     if (activeView === "monitor") return <MonitorView />;
@@ -15,5 +17,10 @@ export function App() {
     if (activeView === "settings") return <SettingsView />;
     return <><WatchlistSidebar /><StockWorkspace /><CopilotPanel /></>;
   };
-  return <div className={`app-shell view-${activeView}`}><ActivityRail />{renderView()}</div>;
+  const showGlobalNotice = settingsNotice && activeView !== "settings";
+  return <div className={`app-shell view-${activeView}`}>
+    <ActivityRail />
+    {showGlobalNotice && <div className={`global-notice ${settingsNotice.type === "error" ? "error" : "success"}`} role={settingsNotice.type === "error" ? "alert" : "status"} aria-live={settingsNotice.type === "error" ? "assertive" : "polite"}><span>{settingsNotice.text}</span><button onClick={clearSettingsNotice} aria-label="关闭通知">关闭</button></div>}
+    {renderView()}
+  </div>;
 }

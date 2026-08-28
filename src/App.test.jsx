@@ -203,6 +203,34 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled();
   });
 
+  it("keeps a settings apply failure visible after leaving Settings", async () => {
+    let rejectApply;
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+    integrationMocks.applyIntegrationSettings.mockImplementation(() => new Promise((_resolve, reject) => { rejectApply = reject; }));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存并应用" }));
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+
+    await act(async () => {
+      rejectApply(new Error("新模型网关不可用"));
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("新模型网关不可用");
+    fireEvent.click(screen.getByRole("button", { name: "关闭通知" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it.each(["running", "cancelling"])("does not apply settings while Runtime mode is %s", async (runtimeMode) => {
     useLabStore.setState({ runtimeMode });
     integrationMocks.loadIntegrationStatus.mockResolvedValue({

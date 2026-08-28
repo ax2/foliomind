@@ -39,6 +39,7 @@ export function SettingsView() {
   const runtimeConfiguring = useLabStore((state) => state.runtimeConfiguring);
   const beginRuntimeConfiguration = useLabStore((state) => state.beginRuntimeConfiguration);
   const endRuntimeConfiguration = useLabStore((state) => state.endRuntimeConfiguration);
+  const setSettingsNotice = useLabStore((state) => state.setSettingsNotice);
   const [status, setStatus] = useState({ credentialConfigured: false, settings: defaultIntegrationSettings, demo: false });
   const [form, setForm] = useState(defaultIntegrationSettings);
   const [apiKey, setApiKey] = useState("");
@@ -66,10 +67,18 @@ export function SettingsView() {
     return () => { loadRequest.current += 1; };
   }, [loadSettings]);
 
-  const run = async (action, success) => {
+  const run = async (action, success, persistNotice = false) => {
     setBusy(true); setNotice("");
-    try { const value = await action(); if (value?.models) setForm(value); setNotice(success); }
-    catch (error) { setNotice(errorMessage(error)); }
+    try {
+      const value = await action();
+      if (value?.models) setForm(value);
+      setNotice(success);
+      if (persistNotice) setSettingsNotice({ type: "success", text: success });
+    } catch (error) {
+      const message = errorMessage(error);
+      setNotice(message);
+      if (persistNotice) setSettingsNotice({ type: "error", text: message });
+    }
     finally { setBusy(false); }
   };
   const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); setApiKey(""); setStatus((value) => ({ ...value, credentialConfigured: true })); }, "QVeris API Key 已保存到系统凭据库");
@@ -77,11 +86,13 @@ export function SettingsView() {
   const syncModels = () => run(async () => { const value = await syncQVerisModels(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "模型目录已从 QVeris 网关同步");
   const saveAll = async () => {
     if (!beginRuntimeConfiguration()) {
-      setNotice("当前分析尚未结束，请等待完成或停止后再应用设置");
+      const message = "当前分析尚未结束，请等待完成或停止后再应用设置";
+      setNotice(message);
+      setSettingsNotice({ type: "error", text: message });
       return;
     }
     try {
-      await run(async () => { const value = await applyIntegrationSettings(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型");
+      await run(async () => { const value = await applyIntegrationSettings(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型", true);
     } finally {
       endRuntimeConfiguration();
     }
