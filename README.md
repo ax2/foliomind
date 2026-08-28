@@ -47,7 +47,7 @@ Rust Host
 
 在桌面端打开“设置”：
 
-1. 保存 QVeris API Key。该密钥只进入操作系统凭据库。
+1. 保存 QVeris API Key。该密钥优先进入操作系统凭据库；Linux 本地调试若未运行 Secret Service，则使用权限为 `0600` 的用户配置文件回退，避免设置页保存失败。
 2. 保持默认工具地址 `https://qveris.ai/api/v1`，模型地址 `https://aigateway.qveris.ai/v1`，或按部署环境修改。
 3. 点击“同步模型”，从网关的 `/models` 原子读取并保存当前可用模型，再选择 Pi 默认模型并应用。更换网关地址后必须重新同步，已下线的默认模型会安全回退到目录中的首个可用模型。
 4. 在自选股页面点击“实时数据”，Agent 会使用内置 Skill 查询并返回 provider、工具 ID、来源和截至时间。
@@ -63,7 +63,7 @@ npm run desktop:dev
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-浏览器打开 `http://127.0.0.1:5173` 后，设置页会显示“本地调试 Host”。此模式的 API Key 仍保存到操作系统凭据库，浏览器只持有当前标签页的短期 Host 会话令牌；关闭桌面端后 Web 端会退回到明确标注的预览模式。普通浏览器部署不启用本地 Host，也不会把长期 API Key 写入 `localStorage`。
+浏览器打开 `http://127.0.0.1:5173` 后，设置页会显示“本地调试 Host”。此模式的 API Key 优先保存到操作系统凭据库；Linux 没有 Secret Service 时回退到权限为 `0600` 的用户配置文件，浏览器只持有当前标签页的短期 Host 会话令牌；关闭桌面端后 Web 端会退回到明确标注的预览模式。普通浏览器部署不启用本地 Host，也不会把长期 API Key 写入 `localStorage`。
 
 为避免长期凭据通过明文链路泄露，远程 QVeris 地址必须使用 HTTPS；只有 `localhost`、`127.0.0.0/8` 和 `::1` 回环地址允许使用 HTTP。基础地址不能包含 query 或 fragment。
 
