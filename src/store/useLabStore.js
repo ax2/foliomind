@@ -15,9 +15,11 @@ export const initialLabState = {
   rules: [{ id: "r1", symbol: "600519", name: "批价波动监控", enabled: true }],
   runtimeMode: "ready",
   runtimeConfiguring: false,
+  runtimeCancelPending: false,
+  settingsNotice: null,
 };
 
-export const useLabStore = create((set, get) => ({
+export const useLabStore = create((set) => ({
   ...initialLabState,
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
@@ -28,27 +30,34 @@ export const useLabStore = create((set, get) => ({
   beginRuntimeConfiguration: () => {
     let acquired = false;
     set((state) => {
-      if (state.runtimeConfiguring || ["running", "cancelling"].includes(state.runtimeMode)) return {};
+      if (state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {};
       acquired = true;
       return { runtimeConfiguring: true };
     });
     return acquired;
   },
   endRuntimeConfiguration: () => set({ runtimeConfiguring: false }),
+  setSettingsNotice: (settingsNotice) => set({ settingsNotice }),
+  clearSettingsNotice: () => set({ settingsNotice: null }),
   sendMessage: async (text) => {
     const prompt = String(text ?? "").trim();
-    const state = get();
-    if (!prompt || state.runtimeConfiguring || ["running", "cancelling"].includes(state.runtimeMode)) return false;
+    if (!prompt) return false;
     const userId = crypto.randomUUID();
     const assistantId = crypto.randomUUID();
-    set((state) => ({
-      runtimeMode: "running",
-      messages: [
-        ...state.messages,
-        { id: userId, role: "user", text: prompt },
-        { id: assistantId, role: "assistant", text: RUNNING_REPLY, mode: "streaming", audits: [], streaming: true },
-      ],
-    }));
+    let acquired = false;
+    set((state) => {
+      if (state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {};
+      acquired = true;
+      return {
+        runtimeMode: "running",
+        messages: [
+          ...state.messages,
+          { id: userId, role: "user", text: prompt },
+          { id: assistantId, role: "assistant", text: RUNNING_REPLY, mode: "streaming", audits: [], streaming: true },
+        ],
+      };
+    });
+    if (!acquired) return false;
     try {
       const reply = await askPi(prompt, {
         onProgress: ({ text: partialText }) => set((state) => ({
@@ -81,13 +90,19 @@ export const useLabStore = create((set, get) => ({
     }
   },
   cancelMessage: async () => {
-    if (get().runtimeMode !== "running") return false;
-    set({ runtimeMode: "cancelling" });
+    let acquired = false;
+    set((state) => {
+      if (state.runtimeMode !== "running" || state.runtimeCancelPending) return {};
+      acquired = true;
+      return { runtimeMode: "cancelling", runtimeCancelPending: true };
+    });
+    if (!acquired) return false;
     try {
       await abortPi();
+      set({ runtimeCancelPending: false });
       return true;
     } catch {
-      set((state) => state.runtimeMode === "cancelling" ? { runtimeMode: "running" } : {});
+      set((state) => ({ runtimeCancelPending: false, ...(state.runtimeMode === "cancelling" ? { runtimeMode: "running" } : {}) }));
       return false;
     }
   },

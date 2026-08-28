@@ -37,8 +37,10 @@ export function SkillsView() {
 export function SettingsView() {
   const runtimeMode = useLabStore((state) => state.runtimeMode);
   const runtimeConfiguring = useLabStore((state) => state.runtimeConfiguring);
+  const runtimeCancelPending = useLabStore((state) => state.runtimeCancelPending);
   const beginRuntimeConfiguration = useLabStore((state) => state.beginRuntimeConfiguration);
   const endRuntimeConfiguration = useLabStore((state) => state.endRuntimeConfiguration);
+  const setSettingsNotice = useLabStore((state) => state.setSettingsNotice);
   const [status, setStatus] = useState({ credentialConfigured: false, settings: defaultIntegrationSettings, demo: false });
   const [form, setForm] = useState(defaultIntegrationSettings);
   const [apiKey, setApiKey] = useState("");
@@ -66,10 +68,18 @@ export function SettingsView() {
     return () => { loadRequest.current += 1; };
   }, [loadSettings]);
 
-  const run = async (action, success) => {
+  const run = async (action, success, persistNotice = false) => {
     setBusy(true); setNotice("");
-    try { const value = await action(); if (value?.models) setForm(value); setNotice(success); }
-    catch (error) { setNotice(errorMessage(error)); }
+    try {
+      const value = await action();
+      if (value?.models) setForm(value);
+      setNotice(success);
+      if (persistNotice) setSettingsNotice({ type: "success", text: success });
+    } catch (error) {
+      const message = errorMessage(error);
+      setNotice(message);
+      if (persistNotice) setSettingsNotice({ type: "error", text: message });
+    }
     finally { setBusy(false); }
   };
   const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); setApiKey(""); setStatus((value) => ({ ...value, credentialConfigured: true })); }, "QVeris API Key 已保存到系统凭据库");
@@ -77,22 +87,24 @@ export function SettingsView() {
   const syncModels = () => run(async () => { const value = await syncQVerisModels(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "模型目录已从 QVeris 网关同步");
   const saveAll = async () => {
     if (!beginRuntimeConfiguration()) {
-      setNotice("当前分析尚未结束，请等待完成或停止后再应用设置");
+      const message = "当前分析尚未结束，请等待完成或停止后再应用设置";
+      setNotice(message);
+      setSettingsNotice({ type: "error", text: message });
       return;
     }
     try {
-      await run(async () => { const value = await applyIntegrationSettings(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型");
+      await run(async () => { const value = await applyIntegrationSettings(form); setStatus((current) => ({ ...current, settings: value })); return value; }, "设置已保存，Pi Runtime 已应用新模型", true);
     } finally {
       endRuntimeConfiguration();
     }
   };
 
   const modelOptions = form.models ?? [];
-  const analysisActive = ["running", "cancelling"].includes(runtimeMode);
+  const analysisActive = runtimeCancelPending || ["running", "cancelling"].includes(runtimeMode);
   const gatewayChanged = normalizeEndpoint(form.modelGatewayBaseUrl) !== normalizeEndpoint(status.settings.modelGatewayBaseUrl);
   const selectedModelAvailable = modelOptions.some((model) => model.id === form.modelId);
   const modelStatus = gatewayChanged ? "网关地址已变化，请先同步模型" : modelOptions.length ? `${modelOptions.length} 个可用模型` : "尚未同步模型";
-  const formDisabled = busy || runtimeConfiguring || loadState !== "ready";
+  const formDisabled = busy || runtimeConfiguring || runtimeCancelPending || loadState !== "ready";
   const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : "桌面端";
   const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? "已配置" : "未配置";
   return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy || runtimeConfiguring}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>

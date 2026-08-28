@@ -107,6 +107,56 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().runtimeConfiguring).toBe(false);
   });
 
+  it("atomically accepts only one synchronous send", async () => {
+    runtime.askPi.mockImplementation(() => new Promise(() => {}));
+
+    const first = useLabStore.getState().sendMessage("第一条分析");
+    const second = useLabStore.getState().sendMessage("第二条分析");
+
+    await expect(second).resolves.toBe(false);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().messages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(useLabStore.getState().messages.at(-2).text).toBe("第一条分析");
+    void first;
+  });
+
+  it("atomically accepts only one synchronous cancellation", async () => {
+    runtime.askPi.mockImplementation(() => new Promise(() => {}));
+    runtime.abortPi.mockImplementation(() => new Promise(() => {}));
+    void useLabStore.getState().sendMessage("等待停止");
+
+    const first = useLabStore.getState().cancelMessage();
+    const second = useLabStore.getState().cancelMessage();
+
+    await expect(second).resolves.toBe(false);
+    expect(runtime.abortPi).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().runtimeMode).toBe("cancelling");
+    void first;
+  });
+
+  it("blocks a new analysis until a delayed cancellation command settles", async () => {
+    let finishAnalysis;
+    let finishAbort;
+    runtime.askPi
+      .mockImplementationOnce(() => new Promise((resolve) => { finishAnalysis = resolve; }))
+      .mockResolvedValueOnce({ text: "下一轮完成", mode: "pi-rpc", audits: [] });
+    runtime.abortPi.mockImplementation(() => new Promise((resolve) => { finishAbort = resolve; }));
+
+    const sent = useLabStore.getState().sendMessage("第一轮分析");
+    const cancellation = useLabStore.getState().cancelMessage();
+    finishAnalysis({ text: "取消前已完成", mode: "pi-rpc", audits: [] });
+    await expect(sent).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ runtimeMode: "pi-rpc", runtimeCancelPending: true });
+    await expect(useLabStore.getState().sendMessage("不应抢跑")).resolves.toBe(false);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+
+    finishAbort(true);
+    await expect(cancellation).resolves.toBe(true);
+    expect(useLabStore.getState().runtimeCancelPending).toBe(false);
+    await expect(useLabStore.getState().sendMessage("下一轮分析")).resolves.toBe(true);
+    expect(runtime.askPi).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["running", "cancelling"])("refuses to apply Runtime settings while mode is %s", (runtimeMode) => {
     useLabStore.setState({ runtimeMode });
 

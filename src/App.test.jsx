@@ -203,6 +203,34 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled();
   });
 
+  it("keeps a settings apply failure visible after leaving Settings", async () => {
+    let rejectApply;
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+    integrationMocks.applyIntegrationSettings.mockImplementation(() => new Promise((_resolve, reject) => { rejectApply = reject; }));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存并应用" }));
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+
+    await act(async () => {
+      rejectApply(new Error("新模型网关不可用"));
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("新模型网关不可用");
+    fireEvent.click(screen.getByRole("button", { name: "关闭通知" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it.each(["running", "cancelling"])("does not apply settings while Runtime mode is %s", async (runtimeMode) => {
     useLabStore.setState({ runtimeMode });
     integrationMocks.loadIntegrationStatus.mockResolvedValue({
@@ -256,5 +284,35 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "正在取消" })).toBeDisabled();
     expect(screen.getByText("取消中")).toBeInTheDocument();
     expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在停止本轮分析…");
+  });
+
+  it("keeps the composer locked until a late cancellation command settles", () => {
+    useLabStore.setState({ runtimeMode: "pi-rpc", runtimeCancelPending: true });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+    expect(screen.getByRole("button", { name: "正在完成取消" })).toBeDisabled();
+    expect(screen.getByLabelText("分析问题")).toBeDisabled();
+    expect(screen.getByText("完成取消中")).toBeInTheDocument();
+    expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在完成取消请求…");
+  });
+
+  it("disables Runtime settings while a late cancellation command is pending", async () => {
+    useLabStore.setState({ runtimeMode: "pi-rpc", runtimeCancelPending: true });
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存并应用" })).toBeDisabled();
+    expect(screen.getByLabelText("Gateway Base URL")).toBeDisabled();
+    expect(screen.getByText("请等待当前分析结束后再应用设置")).toBeInTheDocument();
   });
 });

@@ -53,6 +53,46 @@ textarea:focus-visible {
 .app-shell.view-chat {
   background: #fbfcfd;
 }
+.global-notice {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 28px));
+  transform: translateX(-50%);
+  border: 1px solid #b9d8ff;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #f4f9ff;
+  box-shadow: 0 8px 24px rgb(26 57 94 / 12%);
+  color: #24568e;
+  font-size: 12px;
+}
+.global-notice span {
+  overflow-wrap: anywhere;
+}
+.global-notice button {
+  flex: 0 0 auto;
+  border: 1px solid #9ec5f5;
+  border-radius: 6px;
+  padding: 5px 9px;
+  background: #fff;
+  color: #24568e;
+  cursor: pointer;
+  font-size: 11px;
+}
+.global-notice.error {
+  border-color: #f1c9c5;
+  background: #fff7f6;
+  color: #a33b32;
+}
+.global-notice.error button {
+  border-color: #e3aba6;
+  color: #8f3028;
+}
 .activity-rail {
   border-right: 1px solid var(--line);
   background: #fbfbfc;
