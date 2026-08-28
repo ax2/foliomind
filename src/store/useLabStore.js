@@ -266,7 +266,7 @@ export const useLabStore = create((set, get) => ({
     }
   },
   runDueMonitorChecks: async () => { if (!isDesktopRuntime() || !get().userStateLoaded || get().monitorBusy) return false; const now = Date.now(); const due = get().rules.find((rule) => rule.enabled && (!rule.lastCheckedAt || now - Date.parse(rule.lastCheckedAt) >= rule.intervalSeconds * 1000)); return due ? get().runMonitorCheck(due.id) : false; },
-  beginRuntimeConfiguration: () => { let acquired = false; set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.liveDataLoading || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeConfiguring: true }; }); return acquired; },
+  beginRuntimeConfiguration: () => { let acquired = false; set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeConfiguring: true }; }); return acquired; },
   endRuntimeConfiguration: () => set({ runtimeConfiguring: false }),
   setSettingsNotice: (settingsNotice) => set({ settingsNotice }), clearSettingsNotice: () => set({ settingsNotice: null }),
   sendMessage: async (text) => {
