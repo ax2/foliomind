@@ -37,6 +37,24 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().messages.filter((message) => message.role === "assistant")).toHaveLength(2);
   });
 
+  it("hydrates page quotes from a real structured QVeris response", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockResolvedValue({
+      text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1297.4, changePercent: 0.39, asOf: "2026-08-28 15:17:32", source: "caidazi" }] }),
+      mode: "pi-local-host",
+      audits: [{ operation: "search" }],
+    });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, source: "caidazi" });
+    expect(useLabStore.getState().liveDataError).toBe("");
+  });
+
   it("replaces partial output with an error instead of appending another message", async () => {
     runtime.askPi.mockImplementation(async (_prompt, { onProgress }) => {
       onProgress({ text: "未完成内容" });
