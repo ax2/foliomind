@@ -1018,6 +1018,11 @@ textarea:focus-visible {
 .secondary-button:disabled { opacity: .45; cursor: not-allowed; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgb(19 28 42 / 32%); pointer-events: none; }
 .modal-card { width: min(430px, 100%); display: grid; gap: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 20px 70px rgb(13 31 56 / 20%); pointer-events: auto; }
+.watch-suggestions { display: grid; gap: 4px; margin-top: -6px; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: #fbfcfe; }
+.watch-suggestions button { display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: 6px; padding: 8px 9px; background: transparent; text-align: left; cursor: pointer; }
+.watch-suggestions button:hover { background: var(--blue-soft); }
+.watch-suggestions button span { display: grid; gap: 2px; }
+.watch-suggestions button small { color: var(--muted); font-size: 10px; }
 .modal-heading { display: flex; align-items: center; justify-content: space-between; }
 .modal-heading h2 { margin: 0; font-size: 17px; }
 .modal-card label { display: grid; gap: 6px; color: #59616d; font-size: 11px; }

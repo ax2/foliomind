@@ -1,5 +1,7 @@
 import { BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
+import { useEffect } from "react";
 import { stocks } from "../data/market.js";
+import { formatPercent, formatPrice, formatQuoteField } from "../lib/quoteFormatting.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { MarketChart } from "./MarketChart.jsx";
 
@@ -12,15 +14,30 @@ export function StockWorkspace() {
   const setChartRange = useLabStore((state) => state.setChartRange);
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
+  const userStateLoaded = useLabStore((state) => state.userStateLoaded);
+  const refreshQuoteDetails = useLabStore((state) => state.refreshQuoteDetails);
+  const refreshQuoteSeries = useLabStore((state) => state.refreshQuoteSeries);
+  const quoteDetailsLoading = useLabStore((state) => state.quoteDetailsLoading);
+  const quoteDetailsLoaded = useLabStore((state) => state.quoteDetailsLoaded);
+  const quoteDetailsError = useLabStore((state) => state.quoteDetailsError);
+  const quoteSeriesLoading = useLabStore((state) => state.quoteSeriesLoading);
+  const quoteSeriesLoaded = useLabStore((state) => state.quoteSeriesLoaded);
+  const quoteSeriesError = useLabStore((state) => state.quoteSeriesError);
+  const liveDataLoading = useLabStore((state) => state.liveDataLoading);
+  const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const sendMessage = useLabStore((state) => state.sendMessage);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const stock = stocks[symbol] ?? watchlist.find((item) => item.symbol === symbol) ?? { symbol, name: symbol, market: "", category: "" };
   const quote = liveQuotes[symbol];
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && !quoteDetailsLoading[symbol] && !quoteDetailsLoaded[symbol]) void refreshQuoteDetails(symbol); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, refreshQuoteDetails, quoteDetailsLoading, quoteDetailsLoaded]);
+  useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && quoteDetailsLoaded[symbol] && !quoteSeriesLoading[symbol]?.[chartRange] && !quoteSeriesLoaded[symbol]?.[chartRange]) void refreshQuoteSeries(symbol, chartRange); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, chartRange, refreshQuoteSeries, quoteDetailsLoaded, quoteSeriesLoading, quoteSeriesLoaded]);
   const hasQuote = Number.isFinite(quote?.price);
   const price = hasQuote ? quote.price : null;
   const change = hasQuote && Number.isFinite(quote.change) ? quote.change : null;
+  const changeAmount = hasQuote && Number.isFinite(quote.changeAmount) ? quote.changeAmount : change != null && Number.isFinite(quote.previousClose) ? price - Number(quote.previousClose) : null;
+  const series = quote?.seriesByRange?.[chartRange] || (chartRange === "分时" ? quote?.series : []) || [];
   return (
     <main className="stock-workspace">
       <header className="stock-header">
@@ -28,15 +45,15 @@ export function StockWorkspace() {
         <div><button className="live-data-button" aria-label="用 QVeris 获取实时数据" onClick={() => { setActiveView("chat"); void sendMessage(`请使用内置 qveris-finance-research Skill，严格按 Search → Inspect → Call 查询 ${stock.name}（${stock.symbol}）的最新行情、数据截至时间和来源，并明确区分实时或延迟数据。`); }}><Sparkle size={18} />实时数据</button><button aria-label="收藏"><BookmarkSimple size={20} /></button><button aria-label="更多"><DotsThree size={22} /></button></div>
       </header>
       <section className="quote-overview">
-        <div className={change == null || change >= 0 ? "primary-price up" : "primary-price down"}>{price == null ? "—" : price.toFixed(2)} <span>{change == null ? (realDataMode ? "尚未查询真实行情" : "预览模式") : `${change >= 0 ? "+" : ""}${(price * change / 100).toFixed(2)}　${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span><small>{hasQuote ? `QVeris · ${quote.source || "真实数据"}${quote.asOf ? ` · 截至 ${quote.asOf}` : ""}` : realDataMode ? "暂无已查询数据 · 点击实时数据获取" : "配置模型后显示真实行情"}</small></div>
-        <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{quote?.[key] ?? "—"}</dd></dl>)}</div>
+        <div className={change == null || change >= 0 ? "primary-price up" : "primary-price down"}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small>{hasQuote ? `QVeris · ${quote.source || "真实数据"}${quote.asOf ? ` · 截至 ${quote.asOf}` : ""}` : realDataMode ? "暂无已查询数据 · 正在获取详情" : "配置模型后显示真实行情"}</small></div>
+        <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.[key])}</dd></dl>)}</div>
       </section>
       <section className="chart-section">
         <div className="range-tabs">{ranges.map((range) => <button key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}<button className="chart-settings"><SlidersHorizontal size={18} /></button></div>
-        <MarketChart series={quote?.series} />
+        <MarketChart series={series} range={chartRange} loading={Boolean(quoteDetailsLoading[symbol] || quoteSeriesLoading[symbol]?.[chartRange])} error={quoteSeriesError[symbol]?.[chartRange] || ""} />
       </section>
-      <section className="fundamentals"><h3>关键指标</h3><div>{["营业收入(元)", "净利润(元)", "毛利率", "净利率", "ROE"].map((label) => <dl key={label}><dt>{label}</dt><dd>{quote?.fundamentals?.[label] ?? "—"}</dd><small>{quote?.asOf ? `截至 ${quote.asOf}` : "查询真实数据后显示"}</small></dl>)}</div></section>
-      <section className="company-intro"><h3>公司简介</h3><p>{quote?.companyDescription || "尚未获取公司简介。点击“实时数据”后，Agent 会从 QVeris 返回可核验内容。"}</p></section>
+      <section className="fundamentals"><h3>关键指标 <small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "真实财务数据"}</small></h3><div>{[["营业收入", "revenue"], ["净利润", "netProfit"], ["毛利率", "grossMargin"], ["净利率", "netMargin"], ["ROE", "roe"]].map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.fundamentals?.[key] ?? quote?.fundamentals?.[label])}</dd><small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "查询详情后显示"}</small></dl>)}</div></section>
+      <section className="company-intro"><h3>公司简介</h3><p>{quote?.companyDescription || (quoteDetailsError[symbol] ? `详情获取失败：${quoteDetailsError[symbol]}` : "正在获取公司简介；QVeris 未返回时保持空状态。")}</p></section>
       <footer className="source-line">{realDataMode ? "仅显示 QVeris 已返回的真实数据；空值不会以示例数据填充。" : "当前为界面预览；配置模型后将只显示 QVeris 返回的真实数据。"}</footer>
     </main>
   );
