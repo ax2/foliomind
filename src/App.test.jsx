@@ -97,7 +97,7 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(await screen.findByText("浏览器预览")).toBeInTheDocument();
-    expect(screen.getByLabelText("QVeris API Key")).toBeInTheDocument();
+    expect(screen.getByLabelText("数据服务 API Key")).toBeInTheDocument();
     expect(screen.getByLabelText("Gateway Base URL")).toHaveValue("https://aigateway.qveris.ai/v1");
     expect(screen.getByText("未配置")).toBeInTheDocument();
   });
@@ -117,7 +117,7 @@ describe("FolioMind core flows", () => {
 
     render(<App />);
     expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
-    expect(await screen.findByText("Pi / QVeris 实时检查已启用")).toBeInTheDocument();
+    expect(await screen.findByText("实时行情已启用 · 每分钟更新")).toBeInTheDocument();
     expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
   });
 
@@ -147,7 +147,7 @@ describe("FolioMind core flows", () => {
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("设置加载失败：系统凭据库暂时不可用");
+    expect(await screen.findByRole("alert")).toHaveTextContent("数据服务凭据需要重新确认，请到设置中检查配置");
     expect(screen.getByText("加载失败")).toBeInTheDocument();
     expect(screen.getByText("状态未知")).toBeInTheDocument();
     expect(screen.queryByText("浏览器预览")).not.toBeInTheDocument();
@@ -217,7 +217,7 @@ describe("FolioMind core flows", () => {
     expect(await screen.findByText("桌面端")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "保存并应用" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Runtime 重启失败");
+    expect(await screen.findByRole("status")).toHaveTextContent("设置暂时无法保存，请稍后重试");
     await waitFor(() => expect(useLabStore.getState().runtimeConfiguring).toBe(false));
     expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled();
   });
@@ -245,7 +245,7 @@ describe("FolioMind core flows", () => {
     await act(async () => {
       rejectApply(new Error("新模型网关不可用"));
     });
-    expect(await screen.findByRole("alert")).toHaveTextContent("新模型网关不可用");
+    expect(await screen.findByRole("alert")).toHaveTextContent("设置暂时无法保存，请稍后重试");
     fireEvent.click(screen.getByRole("button", { name: "关闭通知" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -272,8 +272,8 @@ describe("FolioMind core flows", () => {
 
   it("routes a live-data request through the agent conversation", async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "用 QVeris 获取实时数据" }));
-    expect(await screen.findByText(/qveris-finance-research Skill/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "获取实时数据" }));
+    expect(await screen.findByText(/已配置的数据工具/)).toBeInTheDocument();
     expect(screen.getAllByText("分析摘要").length).toBeGreaterThan(0);
   });
 

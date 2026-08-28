@@ -2,7 +2,7 @@ import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { ChatView, MarketView, MonitorView, NotificationsView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
-import { MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
+import { LIVE_QUOTE_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
 import { useEffect } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
@@ -27,7 +27,7 @@ export function App() {
   useEffect(() => {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured || !integrationStatus.settings?.modelId) return undefined;
     void refreshLiveData();
-    const timer = window.setInterval(() => { void refreshLiveData(); }, 5 * 60_000);
+    const timer = window.setInterval(() => { void refreshLiveData(); }, LIVE_QUOTE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [userStateLoaded, integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, refreshLiveData]);
   const renderView = () => {
