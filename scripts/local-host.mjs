@@ -66,8 +66,21 @@ async function upstream(url, options = {}, signal) {
   const response = await fetch(url, { ...options, signal, headers: { accept: "application/json", ...(options.headers || {}) } });
   const text = await response.text();
   let body; try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
-  if (!response.ok) throw new Error(`上游请求失败（HTTP ${response.status}）`);
+  if (!response.ok) { const error = new Error(`上游请求失败（HTTP ${response.status}）`); error.status = response.status; throw error; }
   return body;
+}
+async function upstreamWithRetry(url, options = {}, signal, attempts = 2) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await upstream(url, options, signal); }
+    catch (error) {
+      const retryable = [429, 500, 502, 503, 504].includes(Number(error?.status));
+      if (!retryable || attempt >= attempts) throw error;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 500 * (attempt + 1));
+        if (signal) signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason || new Error("aborted")); }, { once: true });
+      });
+    }
+  }
 }
 function jsonHeaders(origin) {
   const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "access-control-allow-headers": "Content-Type, X-FolioMind-Host", "access-control-allow-methods": "GET, POST, DELETE, OPTIONS" };
@@ -127,7 +140,7 @@ async function promptAgent(message, settings, key, signal) {
   const audits = [];
   const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。涉及实时、外部或专业数据时，必须按 Search → Inspect → Call 顺序使用 QVeris 工具；回答要标明数据时间、来源和不确定性。" }, { role: "user", content: message }];
   for (let round = 0; round < 8; round += 1) {
-    const response = await upstream(endpoint(settings.modelGatewayBaseUrl, "chat/completions"), { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages, tools: toolDefinitions(), tool_choice: "auto", max_tokens: 4096 }) }, signal);
+    const response = await upstreamWithRetry(endpoint(settings.modelGatewayBaseUrl, "chat/completions"), { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages, tools: toolDefinitions(), tool_choice: "auto", max_tokens: 4096 }) }, signal);
     const assistant = response.choices?.[0]?.message;
     if (!assistant) throw new Error("模型返回为空");
     messages.push(assistant);
