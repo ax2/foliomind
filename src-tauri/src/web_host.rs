@@ -400,10 +400,7 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
         if buffer.len() > MAX_HEADER_BYTES {
             return Err("请求头过大".into());
         }
-        if let Some(index) = buffer
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-        {
+        if let Some(index) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
             break index;
         }
     };

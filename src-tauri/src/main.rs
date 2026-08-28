@@ -1285,12 +1285,12 @@ fn main() {
         .expect("error while building FolioMind");
     let mut web_host =
         match web_host::WebHost::start(app.handle().clone(), (*app.state::<PiHost>()).clone()) {
-        Ok(host) => Some(host),
-        Err(error) => {
-            eprintln!("local web host unavailable: {error}");
-            None
-        }
-    };
+            Ok(host) => Some(host),
+            Err(error) => {
+                eprintln!("local web host unavailable: {error}");
+                None
+            }
+        };
     app.run(move |app_handle, event| {
         if matches!(
             event,
