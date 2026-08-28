@@ -56,14 +56,15 @@ Rust Host
 
 ### 本地 Web 调试
 
-Web 端只用于本机调试时，先启动桌面端 Host，再启动 Vite：
+Web 端本机调试不需要安装或启动桌面端。推荐用一个命令同时启动 Vite 和独立 Dev Host：
 
 ```bash
-npm run desktop:dev
-npm run dev -- --host 127.0.0.1 --port 5173
+npm run web:dev
 ```
 
-浏览器打开 `http://127.0.0.1:5173` 后，设置页会显示“本地调试 Host”。此模式的 API Key 优先保存到操作系统凭据库；Linux 没有 Secret Service 时回退到权限为 `0600` 的用户配置文件，浏览器只持有当前标签页的短期 Host 会话令牌；关闭桌面端后 Web 端会退回到明确标注的预览模式。普通浏览器部署不启用本地 Host，也不会把长期 API Key 写入 `localStorage`。
+浏览器打开 `http://127.0.0.1:5173` 后，设置页会显示“本地开发 Host”。Dev Host 与桌面端共享同一套 Host HTTP 协议，并直接代理 QVeris 模型、Search → Inspect → Call 和对话，因此修改前端或 Host 逻辑后刷新页面即可验证，不需要重新安装桌面包。API Key 保存在用户配置目录下权限为 `0600` 的文件中，浏览器只持有当前标签页的短期会话令牌。
+
+如需验证真实 Tauri 窗口，再使用 `npm run desktop:dev`；这不是 Web 调试的前置条件。
 
 为避免长期凭据通过明文链路泄露，远程 QVeris 地址必须使用 HTTPS；只有 `localhost`、`127.0.0.0/8` 和 `::1` 回环地址允许使用 HTTP。基础地址不能包含 query 或 fragment。
 

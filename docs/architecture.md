@@ -4,13 +4,13 @@
 
 1. 桌面层负责产品体验、权限、凭证、生命周期和审计，不重新实现 Pi Agent。
 2. Pi 只通过 stdin/stdout JSONL RPC 与 Rust Host 通信，不自行监听公网端口。
-3. 长期 `QVERIS_API_KEY` 不进入 Pi 环境。Host 为每次运行签发短期 capability，并限定 executor 为 loopback。
+3. 长期 `QVERIS_API_KEY` 不进入浏览器或 Pi 环境。桌面 Host 为每次运行签发短期 capability；Web 调试使用独立的 Node Dev Host，同样只监听 loopback。
 4. 数据调用遵循 `Search → Inspect → Call`；调用结果必须保留 source、as-of、execution ID 和费用字段。
 5. 第一版不连接真实券商，不提供自动交易，不承诺收益。
 
 自选标的、盯盘规则和站内通知统一保存在 Host 管理的 `user-state.json` 中。桌面端写入 Tauri 应用配置目录并使用临时文件原子替换；浏览器预览使用版本化 `localStorage`，只作为演示状态，不宣称已完成真实查询。
 
-本地 Web 调试时，桌面 Host 额外监听固定回环地址 `127.0.0.1:43123`。Web UI 先通过允许的 localhost Origin 获取一次性会话令牌，再以 `X-FolioMind-Host` 请求头访问配置、凭据、用户状态和 Pi API。长期 QVeris API Key 由 Host 写入操作系统凭据库；Linux 未运行 Secret Service 时回退到权限为 `0600` 的用户配置文件，不进入浏览器存储。Host 只返回“已配置”状态。该 HTTP 入口仅允许回环请求和本地开发 Origin，不作为公网服务。
+本地 Web 调试时，`npm run web:dev` 同时启动 Vite 和独立 Dev Host，固定监听 `127.0.0.1:43123`。Dev Host 复用同一 HTTP 路由和 Search → Inspect → Call 策略，直接代理模型网关和 QVeris 工具；因此修改 Web/Host 代码后无需安装新桌面版本。Web UI 先通过允许的 localhost Origin 获取一次性会话令牌，再以 `X-FolioMind-Host` 请求头访问配置、凭据、用户状态和运行时 API。该 HTTP 入口仅允许回环请求和本地开发 Origin，不作为公网服务。
 
 盯盘服务由 WebView 调度（桌面端每 30 秒检查到期规则），同一时间只允许一条 Pi 检查任务，避免与用户对话并发占用 Runtime。每次检查都要求 Pi 使用内置 `qveris-finance-research` Skill 执行 `Search → Inspect → Call`，要求返回带 `triggered`、来源和数据截至时间的结构化结果；触发结果、失败和预览模式提示都会写入站内消息，用户可在消息中心标记已读。
 

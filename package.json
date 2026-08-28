@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "web:dev": "node scripts/web-dev.mjs",
+    "host:dev": "node scripts/local-host.mjs",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
