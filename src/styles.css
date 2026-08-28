@@ -812,6 +812,18 @@ textarea:focus-visible {
   padding: 34px 44px 50px;
   background: #fff;
 }
+.secondary-view-shell { display: flex; min-width: 0; height: 100vh; flex-direction: column; overflow: hidden; }
+.secondary-view-shell > .secondary-page { min-height: 0; height: auto; flex: 1; }
+.live-quotes-strip { flex: 0 0 auto; margin: 18px 44px 0; border: 1px solid #dfe8f5; border-radius: 10px; padding: 12px 14px; background: #f8fbff; }
+.live-quotes-heading { display: flex; justify-content: space-between; gap: 12px; color: #24568e; font-size: 12px; }
+.live-quotes-heading span, .live-quotes-strip article small { color: var(--muted); font-size: 10px; }
+.live-quotes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
+.live-quotes-grid article { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; border: 1px solid #e6edf7; border-radius: 7px; padding: 8px; background: #fff; }
+.live-quotes-grid article > div { display: grid; gap: 2px; }
+.live-quotes-grid article b { font-size: 15px; align-self: center; }
+.live-quotes-grid article > span { font-size: 11px; text-align: right; }
+.live-quotes-grid article > small { grid-column: 1 / -1; }
+.live-quotes-error { margin: 8px 0 0; color: #b33a3a; font-size: 11px; }
 .secondary-page > header {
   display: flex;
   align-items: center;
@@ -1161,6 +1173,7 @@ textarea:focus-visible {
   .secondary-page {
     padding: 26px 24px 40px;
   }
+  .live-quotes-strip { margin-inline: 24px; }
   .index-board {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -18,6 +18,14 @@ function nowIso() { return new Date().toISOString(); }
 function createId(prefix) { return `${prefix}-${typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`; }
 function findJsonObject(text) {
   const source = String(text ?? "");
+  const first = source.indexOf("{");
+  const last = source.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    try {
+      const value = JSON.parse(source.slice(first, last + 1));
+      if (value && typeof value === "object") return value;
+    } catch { /* Fall back to nested object boundaries. */ }
+  }
   for (let end = source.lastIndexOf("}"); end >= 0; end -= 1) {
     const start = source.lastIndexOf("{", end);
     if (start < 0) break;
@@ -61,10 +69,57 @@ function quoteFromReply(text) {
   };
 }
 
+function normalizeLiveQuote(value) {
+  if (!value || typeof value !== "object") return null;
+  const price = Number(value.price ?? value.lastPrice ?? value.last_price);
+  if (!Number.isFinite(price)) return null;
+  const previousClose = Number(value.previousClose ?? value.previous_close ?? value.prevClose);
+  const explicitPercent = Number(value.changePercent ?? value.change_percent ?? value.pctChange ?? value.percentChange);
+  const change = Number.isFinite(explicitPercent)
+    ? explicitPercent
+    : Number.isFinite(previousClose) && previousClose !== 0 && Number.isFinite(Number(value.change))
+      ? Number(value.change) / previousClose * 100
+      : null;
+  return {
+    price,
+    change: Number.isFinite(change) ? change : null,
+    asOf: String(value.asOf ?? value.as_of ?? value.timestamp ?? ""),
+    source: String(value.source ?? value.dataSource ?? "QVeris"),
+    open: value.open ?? null,
+    previousClose: Number.isFinite(previousClose) ? previousClose : value.previousClose ?? null,
+    high: value.high ?? null,
+    low: value.low ?? null,
+    volume: value.volume ?? null,
+    turnover: value.turnover ?? null,
+    turnoverRate: value.turnoverRate ?? value.turnover_rate ?? null,
+    volumeRatio: value.volumeRatio ?? value.volume_ratio ?? null,
+    pe: value.pe ?? value.peTtm ?? value.pe_ttm ?? null,
+    pb: value.pb ?? null,
+    marketCap: value.marketCap ?? value.market_cap ?? null,
+    floatMarketCap: value.floatMarketCap ?? value.float_market_cap ?? null,
+    series: Array.isArray(value.series) ? value.series : [],
+    fundamentals: value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {},
+    companyDescription: typeof value.companyDescription === "string" ? value.companyDescription : "",
+  };
+}
+
+function liveQuotesFromReply(text, symbols) {
+  const value = findJsonObject(text);
+  const items = Array.isArray(value?.quotes) ? value.quotes : Array.isArray(value) ? value : [];
+  const allowed = new Set(symbols);
+  return items.reduce((result, item) => {
+    const symbol = String(item?.symbol ?? item?.code ?? "").trim().toUpperCase();
+    if (!symbol || !allowed.has(symbol)) return result;
+    const quote = normalizeLiveQuote(item);
+    if (quote) result[symbol] = quote;
+    return result;
+  }, {});
+}
+
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过 QVeris Search → Inspect → Call 查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 export const useLabStore = create((set, get) => ({
@@ -75,6 +130,25 @@ export const useLabStore = create((set, get) => ({
     catch (error) { set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) }); }
   },
   setIntegrationStatus: (integrationStatus) => set({ integrationStatus, integrationStatusLoading: false, integrationStatusError: "" }),
+  refreshLiveData: async () => {
+    const state = get();
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    if (!configured || !state.watchlist.length || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling") return false;
+    set({ liveDataLoading: true, liveDataError: "" });
+    try {
+      const quotes = {};
+      for (const item of state.watchlist) {
+        const reply = await askPi(`请使用内置 qveris-finance-research Skill，严格按 Search → Inspect → Call 查询 ${item.name}（${item.symbol}）的最新真实行情。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown、不要解释，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":0,"changePercent":0,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源","series":[]}],"errors":[]}。没有真实值的字段填 null。`, { settleTimeoutMs: 120_000 });
+        Object.assign(quotes, liveQuotesFromReply(reply.text, [item.symbol]));
+      }
+      if (!Object.keys(quotes).length) throw new Error("QVeris 未返回可识别的真实行情");
+      set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLoading: false, liveDataLastRefreshAt: nowIso(), liveDataError: "" }));
+      return true;
+    } catch (error) {
+      set({ liveDataLoading: false, liveDataError: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  },
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
   setChartRange: (chartRange) => set({ chartRange }),
@@ -106,7 +180,7 @@ export const useLabStore = create((set, get) => ({
   markAllNotificationsRead: () => { set((state) => ({ notifications: state.notifications.map((item) => ({ ...item, read: true })) })); void get().persistUserState(); },
   runMonitorCheck: async (ruleId) => {
     let acquired = false; let rule; let item;
-    set((state) => { rule = state.rules.find((candidate) => candidate.id === ruleId); item = state.watchlist.find((candidate) => candidate.symbol === rule?.symbol); if (!rule || !rule.enabled || state.monitorBusy || state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; const checkedAt = nowIso(); return { monitorBusy: true, monitorLastRunAt: checkedAt, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastCheckedAt: checkedAt } : candidate) }; });
+    set((state) => { rule = state.rules.find((candidate) => candidate.id === ruleId); item = state.watchlist.find((candidate) => candidate.symbol === rule?.symbol); if (!rule || !rule.enabled || state.monitorBusy || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; const checkedAt = nowIso(); return { monitorBusy: true, monitorLastRunAt: checkedAt, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastCheckedAt: checkedAt } : candidate) }; });
     if (!acquired) return false;
     const strategy = strategyFor(rule.strategyId);
     try {
@@ -118,12 +192,12 @@ export const useLabStore = create((set, get) => ({
     }
   },
   runDueMonitorChecks: async () => { if (!isDesktopRuntime() || !get().userStateLoaded || get().monitorBusy) return false; const now = Date.now(); const due = get().rules.find((rule) => rule.enabled && (!rule.lastCheckedAt || now - Date.parse(rule.lastCheckedAt) >= rule.intervalSeconds * 1000)); return due ? get().runMonitorCheck(due.id) : false; },
-  beginRuntimeConfiguration: () => { let acquired = false; set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeConfiguring: true }; }); return acquired; },
+  beginRuntimeConfiguration: () => { let acquired = false; set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.liveDataLoading || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeConfiguring: true }; }); return acquired; },
   endRuntimeConfiguration: () => set({ runtimeConfiguring: false }),
   setSettingsNotice: (settingsNotice) => set({ settingsNotice }), clearSettingsNotice: () => set({ settingsNotice: null }),
   sendMessage: async (text) => {
     const prompt = String(text ?? "").trim(); if (!prompt) return false; const userId = createId("message"); const assistantId = createId("message"); let acquired = false;
-    set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeMode: "running", messages: [...state.messages, { id: userId, role: "user", text: prompt }, { id: assistantId, role: "assistant", text: RUNNING_REPLY, mode: "streaming", audits: [], streaming: true }] }; }); if (!acquired) return false;
+    set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.liveDataLoading || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeMode: "running", messages: [...state.messages, { id: userId, role: "user", text: prompt }, { id: assistantId, role: "assistant", text: RUNNING_REPLY, mode: "streaming", audits: [], streaming: true }] }; }); if (!acquired) return false;
     try { const reply = await askPi(prompt, { onProgress: ({ text: partialText }) => set((state) => ({ messages: state.messages.map((message) => message.id === assistantId && message.streaming ? { ...message, text: partialText } : message) })) }); const quote = /实时数据|最新行情|最新价格/.test(prompt) ? quoteFromReply(reply.text) : null; set((state) => ({ runtimeMode: reply.mode, liveQuotes: quote ? { ...state.liveQuotes, [state.selectedSymbol]: quote } : state.liveQuotes, messages: state.messages.map((message) => message.id === assistantId ? { ...message, text: reply.text, mode: reply.mode, audits: reply.audits ?? [], streaming: false } : message) })); return true; }
     catch (error) { const cancelled = error?.code === ABORTED_CODE; set((state) => ({ runtimeMode: cancelled ? "cancelled" : "error", messages: state.messages.map((message) => message.id === assistantId ? { ...message, text: cancelled ? "已取消本轮分析。" : `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}`, mode: cancelled ? "cancelled" : "error", streaming: false } : message) })); return false; }
   },
