@@ -124,7 +124,7 @@ export function SettingsView() {
   const selectedModelAvailable = modelOptions.some((model) => model.id === form.modelId);
   const modelStatus = gatewayChanged ? "网关地址已变化，请先同步模型" : modelOptions.length ? `${modelOptions.length} 个可用模型` : "尚未同步模型";
   const formDisabled = busy || runtimeConfiguring || runtimeCancelPending || loadState !== "ready";
-  const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : "桌面端";
+  const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : status.environment === "local-host" ? "本地调试 Host" : "桌面端";
   const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? "已配置" : "未配置";
   return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy || runtimeConfiguring}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>
     {loadError && <div className="settings-notice error" role="alert"><span>设置加载失败：{loadError}</span><button className="secondary-button" onClick={() => { void loadSettings(); }}>重试加载</button></div>}

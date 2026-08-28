@@ -6,6 +6,7 @@ mod credentials;
 mod executor;
 mod process_command;
 mod user_state;
+mod web_host;
 
 use config::IntegrationSettings;
 use credentials::{CredentialStore, OsCredentialStore};
@@ -89,6 +90,7 @@ struct PiHost {
     inner: Arc<Mutex<Inner>>,
     next_id: Arc<AtomicU64>,
     credentials: Arc<dyn CredentialStore>,
+    web_events: Arc<Mutex<Vec<mpsc::Sender<RuntimeEvent>>>>,
 }
 
 impl Default for PiHost {
@@ -106,6 +108,7 @@ impl Default for PiHost {
             })),
             next_id: Arc::new(AtomicU64::new(1)),
             credentials: Arc::new(OsCredentialStore),
+            web_events: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -130,6 +133,21 @@ impl PiHost {
             .expect("host lock poisoned")
             .status
             .clone()
+    }
+
+    fn emit_runtime_event(&self, app: &AppHandle, event: RuntimeEvent) {
+        let _ = app.emit(EVENT_NAME, event.clone());
+        if let Ok(mut subscribers) = self.web_events.lock() {
+            subscribers.retain(|subscriber| subscriber.send(event.clone()).is_ok());
+        }
+    }
+
+    fn subscribe_web_events(&self) -> mpsc::Receiver<RuntimeEvent> {
+        let (sender, receiver) = mpsc::channel();
+        if let Ok(mut subscribers) = self.web_events.lock() {
+            subscribers.push(sender);
+        }
+        receiver
     }
 
     fn staged_model_catalog(&self) -> Result<Option<StagedModelCatalog>, String> {
@@ -158,8 +176,8 @@ impl PiHost {
     }
 
     fn publish(&self, app: &AppHandle, kind: &str, frame: Option<Value>) {
-        let _ = app.emit(
-            EVENT_NAME,
+        self.emit_runtime_event(
+            app,
             RuntimeEvent {
                 kind: kind.into(),
                 status: self.status(),
@@ -196,9 +214,13 @@ impl PiHost {
         let audit = Arc::new(move |event: AuditEvent| {
             if let Ok(inner) = audit_host.inner.lock() {
                 if inner.generation == generation && inner.status.state == RuntimeState::Running {
-                    let _ = audit_app.emit(
-                        EVENT_NAME,
-                        serde_json::json!({ "kind": "qveris_audit", "audit": event }),
+                    audit_host.emit_runtime_event(
+                        &audit_app,
+                        RuntimeEvent {
+                            kind: "qveris_audit".into(),
+                            status: inner.status.clone(),
+                            frame: Some(serde_json::json!({ "audit": event })),
+                        },
                     );
                 }
             }
@@ -564,17 +586,17 @@ impl PiHost {
         kind: &str,
         frame: Option<Value>,
     ) {
-        if let Ok(inner) = self.inner.lock() {
-            if inner.generation == generation && inner.status.state == RuntimeState::Running {
-                let _ = app.emit(
-                    EVENT_NAME,
-                    RuntimeEvent {
-                        kind: kind.into(),
-                        status: inner.status.clone(),
-                        frame,
-                    },
-                );
-            }
+        let event = self.inner.lock().ok().and_then(|inner| {
+            (inner.generation == generation && inner.status.state == RuntimeState::Running).then(
+                || RuntimeEvent {
+                    kind: kind.into(),
+                    status: inner.status.clone(),
+                    frame,
+                },
+            )
+        });
+        if let Some(event) = event {
+            self.emit_runtime_event(app, event);
         }
     }
     fn resolve(&self, generation: u64, id: &str, frame: Value) {
@@ -1182,17 +1204,16 @@ async fn integration_settings_apply(
         .map_err(|error| format!("settings apply task failed: {error}"))?
 }
 
-#[tauri::command]
-async fn qveris_model_catalog_sync(
-    host: State<'_, PiHost>,
-    app: AppHandle,
+fn sync_model_catalog(
+    host: &PiHost,
+    app: &AppHandle,
     input: SettingsInput,
 ) -> Result<IntegrationSettings, String> {
     let key = host
         .credentials
         .read_qveris_key()?
         .ok_or("QVeris credential is not configured")?;
-    let mut settings = config::load(&app)?;
+    let mut settings = config::load(app)?;
     settings.capability_base_url = input
         .capability_base_url
         .trim()
@@ -1206,11 +1227,7 @@ async fn qveris_model_catalog_sync(
     settings.model_id = input.model_id.trim().to_owned();
     config::validate(&settings)?;
     let base_url = settings.model_gateway_base_url.clone();
-    let models = tauri::async_runtime::spawn_blocking(move || {
-        executor::fetch_model_catalog(&key, &base_url)
-    })
-    .await
-    .map_err(|error| format!("model catalog task failed: {error}"))??;
+    let models = executor::fetch_model_catalog(&key, &base_url)?;
     settings.models = models;
     settings.model_id = config::reconcile_model_id(&settings.model_id, &settings.models);
     config::validate_model_selection(&settings)?;
@@ -1219,6 +1236,18 @@ async fn qveris_model_catalog_sync(
         models: settings.models.clone(),
     })?;
     Ok(settings)
+}
+
+#[tauri::command]
+async fn qveris_model_catalog_sync(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+    input: SettingsInput,
+) -> Result<IntegrationSettings, String> {
+    let host = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || sync_model_catalog(&host, &app, input))
+        .await
+        .map_err(|error| format!("model catalog task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1254,11 +1283,22 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building FolioMind");
-    app.run(|app_handle, event| {
+    let mut web_host =
+        match web_host::WebHost::start(app.handle().clone(), (*app.state::<PiHost>()).clone()) {
+            Ok(host) => Some(host),
+            Err(error) => {
+                eprintln!("local web host unavailable: {error}");
+                None
+            }
+        };
+    app.run(move |app_handle, event| {
         if matches!(
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
+            if let Some(host) = web_host.as_mut() {
+                host.stop();
+            }
             app_handle.state::<PiHost>().shutdown();
         }
     });

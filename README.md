@@ -20,6 +20,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 内置 QVeris OpenAI-compatible 模型网关配置；Pi 只访问带短期令牌的本机回环代理，不接触长期 API Key。
 - 内置 Pi Bash 工具；Windows 安装包捆绑经过 SHA-256 校验的 PortableGit/Bash，所有桌面子进程均以无控制台窗口方式启动。
 - WebView 对话在桌面环境通过 Tauri command 调用真实 Pi RPC；普通浏览器预览使用明确的演示回退。
+- 本地 Web 调试可连接桌面端随附的 `127.0.0.1` Local Host；浏览器通过受保护的短期会话调用同一套 Pi、QVeris、凭据和用户状态能力。
 
 ## 架构
 
@@ -52,6 +53,17 @@ Rust Host
 4. 在自选股页面点击“实时数据”，Agent 会使用内置 Skill 查询并返回 provider、工具 ID、来源和截至时间。
 
 行情页面中的预置数字仅用于界面布局演示，并有明确标注；Agent 查询结果才是实时外部数据。
+
+### 本地 Web 调试
+
+Web 端只用于本机调试时，先启动桌面端 Host，再启动 Vite：
+
+```bash
+npm run desktop:dev
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+浏览器打开 `http://127.0.0.1:5173` 后，设置页会显示“本地调试 Host”。此模式的 API Key 仍保存到操作系统凭据库，浏览器只持有当前标签页的短期 Host 会话令牌；关闭桌面端后 Web 端会退回到明确标注的预览模式。普通浏览器部署不启用本地 Host，也不会把长期 API Key 写入 `localStorage`。
 
 为避免长期凭据通过明文链路泄露，远程 QVeris 地址必须使用 HTTPS；只有 `localhost`、`127.0.0.0/8` 和 `::1` 回环地址允许使用 HTTP。基础地址不能包含 query 或 fragment。
 
@@ -86,10 +98,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.1`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.3`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.1 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.3 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。

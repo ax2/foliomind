@@ -1,3 +1,5 @@
+import { isLocalWebRuntime, localHostRequest } from "./localHost.js";
+
 const DEMO_REPLY = "我会按 Search → Inspect → Call 流程调用 QVeris，并把数据来源、截至时间与执行记录一起返回。";
 const DEFAULT_SETTLE_TIMEOUT_MS = 120_000;
 const MAX_PROMPT_CHARS = 32_000;
@@ -42,7 +44,11 @@ async function abortActiveRun(invoke) {
 }
 
 export async function abortPi() {
-  if (!isDesktopRuntime()) throw new Error("停止分析仅在桌面应用中可用");
+  if (!isDesktopRuntime()) {
+    if (!isLocalWebRuntime()) throw new Error("停止分析仅在本地调试 Host 或桌面应用中可用");
+    await localHostRequest("/api/runtime/abort", { method: "POST" });
+    return true;
+  }
   const { invoke } = await import("@tauri-apps/api/core");
   const response = await invoke("runtime_send_rpc", { payload: { type: "abort" }, timeoutMs: 5_000 });
   const commandError = rejectedCommandError(response);
@@ -71,7 +77,12 @@ function updateStreamingText(blocks, frame) {
 
 export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS, onProgress } = {}) {
   const prompt = normalizedPrompt(message);
-  if (!isDesktopRuntime()) return { text: DEMO_REPLY, mode: "browser-demo" };
+  if (!isDesktopRuntime()) {
+    if (!isLocalWebRuntime()) return { text: DEMO_REPLY, mode: "browser-demo" };
+    const result = await localHostRequest("/api/runtime/prompt", { method: "POST", timeoutMs: settleTimeoutMs + 5_000, body: JSON.stringify({ message: prompt, timeoutMs: settleTimeoutMs }) });
+    if (result.text) onProgress?.({ text: result.text });
+    return { text: result.text || "本地 Pi 已完成本轮分析。", mode: "pi-local-host", audits: result.audits || [] };
+  }
   const [{ invoke }, { listen }] = await Promise.all([
     import("@tauri-apps/api/core"),
     import("@tauri-apps/api/event"),

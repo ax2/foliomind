@@ -1,4 +1,5 @@
 import { isDesktopRuntime } from "./piRuntime.js";
+import { isLocalWebRuntime, localHostRequest } from "./localHost.js";
 
 const STORAGE_KEY = "foliomind.user-state.v1";
 
@@ -18,11 +19,17 @@ function readBrowserState() {
 
 export async function loadUserState() {
   if (isDesktopRuntime()) return desktopInvoke("user_state_load");
+  if (isLocalWebRuntime()) {
+    try { return await localHostRequest("/api/user-state"); } catch { /* Keep browser preview usable when Host is offline. */ }
+  }
   return readBrowserState();
 }
 
 export async function saveUserState(state) {
   if (isDesktopRuntime()) return desktopInvoke("user_state_save", { state });
+  if (isLocalWebRuntime()) {
+    try { return await localHostRequest("/api/user-state", { method: "POST", body: JSON.stringify({ state }) }); } catch { /* Fall back to browser-only preview state. */ }
+  }
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
