@@ -19,14 +19,14 @@ export function ActivityRail() {
       </button>
       <div className="rail-links">
         {nav.map(([id, label, Icon]) => (
-          <button key={id} className={activeView === id ? "rail-link active" : "rail-link"} onClick={() => setActiveView(id)}>
+          <button key={id} className={activeView === id ? "rail-link active" : "rail-link"} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}>
             <Icon size={22} weight={activeView === id ? "fill" : "regular"} />
             <span>{label}</span>
           </button>
         ))}
       </div>
       <div className="rail-footer">
-        <button className="rail-link" onClick={() => setActiveView("settings")}><Gear size={22} /><span>设置</span></button>
+        <button className={activeView === "settings" ? "rail-link active" : "rail-link"} aria-current={activeView === "settings" ? "page" : undefined} onClick={() => setActiveView("settings")}><Gear size={22} /><span>设置</span></button>
         <button className="avatar-button" aria-label="个人账户"><Storefront size={18} /></button>
       </div>
     </nav>

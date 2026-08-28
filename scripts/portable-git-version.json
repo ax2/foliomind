@@ -1,0 +1,14 @@
+{
+  "tag": "v2.55.0.windows.3",
+  "version": "2.55.0.3",
+  "assets": {
+    "windows-x64": {
+      "name": "PortableGit-2.55.0.3-64-bit.7z.exe",
+      "sha256": "ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d"
+    },
+    "windows-arm64": {
+      "name": "PortableGit-2.55.0.3-arm64.7z.exe",
+      "sha256": "3bf26b94d9399b16a890776e468334f501742861576cbcdea2d9134643c374bd"
+    }
+  }
+}

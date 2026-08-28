@@ -27,7 +27,7 @@ if (!existsSync(archive)) {
   const url = `https://github.com/earendil-works/pi-mono/releases/download/v${lock.version}/${archiveName}`;
   console.log(`[fetch-pi] downloading ${url}`);
   try {
-    execFileSync("curl", ["--fail", "--location", "--retry", "3", "--connect-timeout", "30", "--max-time", "600", "--output", archive, url], { stdio: "inherit" });
+    execFileSync("curl", ["--fail", "--location", "--retry", "3", "--connect-timeout", "30", "--max-time", "600", "--output", archive, url], { stdio: "inherit", windowsHide: true });
   } catch (curlError) {
     rmSync(archive, { force: true });
     const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(600_000) });
@@ -43,7 +43,7 @@ if (digest !== lock.sha256[archiveName]) {
 
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
-execFileSync("tar", [windows ? "-xf" : "-xzf", archive, "-C", output], { stdio: "inherit" });
+execFileSync("tar", [windows ? "-xf" : "-xzf", archive, "-C", output], { stdio: "inherit", windowsHide: true });
 const wrapper = join(output, "pi");
 if (existsSync(wrapper) && statSync(wrapper).isDirectory()) {
   const staging = join(output, `pi-wrapper-${process.pid}`);

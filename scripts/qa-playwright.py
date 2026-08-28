@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from playwright.async_api import expect, async_playwright
@@ -7,7 +8,19 @@ from playwright.async_api import expect, async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / ".qa"
-CHROMIUM = "/home/alex/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome"
+CHROMIUM_CANDIDATES = (
+    "/home/alex/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
+    "/home/alex/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell",
+    "/home/alex/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome",
+    "/home/alex/.local/chrome-linux64/chrome",
+)
+
+
+def chromium_executable() -> str:
+    candidates = (os.environ.get("FOLIOMIND_CHROMIUM"), *CHROMIUM_CANDIDATES)
+    if executable := next((path for path in candidates if path and Path(path).is_file()), None):
+        return executable
+    raise FileNotFoundError("找不到 Chromium；请通过 FOLIOMIND_CHROMIUM 指定可执行文件")
 
 
 async def main() -> None:
@@ -18,7 +31,7 @@ async def main() -> None:
 
     viewport = {"width": 1487, "height": 1058}
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True, executable_path=CHROMIUM)
+        browser = await playwright.chromium.launch(headless=True, executable_path=chromium_executable())
         context = await browser.new_context(viewport=viewport, device_scale_factor=1)
         page = await context.new_page()
         page.set_default_timeout(6_000)
@@ -45,6 +58,11 @@ async def main() -> None:
         await install_button.click()
         await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible()
         checks.append({"flow": "安装 Skill", "passed": True})
+
+        await click_and_capture("设置", "implementation-settings.png", "QVeris 数据与模型凭证")
+        await expect(page.get_by_label("Gateway Base URL")).to_have_value("https://aigateway.qveris.ai/v1")
+        await expect(page.get_by_text("未配置", exact=True)).to_be_visible()
+        checks.append({"flow": "真实数据与模型设置", "passed": True})
 
         await click_and_capture("对话", "implementation-chat.png", "分析摘要")
         composer = page.get_by_placeholder("向 FolioMind 提问或下达分析指令…")
@@ -80,6 +98,12 @@ async def main() -> None:
     }
     (OUTPUT / "playwright-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    failed_checks = [check["flow"] for check in checks if not check["passed"]]
+    if failed_checks or console_errors or page_errors:
+        raise SystemExit(
+            f"Playwright QA failed: checks={failed_checks}, "
+            f"consoleErrors={len(console_errors)}, pageErrors={len(page_errors)}"
+        )
 
 
 if __name__ == "__main__":

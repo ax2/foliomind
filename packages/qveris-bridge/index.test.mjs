@@ -32,7 +32,12 @@ async function completeChain(tools) {
 }
 
 test("registers the three Pi tools", () => {
-  assert.deepEqual([...loadExtension().keys()], ["qveris_search", "qveris_inspect", "qveris_call"]);
+  const tools = loadExtension();
+  assert.deepEqual([...tools.keys()], ["qveris_search", "qveris_inspect", "qveris_call"]);
+  assert.equal("session_id" in tools.get("qveris_search").parameters.properties, false);
+  assert.equal("session_id" in tools.get("qveris_inspect").parameters.properties, false);
+  assert.equal("session_id" in tools.get("qveris_call").parameters.properties, false);
+  assert.equal("max_response_size" in tools.get("qveris_call").parameters.properties, false);
 });
 
 test("accepts only loopback executor URLs", () => {

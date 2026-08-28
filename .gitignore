@@ -2,6 +2,8 @@ node_modules/
 .cache/
 src-tauri/resources/pi/*
 !src-tauri/resources/pi/.gitkeep
+src-tauri/resources/portable-git/*
+!src-tauri/resources/portable-git/.gitkeep
 dist/
 src-tauri/target/
 .DS_Store

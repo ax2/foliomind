@@ -1,46 +1,48 @@
-import { ArrowUp, CaretRight, Check, Info, MagnifyingGlass, Plus, Sparkle } from "@phosphor-icons/react";
-import { useState } from "react";
+import { ArrowUp, Check, Info, MagnifyingGlass, Plus, Sparkle, Square } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 import { useLabStore } from "../store/useLabStore.js";
+import { AssistantMessageText } from "./AssistantMessageText.jsx";
 
 export function CopilotPanel({ standalone = false }) {
   const [draft, setDraft] = useState("");
   const messages = useLabStore((state) => state.messages);
   const sendMessage = useLabStore((state) => state.sendMessage);
+  const cancelMessage = useLabStore((state) => state.cancelMessage);
   const runtimeMode = useLabStore((state) => state.runtimeMode);
+  const runtimeConfiguring = useLabStore((state) => state.runtimeConfiguring);
+  const feedEnd = useRef(null);
+  const running = runtimeMode === "running";
+  const cancelling = runtimeMode === "cancelling";
+  const runtimeBusy = running || cancelling;
+  const busy = runtimeBusy || runtimeConfiguring;
+  useEffect(() => {
+    if (typeof feedEnd.current?.scrollIntoView === "function") feedEnd.current.scrollIntoView({ block: "nearest" });
+  }, [messages, busy]);
   const submit = () => {
     const value = draft.trim();
-    if (!value) return;
-    sendMessage(value);
+    if (!value || busy) return;
+    void sendMessage(value);
     setDraft("");
   };
   return (
     <aside className={standalone ? "copilot-panel standalone" : "copilot-panel"}>
       <div className="copilot-heading"><div><Sparkle size={20} weight="fill" />FolioMind Agent <Info size={16} /></div></div>
-      <div className="conversation-feed">
+      <div className="conversation-feed" role="log" aria-live="polite" aria-relevant="additions text">
         {messages.map((message) => message.role === "user" ? (
-          <div key={message.id} className="user-message-wrap"><div className="user-message">{message.text}</div><time>15:00:22&nbsp; ✓✓</time></div>
+          <div key={message.id} className="user-message-wrap"><div className="user-message">{message.text}</div></div>
         ) : (
-          <div key={message.id} className="assistant-message">
-            <div className="answer-title"><MagnifyingGlass size={18} />分析摘要</div>
-            <p>{message.text}</p>
-            <h4>关键观点</h4>
-            <ul><li>收入与利润保持双位数增长，盈利能力领先行业。</li><li>品牌壁垒高，渠道库存处于合理区间。</li><li>估值接近三年 60% 分位，需关注需求节奏。</li><li>风险：宏观消费波动、政务消费约束、批价回落。</li></ul>
+          <div key={message.id} className="assistant-message" aria-busy={message.streaming || undefined}>
+            <div className="answer-title"><MagnifyingGlass size={18} />{message.streaming ? "正在分析" : "分析摘要"}</div>
+            <AssistantMessageText text={message.text} streaming={message.streaming} />
+            {message.audits?.length > 0 && <div className="tool-run"><div className="tool-run-title">QVeris 审计记录（{message.audits.length}）</div>{message.audits.map((audit, index) => <div key={`${audit.toolCallId}-${index}`}><Check size={14} />{audit.operation.toUpperCase()} · {audit.outcome === "success" ? "成功" : "失败"}</div>)}</div>}
           </div>
         ))}
-        <div className="tool-run">
-          <div className="tool-run-title">工具调用（3）</div>
-          {["qv_financials · 财务指标与估值", "qv_price_monitor · 批价与动销监控", "qv_news_sentiment · 舆情与事件分析"].map((tool, index) => <div key={tool}><Check size={14} />{index + 1}. {tool}<time>15:00:{22 + index * 2}</time></div>)}
-          <button>查看详情 <CaretRight size={14} /></button>
-        </div>
-        <div className="copilot-signal">
-          <div><span className="event-dot" /><strong>批价波动监控</strong><b>事件</b></div>
-          <p>飞天茅台散瓶批价较昨日下跌 10 元，报 2,780 元/瓶。</p>
-          <time>08-27 14:48</time>
-        </div>
+        {!messages.some((message) => message.audits?.length) && <div className="audit-empty"><Info size={15} />真实工具调用后，这里会显示 Search / Inspect / Call 审计记录。</div>}
+        <div ref={feedEnd} />
       </div>
-      <div className="composer">
-        <textarea value={draft} disabled={runtimeMode === "running"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={runtimeMode === "running" ? "Pi 正在分析…" : "向 FolioMind 提问或下达分析指令…"} />
-        <div><button className="composer-tool" aria-label="添加内容"><Plus size={19} /></button><span className="mode-select">深度分析</span><button className="send-button" onClick={submit} aria-label="发送"><ArrowUp size={19} weight="bold" /></button></div>
+      <div className="composer" aria-busy={busy}>
+        <textarea aria-label="分析问题" value={draft} maxLength={32000} disabled={busy} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} placeholder={runtimeConfiguring ? "正在应用设置，暂不能发起分析…" : busy ? (cancelling ? "正在停止本轮分析…" : "Pi 正在分析…") : "向 FolioMind 提问或下达分析指令…"} />
+        <div><button className="composer-tool" aria-label="添加内容" disabled={busy}><Plus size={19} /></button><span className="mode-select">{runtimeConfiguring ? "应用设置中" : cancelling ? "取消中" : running ? "分析中" : "深度分析"}</span><button className={`send-button${runtimeBusy ? " cancel-button" : ""}`} disabled={runtimeConfiguring || cancelling || (!running && !draft.trim())} onClick={running ? () => { void cancelMessage(); } : submit} aria-label={runtimeConfiguring ? "正在应用设置" : cancelling ? "正在取消" : running ? "停止分析" : "发送"}>{runtimeBusy ? <Square size={13} weight="fill" /> : <ArrowUp size={19} weight="bold" />}</button></div>
       </div>
       <div className="disclaimer">内容由 AI 生成，仅供参考，不构成投资建议。</div>
     </aside>
