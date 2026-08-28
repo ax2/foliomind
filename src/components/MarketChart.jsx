@@ -32,7 +32,7 @@ export function MarketChart({ series = [], range = "分时", loading = false, er
     return () => chart.remove();
   }, [points, range]);
   if (loading) return <div className="market-chart chart-empty" aria-label="正在获取真实行情">正在获取 {range} 真实数据…</div>;
-  if (error) return <div className="market-chart chart-empty" role="alert" aria-label={`${range}真实数据获取失败`}>该周期真实数据获取失败：{error}</div>;
-  if (points.length < 2) return <div className="market-chart chart-empty" aria-label={`暂无真实${range}数据`}>暂无真实{range}数据。QVeris 未返回时保持空状态。</div>;
+  if (error) return <div className="market-chart chart-empty" role="status" aria-label={`${range}数据暂不可用`}>该周期暂时没有可用数据，系统会稍后自动重试。</div>;
+  if (points.length < 2) return <div className="market-chart chart-empty" aria-label={`暂无真实${range}数据`}>暂无真实{range}数据；有新数据后会自动显示。</div>;
   return <div className="market-chart" ref={ref} aria-label={`真实${range}数据图表`} />;
 }

@@ -17,7 +17,7 @@ export function ActivityRail() {
   return (
     <nav className="activity-rail" aria-label="主导航">
       <button className="brand-button" onClick={() => setActiveView("watchlist")} aria-label="FolioMind 首页">
-        <img src="/assets/foliomind-logo.png" alt="" />
+        <img src="/assets/foliomind-logo-v2.png" alt="" width="36" height="36" decoding="async" />
       </button>
       <div className="rail-links">
         {nav.map(([id, label, Icon]) => (

@@ -36,7 +36,7 @@ export function CopilotPanel({ standalone = false }) {
           <div key={message.id} className="assistant-message" aria-busy={message.streaming || undefined}>
             <div className="answer-title"><MagnifyingGlass size={18} />{message.streaming ? "正在分析" : "分析摘要"}</div>
             <AssistantMessageText text={message.text} streaming={message.streaming} />
-            {message.audits?.length > 0 && <div className="tool-run"><div className="tool-run-title">QVeris 审计记录（{message.audits.length}）</div>{message.audits.map((audit, index) => <div key={`${audit.toolCallId}-${index}`}><Check size={14} />{audit.operation.toUpperCase()} · {audit.outcome === "success" ? "成功" : "失败"}</div>)}</div>}
+            {message.audits?.length > 0 && <div className="tool-run"><div className="tool-run-title">工具调用记录（{message.audits.length}）</div>{message.audits.map((audit, index) => <div key={`${audit.toolCallId}-${index}`}><Check size={14} />{audit.operation.toUpperCase()} · {audit.outcome === "success" ? "成功" : "失败"}</div>)}</div>}
           </div>
         ))}
         {!messages.some((message) => message.audits?.length) && <div className="audit-empty"><Info size={15} />真实工具调用后，这里会显示 Search / Inspect / Call 审计记录。</div>}

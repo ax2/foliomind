@@ -4,9 +4,11 @@ import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { loadIntegrationStatus } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
+import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
+export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items).slice(0, 8).map((item) => ({ ...item }));
 let persistenceQueue = Promise.resolve();
 
@@ -57,7 +59,7 @@ function normalizeRule(rule) {
 function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
   const body = String(result.summary || result.body || reply.text || "检查完成，请打开对话查看完整的来源与审计记录。").trim();
-  return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: reply.mode === "pi-rpc" ? "qveris" : "browser-demo" };
+  return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: reply.mode === "pi-rpc" ? "data-service" : "browser-demo" };
 }
 function quoteFromReply(text) {
   const value = findJsonObject(text);
@@ -66,7 +68,7 @@ function quoteFromReply(text) {
       price: Number(value.price),
       change: Number.isFinite(Number(value.change)) ? Number(value.change) : null,
       asOf: String(value.asOf || ""),
-      source: String(value.source || "QVeris"),
+      source: String(value.source || "数据服务"),
       series: Array.isArray(value.series) ? value.series : [],
       fundamentals: value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {},
       companyDescription: typeof value.companyDescription === "string" ? value.companyDescription : "",
@@ -82,7 +84,7 @@ function quoteFromReply(text) {
     price: Number(priceMatch[1].replaceAll(",", "")),
     change: changeMatch ? Number(changeMatch[1]) : null,
     asOf: asOfMatch?.[1]?.trim() || "",
-    source: sourceMatch?.[1]?.trim() || "QVeris",
+    source: sourceMatch?.[1]?.trim() || "数据服务",
   };
 }
 
@@ -103,7 +105,7 @@ function normalizeLiveQuote(value) {
     change: Number.isFinite(change) ? change : null,
     changeAmount: Number.isFinite(rawChange) ? rawChange : Number.isFinite(previousClose) ? price - previousClose : null,
     asOf: String(value.asOf ?? value.as_of ?? value.timestamp ?? ""),
-    source: String(value.source ?? value.dataSource ?? "QVeris"),
+    source: String(value.source ?? value.dataSource ?? "数据服务"),
     open: value.open ?? null,
     previousClose: Number.isFinite(previousClose) ? previousClose : value.previousClose ?? null,
     high: value.high ?? null,
@@ -157,18 +159,33 @@ function liveQuotesFromReply(text, symbols) {
 
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
-  messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过 QVeris Search → Inspect → Call 查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
+  messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
   rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+};
+
+function dataChannelChanged(previous, next) {
+  return Boolean(previous) && (
+    previous.credentialConfigured !== next?.credentialConfigured
+    || previous.settings?.modelId !== next?.settings?.modelId
+    || previous.settings?.modelGatewayBaseUrl !== next?.settings?.modelGatewayBaseUrl
+    || previous.settings?.capabilityBaseUrl !== next?.settings?.capabilityBaseUrl
+  );
+}
+
+const quoteRefreshReset = {
+  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "",
+  quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {},
+  quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {},
 };
 
 export const useLabStore = create((set, get) => ({
   ...initialLabState,
   hydrateIntegrationStatus: async () => {
     set({ integrationStatusLoading: true, integrationStatusError: "" });
-    try { set({ integrationStatus: await loadIntegrationStatus(), integrationStatusLoading: false }); }
+    try { get().setIntegrationStatus(await loadIntegrationStatus()); }
     catch (error) { set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) }); }
   },
-  setIntegrationStatus: (integrationStatus) => set({ integrationStatus, integrationStatusLoading: false, integrationStatusError: "" }),
+  setIntegrationStatus: (integrationStatus) => set((state) => ({ integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(dataChannelChanged(state.integrationStatus, integrationStatus) ? quoteRefreshReset : {}) })),
   refreshLiveData: async () => {
     const state = get();
     const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
@@ -189,7 +206,7 @@ export const useLabStore = create((set, get) => ({
           errors.push(`${item.name}：${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      if (!received) throw new Error(errors.join("；") || "QVeris 未返回可识别的真实行情");
+      if (!received) throw new Error(errors.join("；") || "数据服务暂未返回可识别的真实行情");
       set({ liveDataLoading: false, liveDataError: errors.length ? `部分行情获取失败：${errors.join("；")}` : "" });
       return true;
     } catch (error) {
@@ -206,7 +223,7 @@ export const useLabStore = create((set, get) => ({
     try {
       const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`, { settleTimeoutMs: 90_000 });
       const details = detailedQuoteFromReply(reply.text);
-      if (!details) throw new Error("QVeris 未返回可识别的行情详情");
+      if (!details) throw new Error("数据服务暂未返回可识别的行情详情");
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], ...details.quote, reportPeriod: details.reportPeriod } }, quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
       return true;
     } catch (error) {
@@ -228,7 +245,7 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
       return true;
     } catch (error) {
-      set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: error instanceof Error ? error.message : String(error) } } }));
+      set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: error instanceof Error ? error.message : String(error) } } }));
       return false;
     }
   },
@@ -241,7 +258,7 @@ export const useLabStore = create((set, get) => ({
       const persisted = await loadUserState();
       if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, userStateLoaded: true }));
       else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
-    } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: `本地用户数据加载失败：${error instanceof Error ? error.message : String(error)}` } }); }
+    } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
   persistUserState: () => persistSnapshot(get()),
   addWatchlist: async (item) => {
@@ -268,10 +285,10 @@ export const useLabStore = create((set, get) => ({
     const strategy = strategyFor(rule.strategyId);
     try {
       const reply = await askPi(`执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。阈值：${rule.threshold}${strategy.unit}。${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true或false,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`, { settleTimeoutMs: 120_000 });
-      const parsed = findJsonObject(reply.text); const result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实 QVeris 查询，请在桌面端检查。" : reply.text, severity: "info" };
+      const parsed = findJsonObject(reply.text); const result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
       set((state) => { const shouldNotify = result.triggered === true || reply.mode === "browser-demo" || !parsed; const notification = shouldNotify ? notificationFromResult(rule, item, result, reply) : null; return { monitorBusy: false, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: result.triggered ? nowIso() : candidate.lastTriggeredAt } : candidate), notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications }; }); await get().persistUserState(); return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error); set((state) => ({ monitorBusy: false, notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 检查失败`, body: message, severity: "warning", createdAt: nowIso(), read: false, source: "qveris" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
+      const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试"); set((state) => ({ monitorBusy: false, notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: nowIso(), read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
     }
   },
   runDueMonitorChecks: async () => { if (!isDesktopRuntime() || !get().userStateLoaded || get().monitorBusy) return false; const now = Date.now(); const due = get().rules.find((rule) => rule.enabled && (!rule.lastCheckedAt || now - Date.parse(rule.lastCheckedAt) >= rule.intervalSeconds * 1000)); return due ? get().runMonitorCheck(due.id) : false; },
@@ -282,7 +299,7 @@ export const useLabStore = create((set, get) => ({
     const prompt = String(text ?? "").trim(); if (!prompt) return false; const userId = createId("message"); const assistantId = createId("message"); let acquired = false;
     set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.liveDataLoading || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeMode: "running", messages: [...state.messages, { id: userId, role: "user", text: prompt }, { id: assistantId, role: "assistant", text: RUNNING_REPLY, mode: "streaming", audits: [], streaming: true }] }; }); if (!acquired) return false;
     try { const reply = await askPi(prompt, { onProgress: ({ text: partialText }) => set((state) => ({ messages: state.messages.map((message) => message.id === assistantId && message.streaming ? { ...message, text: partialText } : message) })) }); const quote = /实时数据|最新行情|最新价格/.test(prompt) ? quoteFromReply(reply.text) : null; set((state) => ({ runtimeMode: reply.mode, liveQuotes: quote ? { ...state.liveQuotes, [state.selectedSymbol]: quote } : state.liveQuotes, messages: state.messages.map((message) => message.id === assistantId ? { ...message, text: reply.text, mode: reply.mode, audits: reply.audits ?? [], streaming: false } : message) })); return true; }
-    catch (error) { const cancelled = error?.code === ABORTED_CODE; set((state) => ({ runtimeMode: cancelled ? "cancelled" : "error", messages: state.messages.map((message) => message.id === assistantId ? { ...message, text: cancelled ? "已取消本轮分析。" : `Pi Runtime 暂时不可用：${error instanceof Error ? error.message : String(error)}`, mode: cancelled ? "cancelled" : "error", streaming: false } : message) })); return false; }
+    catch (error) { const cancelled = error?.code === ABORTED_CODE; set((state) => ({ runtimeMode: cancelled ? "cancelled" : "error", messages: state.messages.map((message) => message.id === assistantId ? { ...message, text: cancelled ? "已取消本轮分析。" : friendlyDataMessage(error, "这次分析暂时没有完成，稍后可以重试。"), mode: cancelled ? "cancelled" : "error", streaming: false } : message) })); return false; }
   },
   cancelMessage: async () => { let acquired = false; set((state) => { if (state.runtimeMode !== "running" || state.runtimeCancelPending) return {}; acquired = true; return { runtimeMode: "cancelling", runtimeCancelPending: true }; }); if (!acquired) return false; try { await abortPi(); set({ runtimeCancelPending: false }); return true; } catch { set((state) => ({ runtimeCancelPending: false, ...(state.runtimeMode === "cancelling" ? { runtimeMode: "running" } : {}) })); return false; } },
 }));

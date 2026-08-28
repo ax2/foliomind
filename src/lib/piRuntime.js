@@ -1,6 +1,6 @@
 import { isLocalWebRuntime, localHostRequest } from "./localHost.js";
 
-const DEMO_REPLY = "我会按 Search → Inspect → Call 流程调用 QVeris，并把数据来源、截至时间与执行记录一起返回。";
+const DEMO_REPLY = "我会按 Search → Inspect → Call 流程调用已配置的数据工具，并把数据来源、截至时间与执行记录一起返回。";
 const DEFAULT_SETTLE_TIMEOUT_MS = 120_000;
 const MAX_PROMPT_CHARS = 32_000;
 const SETTLE_TIMEOUT_CODE = "PI_SETTLE_TIMEOUT";

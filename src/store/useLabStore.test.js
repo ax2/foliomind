@@ -100,7 +100,7 @@ describe("lab store streaming lifecycle", () => {
 
     await expect(useLabStore.getState().sendMessage("触发错误")).resolves.toBe(false);
     const messages = useLabStore.getState().messages;
-    expect(messages.at(-1)).toMatchObject({ role: "assistant", text: "Pi Runtime 暂时不可用：模型进程退出", mode: "error", streaming: false });
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", text: "这次分析暂时没有完成，稍后可以重试。", mode: "error", streaming: false });
     expect(messages.filter((message) => message.role === "assistant")).toHaveLength(2);
   });
 
