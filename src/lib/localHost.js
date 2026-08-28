@@ -1,4 +1,5 @@
-export const LOCAL_HOST_BASE_URL = "http://127.0.0.1:43123";
+const LOCAL_HOST_PORT = import.meta.env.VITE_FOLIOMIND_HOST_PORT || "43123";
+export const LOCAL_HOST_BASE_URL = `http://127.0.0.1:${LOCAL_HOST_PORT}`;
 export const LOCAL_HOST_UNAVAILABLE = "LOCAL_HOST_UNAVAILABLE";
 
 let sessionToken = null;
@@ -40,9 +41,9 @@ async function fetchJson(url, options = {}) {
     }
     return body;
   } catch (error) {
-    if (error?.name === "AbortError") throw localHostError("本地调试 Host 响应超时，请确认 FolioMind 桌面端正在运行", error);
+    if (error?.name === "AbortError") throw localHostError("本地调试 Host 响应超时，请确认 npm run web:dev 正在运行", error);
     if (error?.code === LOCAL_HOST_UNAVAILABLE) throw error;
-    if (error instanceof TypeError) throw localHostError("无法连接本地调试 Host，请先启动 FolioMind 桌面端", error);
+    if (error instanceof TypeError) throw localHostError("无法连接本地调试 Host，请先运行 npm run web:dev", error);
     throw error;
   } finally {
     clearTimeout(timeout);
