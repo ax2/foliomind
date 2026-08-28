@@ -5,6 +5,7 @@ mod config;
 mod credentials;
 mod executor;
 mod process_command;
+mod user_state;
 
 use config::IntegrationSettings;
 use credentials::{CredentialStore, OsCredentialStore};
@@ -1220,6 +1221,19 @@ async fn qveris_model_catalog_sync(
     Ok(settings)
 }
 
+#[tauri::command]
+fn user_state_load(app: AppHandle) -> Result<user_state::UserState, String> {
+    user_state::load(&app)
+}
+
+#[tauri::command]
+fn user_state_save(
+    app: AppHandle,
+    state: user_state::UserState,
+) -> Result<user_state::UserState, String> {
+    user_state::save(&app, &state)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -1234,7 +1248,9 @@ fn main() {
             qveris_credential_clear,
             integration_status,
             integration_settings_apply,
-            qveris_model_catalog_sync
+            qveris_model_catalog_sync,
+            user_state_load,
+            user_state_save
         ])
         .build(tauri::generate_context!())
         .expect("error while building FolioMind");

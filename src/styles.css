@@ -151,6 +151,8 @@ textarea:focus-visible {
   color: var(--blue);
   font-weight: 600;
 }
+.rail-icon-wrap { position: relative; display: inline-flex; }
+.rail-icon-wrap em { position: absolute; top: -7px; right: -12px; min-width: 15px; height: 15px; border-radius: 8px; padding: 0 3px; background: #f04444; color: #fff; font-size: 9px; line-height: 15px; font-style: normal; text-align: center; }
 .rail-footer {
   margin-top: auto;
   display: grid;
@@ -234,6 +236,20 @@ textarea:focus-visible {
 .watch-row.selected {
   background: #dfeeff;
 }
+.watch-row-main {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+}
+.watch-row-main > span { min-width: 0; display: grid; gap: 3px; }
+.watch-remove { border: 0; background: transparent; color: #a5acb6; cursor: pointer; padding: 2px; opacity: 0; }
+.watch-row:hover .watch-remove, .watch-row.selected .watch-remove { opacity: 1; }
 .watch-row > span {
   min-width: 0;
   display: grid;
@@ -980,6 +996,39 @@ textarea:focus-visible {
   cursor: pointer;
   font-size: 10px;
 }
+.strategy-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 20px; color: var(--muted); font-size: 11px; }
+.strategy-strip strong { color: #46505e; margin-right: 5px; }
+.strategy-strip span { border: 1px solid #dce8fb; border-radius: 999px; padding: 5px 9px; background: #f6f9ff; color: #3573bf; }
+.rule-run, .icon-button { border: 0; background: transparent; color: #697586; cursor: pointer; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; }
+.rule-run:hover, .icon-button:hover { background: #f0f2f5; color: var(--blue); }
+.rule-run:disabled { opacity: .45; cursor: not-allowed; }
+.secondary-button { border: 1px solid #d9dde4; border-radius: 7px; padding: 8px 11px; background: #fff; color: #59616d; cursor: pointer; font-size: 11px; }
+.secondary-button:disabled { opacity: .45; cursor: not-allowed; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgb(19 28 42 / 32%); pointer-events: none; }
+.modal-card { width: min(430px, 100%); display: grid; gap: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 20px 70px rgb(13 31 56 / 20%); pointer-events: auto; }
+.modal-heading { display: flex; align-items: center; justify-content: space-between; }
+.modal-heading h2 { margin: 0; font-size: 17px; }
+.modal-card label { display: grid; gap: 6px; color: #59616d; font-size: 11px; }
+.modal-card input, .modal-card select { width: 100%; height: 38px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 10px; background: #fff; color: #171a21; }
+.modal-card label small { margin-top: -25px; margin-left: auto; padding-right: 10px; color: var(--muted); }
+.modal-help { margin: -5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.form-error { margin: 0; color: #b14139; font-size: 11px; }
+.notification-list { display: grid; gap: 10px; margin-top: 22px; }
+.notification { position: relative; display: grid; grid-template-columns: 5px 1fr auto; gap: 13px; border: 1px solid var(--line); border-radius: 9px; padding: 14px 16px; cursor: pointer; }
+.notification:hover { border-color: #c6d9f7; background: #fbfdff; }
+.notification.read { opacity: .72; }
+.notification-severity { width: 5px; min-height: 42px; border-radius: 3px; background: #8ca0ba; }
+.notification-severity.warning { background: #efa62a; }
+.notification-severity.critical { background: #f04444; }
+.notification-severity.info { background: var(--blue); }
+.notification strong { font-size: 13px; }
+.notification p { margin: 5px 0; color: #657181; font-size: 11px; line-height: 1.55; }
+.notification small { color: var(--muted); font-size: 10px; }
+.unread-dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: var(--blue); }
+.empty-state { display: grid; justify-items: center; gap: 8px; margin: 18vh auto; color: var(--muted); text-align: center; }
+.empty-state svg { color: #9bbce8; }
+.empty-state strong { color: #4a5563; font-size: 14px; }
+.empty-state p { margin: 0; font-size: 11px; }
 .search-box {
   width: 270px;
   border: 1px solid #dfe2e7;
