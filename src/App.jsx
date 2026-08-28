@@ -12,9 +12,11 @@ export function App() {
   const settingsNotice = useLabStore((state) => state.settingsNotice);
   const clearSettingsNotice = useLabStore((state) => state.clearSettingsNotice);
   const hydrateUserState = useLabStore((state) => state.hydrateUserState);
+  const hydrateIntegrationStatus = useLabStore((state) => state.hydrateIntegrationStatus);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
   useEffect(() => {
     void hydrateUserState();
+    void hydrateIntegrationStatus();
     const timer = window.setInterval(() => { void runDueMonitorChecks(); }, MONITOR_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [hydrateUserState, runDueMonitorChecks]);

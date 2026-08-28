@@ -1,12 +1,21 @@
-import { useEffect, useRef } from "react";
-import { AreaSeries, createChart, HistogramSeries, LineSeries } from "lightweight-charts";
-import { intradaySeries } from "../data/market.js";
+import { useEffect, useMemo, useRef } from "react";
+import { AreaSeries, createChart } from "lightweight-charts";
 
-export function MarketChart() {
+function normalizeSeries(series) {
+  return (Array.isArray(series) ? series : []).map((point) => {
+    const value = Number(point?.value ?? point?.price ?? point?.close);
+    const rawTime = point?.time ?? point?.timestamp ?? point?.date;
+    const date = typeof rawTime === "string" && !/^\d{4}-\d{2}-\d{2}$/.test(rawTime) ? new Date(rawTime) : null;
+    const time = date && Number.isFinite(date.getTime()) ? Math.floor(date.getTime() / 1000) : rawTime;
+    return { time, value };
+  }).filter((point) => point.time != null && Number.isFinite(point.value));
+}
+
+export function MarketChart({ series = [] }) {
   const ref = useRef(null);
-
+  const points = useMemo(() => normalizeSeries(series), [series]);
   useEffect(() => {
-    if (!ref.current) return undefined;
+    if (!ref.current || points.length < 2) return undefined;
     const chart = createChart(ref.current, {
       autoSize: true,
       height: 280,
@@ -16,25 +25,11 @@ export function MarketChart() {
       timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
       crosshair: { vertLine: { color: "#8ebcff", style: 2 }, horzLine: { color: "#8ebcff", style: 2 } },
     });
-    const series = chart.addSeries(AreaSeries, {
-      lineColor: "#1677ff",
-      topColor: "rgba(22, 119, 255, 0.18)",
-      bottomColor: "rgba(22, 119, 255, 0.01)",
-      lineWidth: 2,
-      priceLineVisible: false,
-    });
-    series.setData(intradaySeries);
-    const average = chart.addSeries(LineSeries, { color: "#f5a524", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    average.setData(intradaySeries.map((point, index, values) => ({
-      time: point.time,
-      value: Number((values.slice(0, index + 1).reduce((sum, item) => sum + item.value, 0) / (index + 1)).toFixed(2)),
-    })));
-    const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "volume", lastValueVisible: false, priceLineVisible: false });
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    volume.setData(intradaySeries.map((point, index) => ({ time: point.time, value: 3800 + ((index * 791) % 6800), color: index % 3 === 0 ? "rgba(240,68,68,.6)" : "rgba(24,166,106,.55)" })));
+    const area = chart.addSeries(AreaSeries, { lineColor: "#1677ff", topColor: "rgba(22, 119, 255, 0.18)", bottomColor: "rgba(22, 119, 255, 0.01)", lineWidth: 2, priceLineVisible: false });
+    area.setData(points);
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, []);
-
-  return <div className="market-chart" ref={ref} aria-label="贵州茅台分时行情图" />;
+  }, [points]);
+  if (points.length < 2) return <div className="market-chart chart-empty" aria-label="暂无真实分时数据">暂无真实分时数据。查询行情后显示图表。</div>;
+  return <div className="market-chart" ref={ref} aria-label="真实分时数据图表" />;
 }

@@ -48,6 +48,7 @@ async function saveKey(value) {
   try { await chmod(credentialFile, 0o600); } catch { /* Windows has no POSIX mode. */ }
 }
 async function deleteKey() { try { await unlink(credentialFile); } catch { /* idempotent */ } }
+function apiKeyPrefix(value) { const key = String(value || "").trim(); return key ? `${key.slice(0, 8)}${key.length > 8 ? "…" : ""}` : ""; }
 
 function normalizeModels(items) {
   const seen = new Set();
@@ -150,7 +151,7 @@ async function route(req, body) {
   if (method === "GET" && path === "/api/health") return { ok: true, service: "foliomind-dev-host", mode: "standalone" };
   if (method === "GET" && path === "/api/session") return { token, service: "foliomind-dev-host", mode: "standalone" };
   requireSession(req);
-  if (method === "GET" && path === "/api/integration/status") return { credentialConfigured: Boolean(await readKey()), settings: await readJson(settingsFile, defaultSettings) };
+  if (method === "GET" && path === "/api/integration/status") { const key = await readKey(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: await readJson(settingsFile, defaultSettings) }; }
   if (method === "POST" && path === "/api/integration/credential") { if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) throw new Error("API Key 无效"); await saveKey(body.apiKey); return { configured: true }; }
   if (method === "DELETE" && path === "/api/integration/credential") { await deleteKey(); return { configured: false }; }
   if (method === "POST" && path === "/api/integration/models/sync") {

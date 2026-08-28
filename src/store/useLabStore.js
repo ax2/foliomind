@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { skills, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
+import { loadIntegrationStatus } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
@@ -35,18 +36,45 @@ function notificationFromResult(rule, item, result, reply) {
 }
 function quoteFromReply(text) {
   const value = findJsonObject(text);
-  if (!value || !Number.isFinite(Number(value.price))) return null;
-  return { price: Number(value.price), change: Number.isFinite(Number(value.change)) ? Number(value.change) : null, asOf: String(value.asOf || ""), source: String(value.source || "QVeris") };
+  if (value && Number.isFinite(Number(value.price))) {
+    return {
+      price: Number(value.price),
+      change: Number.isFinite(Number(value.change)) ? Number(value.change) : null,
+      asOf: String(value.asOf || ""),
+      source: String(value.source || "QVeris"),
+      series: Array.isArray(value.series) ? value.series : [],
+      fundamentals: value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {},
+      companyDescription: typeof value.companyDescription === "string" ? value.companyDescription : "",
+    };
+  }
+  const source = String(text ?? "");
+  const priceMatch = source.match(/(?:最新价|当前价|收盘价|last\s*price)[^\d$￥¥]{0,24}[$￥¥]?\s*([\d,]+(?:\.\d+)?)/i);
+  if (!priceMatch) return null;
+  const changeMatch = source.match(/(?:涨跌幅|涨幅|change)[^\d+\-]{0,18}([+\-]?\d+(?:\.\d+)?)\s*%/i);
+  const asOfMatch = source.match(/(?:数据时间|截至|as\s*of)[：:\s]*([^\n|]+)/i);
+  const sourceMatch = source.match(/(?:数据来源|来源|source)[：:\s]*([^\n|]+)/i);
+  return {
+    price: Number(priceMatch[1].replaceAll(",", "")),
+    change: changeMatch ? Number(changeMatch[1]) : null,
+    asOf: asOfMatch?.[1]?.trim() || "",
+    source: sourceMatch?.[1]?.trim() || "QVeris",
+  };
 }
 
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过 QVeris Search → Inspect → Call 查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 export const useLabStore = create((set, get) => ({
   ...initialLabState,
+  hydrateIntegrationStatus: async () => {
+    set({ integrationStatusLoading: true, integrationStatusError: "" });
+    try { set({ integrationStatus: await loadIntegrationStatus(), integrationStatusLoading: false }); }
+    catch (error) { set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) }); }
+  },
+  setIntegrationStatus: (integrationStatus) => set({ integrationStatus, integrationStatusLoading: false, integrationStatusError: "" }),
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
   setChartRange: (chartRange) => set({ chartRange }),

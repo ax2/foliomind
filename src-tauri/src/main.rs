@@ -1093,7 +1093,21 @@ fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> {
 #[serde(rename_all = "camelCase")]
 struct IntegrationStatus {
     credential_configured: bool,
+    key_prefix: Option<String>,
     settings: IntegrationSettings,
+}
+
+fn api_key_prefix(value: Option<String>) -> Option<String> {
+    let value = value?.trim().to_owned();
+    if value.is_empty() {
+        return None;
+    }
+    let prefix: String = value.chars().take(8).collect();
+    Some(if value.chars().count() > 8 {
+        format!("{prefix}…")
+    } else {
+        prefix
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -1109,8 +1123,10 @@ fn integration_status(
     host: State<'_, PiHost>,
     app: AppHandle,
 ) -> Result<IntegrationStatus, String> {
+    let key = host.credentials.read_qveris_key()?;
     Ok(IntegrationStatus {
-        credential_configured: host.credentials.read_qveris_key()?.is_some(),
+        credential_configured: key.is_some(),
+        key_prefix: api_key_prefix(key),
         settings: config::load(&app)?,
     })
 }
