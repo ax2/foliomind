@@ -175,7 +175,13 @@ async function route(req, body) {
     const timeoutMs = Math.max(1_000, Math.min(125_000, Number(body.timeoutMs) || 120_000));
     const timeout = setTimeout(() => activeAbort?.abort(new Error("timeout")), timeoutMs);
     try { return { ...(await promptAgent(body.message.trim(), settings, key, activeAbort.signal)), mode: "standalone-dev-host" }; }
-    finally { clearTimeout(timeout); activeAbort = null; }
+    finally {
+      clearTimeout(timeout);
+      activeAbort = null;
+      // A completed (or failed) request must release the runtime lock so the
+      // next browser prompt can start without requiring a host restart.
+      runtimeState = "stopped";
+    }
   }
   const error = new Error("route not found"); error.status = 404; throw error;
 }

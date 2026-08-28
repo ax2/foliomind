@@ -102,6 +102,25 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("未配置")).toBeInTheDocument();
   });
 
+  it("does not show preview quotes while the local Host status is loading", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+
+    render(<App />);
+    expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
+    expect(await screen.findByText("Pi / QVeris 实时检查已启用")).toBeInTheDocument();
+    expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
+  });
+
   it("requires a fresh model sync after changing the gateway", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
