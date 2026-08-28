@@ -33,6 +33,15 @@ function findJsonObject(text) {
   }
   return null;
 }
+function findJsonArray(text) {
+  const source = String(text ?? "");
+  const first = source.indexOf("[");
+  const last = source.lastIndexOf("]");
+  if (first >= 0 && last > first) {
+    try { const value = JSON.parse(source.slice(first, last + 1)); if (Array.isArray(value)) return value; } catch { /* Fall back to nested array boundaries. */ }
+  }
+  return [];
+}
 function normalizeRule(rule) {
   const strategy = strategyFor(rule.strategyId);
   return { id: String(rule.id ?? createId("rule")), symbol: String(rule.symbol ?? "600519"), strategyId: strategy.id, threshold: Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : strategy.defaultThreshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null };
@@ -74,15 +83,17 @@ function normalizeLiveQuote(value) {
   const price = Number(value.price ?? value.lastPrice ?? value.last_price);
   if (!Number.isFinite(price)) return null;
   const previousClose = Number(value.previousClose ?? value.previous_close ?? value.prevClose);
+  const rawChange = Number(value.changeAmount ?? value.change_amount ?? value.changeValue ?? value.change);
   const explicitPercent = Number(value.changePercent ?? value.change_percent ?? value.pctChange ?? value.percentChange);
   const change = Number.isFinite(explicitPercent)
     ? explicitPercent
-    : Number.isFinite(previousClose) && previousClose !== 0 && Number.isFinite(Number(value.change))
-      ? Number(value.change) / previousClose * 100
+    : Number.isFinite(previousClose) && previousClose !== 0 && Number.isFinite(rawChange)
+      ? rawChange / previousClose * 100
       : null;
   return {
     price,
     change: Number.isFinite(change) ? change : null,
+    changeAmount: Number.isFinite(rawChange) ? rawChange : Number.isFinite(previousClose) ? price - previousClose : null,
     asOf: String(value.asOf ?? value.as_of ?? value.timestamp ?? ""),
     source: String(value.source ?? value.dataSource ?? "QVeris"),
     open: value.open ?? null,
@@ -103,12 +114,32 @@ function normalizeLiveQuote(value) {
   };
 }
 
+function detailedQuoteFromReply(text) {
+  const value = findJsonObject(text) || {};
+  const quote = normalizeLiveQuote(value.quote) || normalizeLiveQuote(value.quotes?.[0]) || normalizeLiveQuote(value);
+  const rawSeries = value.seriesByRange || value.series_by_range || {};
+  const seriesByRange = Object.fromEntries(Object.entries(rawSeries).filter(([, points]) => Array.isArray(points)));
+  if (Array.isArray(value.series) && !seriesByRange["分时"]) seriesByRange["分时"] = value.series;
+  const fundamentals = value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {};
+  if (!quote && !Object.keys(fundamentals).length && !value.companyDescription && !value.company_description && !Object.keys(seriesByRange).length) return null;
+  return {
+    quote: { ...(quote || {}), seriesByRange, fundamentals: { ...(quote?.fundamentals || {}), ...fundamentals }, companyDescription: String(value.companyDescription || value.company_description || quote?.companyDescription || "") },
+    reportPeriod: String(value.reportPeriod || value.report_period || ""),
+  };
+}
+function seriesFromReply(text) {
+  const value = findJsonObject(text);
+  const series = Array.isArray(value?.series) ? value.series : Array.isArray(value?.data) ? value.data : findJsonArray(text);
+  return series.filter((point) => point && typeof point === "object");
+}
+
 function liveQuotesFromReply(text, symbols) {
   const value = findJsonObject(text);
   const items = Array.isArray(value?.quotes) ? value.quotes : Array.isArray(value) ? value : [];
-  const allowed = new Set(symbols);
+  const canonical = (symbol) => String(symbol ?? "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "");
+  const allowed = new Set(symbols.map(canonical));
   return items.reduce((result, item) => {
-    const symbol = String(item?.symbol ?? item?.code ?? "").trim().toUpperCase();
+    const symbol = canonical(item?.symbol ?? item?.code);
     if (!symbol || !allowed.has(symbol)) return result;
     const quote = normalizeLiveQuote(item);
     if (quote) result[symbol] = quote;
@@ -119,7 +150,7 @@ function liveQuotesFromReply(text, symbols) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过 QVeris Search → Inspect → Call 查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 export const useLabStore = create((set, get) => ({
@@ -135,17 +166,60 @@ export const useLabStore = create((set, get) => ({
     const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
     if (!configured || !state.watchlist.length || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling") return false;
     set({ liveDataLoading: true, liveDataError: "" });
+    const errors = [];
+    let received = 0;
     try {
-      const quotes = {};
       for (const item of state.watchlist) {
-        const reply = await askPi(`请使用内置 qveris-finance-research Skill，严格按 Search → Inspect → Call 查询 ${item.name}（${item.symbol}）的最新真实行情。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown、不要解释，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":0,"changePercent":0,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源","series":[]}],"errors":[]}。没有真实值的字段填 null。`, { settleTimeoutMs: 120_000 });
-        Object.assign(quotes, liveQuotesFromReply(reply.text, [item.symbol]));
+        try {
+          const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）A股实时行情快照。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`, { settleTimeoutMs: 60_000 });
+          const quotes = liveQuotesFromReply(reply.text, [item.symbol]);
+          if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
+          received += 1;
+          set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLastRefreshAt: nowIso() }));
+        } catch (error) {
+          errors.push(`${item.name}：${error instanceof Error ? error.message : String(error)}`);
+        }
       }
-      if (!Object.keys(quotes).length) throw new Error("QVeris 未返回可识别的真实行情");
-      set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLoading: false, liveDataLastRefreshAt: nowIso(), liveDataError: "" }));
+      if (!received) throw new Error(errors.join("；") || "QVeris 未返回可识别的真实行情");
+      set({ liveDataLoading: false, liveDataError: errors.length ? `部分行情获取失败：${errors.join("；")}` : "" });
       return true;
     } catch (error) {
       set({ liveDataLoading: false, liveDataError: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  },
+  refreshQuoteDetails: async (symbol) => {
+    const state = get();
+    const item = state.watchlist.find((entry) => entry.symbol === symbol);
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    if (!configured || !item || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling" || state.quoteDetailsLoading[symbol] || state.quoteDetailsLoaded[symbol]) return false;
+    set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
+    try {
+      const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`, { settleTimeoutMs: 90_000 });
+      const details = detailedQuoteFromReply(reply.text);
+      if (!details) throw new Error("QVeris 未返回可识别的行情详情");
+      set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], ...details.quote, reportPeriod: details.reportPeriod } }, quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
+      return true;
+    } catch (error) {
+      set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: error instanceof Error ? error.message : String(error) } }));
+      return false;
+    }
+  },
+  refreshQuoteSeries: async (symbol, range) => {
+    const state = get();
+    const item = state.watchlist.find((entry) => entry.symbol === symbol);
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
+    if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
+    set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
+    const rangeRequest = { 分时: "今天的1分钟或5分钟分时", "5日": "最近5个交易日日线", 日K: "最近90个交易日日线", 周K: "最近52周周线", 月K: "最近60个月月线", 季K: "最近20个季度线", 年K: "最近10年年线" }[range] || range;
+    try {
+      const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`, { settleTimeoutMs: 60_000 });
+      const series = seriesFromReply(reply.text);
+      set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
+      return true;
+    } catch (error) {
+      set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: error instanceof Error ? error.message : String(error) } } }));
       return false;
     }
   },

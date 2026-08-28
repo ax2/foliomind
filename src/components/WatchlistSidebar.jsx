@@ -1,4 +1,4 @@
-import { CaretDown, DotsThree, Plus, X } from "@phosphor-icons/react";
+import { DotsThree, Plus, X } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { stocks } from "../data/market.js";
 import { useLabStore } from "../store/useLabStore.js";
@@ -13,16 +13,28 @@ export function WatchlistSidebar() {
   const addWatchlist = useLabStore((state) => state.addWatchlist);
   const removeWatchlist = useLabStore((state) => state.removeWatchlist);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const previewMode = integrationStatus?.demo === true;
-  const [form, setForm] = useState({ symbol: "", name: "", market: "沪深", category: "自选" });
-  const groups = useMemo(() => Object.entries(watchlist.reduce((result, item) => { const label = item.market === "NASDAQ" ? "美股" : item.market || "自选"; (result[label] ||= []).push(item); return result; }, {})), [watchlist]);
-  const submit = async (event) => { event.preventDefault(); setError(""); try { await addWatchlist(form); setForm({ symbol: "", name: "", market: "沪深", category: "自选" }); setDialogOpen(false); } catch (value) { setError(value instanceof Error ? value.message : String(value)); } };
+  const suggestions = useMemo(() => {
+    const value = query.trim().toLocaleLowerCase("zh-CN");
+    if (!value) return [];
+    return Object.values(stocks).filter((item) => `${item.name} ${item.symbol}`.toLocaleLowerCase("zh-CN").includes(value) && !watchlist.some((entry) => entry.symbol === item.symbol)).slice(0, 6);
+  }, [query, watchlist]);
+  const closeDialog = () => { setDialogOpen(false); setQuery(""); setError(""); };
+  const chooseSuggestion = async (item) => { try { await addWatchlist(item); closeDialog(); } catch (value) { setError(value instanceof Error ? value.message : String(value)); } };
+  const submit = async (event) => {
+    event.preventDefault(); setError("");
+    const value = query.trim();
+    if (!value) return;
+    const suggestion = suggestions[0];
+    try { await addWatchlist(suggestion || { symbol: value.toUpperCase(), name: value, market: "自定义", category: "自选" }); closeDialog(); } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+  };
   return <aside className="watchlist-sidebar">
     <div className="sidebar-heading"><h2>自选</h2><div><button aria-label="添加自选" onClick={() => setDialogOpen(true)}><Plus size={19} /></button><button aria-label="更多"><DotsThree size={20} /></button></div></div>
-    <div className="watch-groups">{groups.map(([label, items]) => <section key={label}><h3>{label}<CaretDown size={13} /></h3>{items.map((item) => { const quote = liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null); const hasQuote = Number.isFinite(quote?.price); return <div className={selectedSymbol === item.symbol ? "watch-row selected" : "watch-row"} key={item.symbol}><button className="watch-row-main" onClick={() => selectSymbol(item.symbol)}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span className={quote?.change >= 0 ? "quote up" : "quote down"}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasQuote ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : previewMode ? "预览模式" : "加载中"}</small></span></button><button className="watch-remove" aria-label="移除自选" onClick={() => { void removeWatchlist(item.symbol); }}><X size={12} /></button></div>; })}</section>)}</div>
+    <div className="watch-groups">{watchlist.map((item) => { const quote = liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null); const hasQuote = Number.isFinite(quote?.price); return <div className={selectedSymbol === item.symbol ? "watch-row selected" : "watch-row"} key={item.symbol}><button className="watch-row-main" onClick={() => selectSymbol(item.symbol)}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span className={quote?.change >= 0 ? "quote up" : "quote down"}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasQuote && Number.isFinite(quote.change) ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : previewMode ? "预览模式" : "加载中"}</small></span></button><button className="watch-remove" aria-label="移除自选" onClick={() => { void removeWatchlist(item.symbol); }}><X size={12} /></button></div>; })}</div>
     <div className="sidebar-status"><span className="status-dot" />{liveDataLoading ? "正在获取 QVeris 实时行情…" : realDataMode ? "Pi / QVeris 实时检查已启用" : "等待配置真实数据"}</div>
-    {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card sidebar-modal" onSubmit={submit}><div className="modal-heading"><h2>添加自选标的</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">添加后会保存到本机，并可用于实时查询和盯盘策略。</p><label>股票代码<input autoFocus required value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))} placeholder="例如 AAPL / 600519" /></label><label>名称<input required value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} placeholder="例如 Apple Inc." /></label><label>市场<select value={form.market} onChange={(event) => setForm((value) => ({ ...value, market: event.target.value }))}><option>沪深</option><option>深市</option><option>沪市</option><option>NASDAQ</option><option>NYSE</option><option>自定义</option></select></label><label>分类<input value={form.category} onChange={(event) => setForm((value) => ({ ...value, category: event.target.value }))} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-action" type="submit">保存自选</button></form></div>}
+    {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card sidebar-modal" onSubmit={submit}><div className="modal-heading"><h2>添加自选标的</h2><button type="button" className="icon-button" aria-label="关闭" onClick={closeDialog}><X size={18} /></button></div><p className="modal-help">输入名称或代码即可，选择推荐项可自动补齐市场信息；自定义输入只需填写一个字段。</p><label>搜索名称或代码<input autoFocus required value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如 茅台、600519、AAPL" aria-label="搜索名称或代码" /></label>{suggestions.length > 0 && <div className="watch-suggestions" role="listbox" aria-label="自选推荐">{suggestions.map((item) => <button type="button" key={item.symbol} onClick={() => { void chooseSuggestion(item); }}><span><strong>{item.name}</strong><small>{item.symbol} · {item.market}</small></span><Plus size={15} /></button>)}</div>}{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-action" type="submit">添加到自选</button></form></div>}
   </aside>;
 }

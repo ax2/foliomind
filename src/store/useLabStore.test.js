@@ -44,7 +44,7 @@ describe("lab store streaming lifecycle", () => {
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
     runtime.askPi.mockResolvedValue({
-      text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1297.4, changePercent: 0.39, asOf: "2026-08-28 15:17:32", source: "caidazi" }] }),
+      text: JSON.stringify({ quotes: [{ symbol: "600519.SS", price: 1297.4, changePercent: 0.39, asOf: "2026-08-28 15:17:32", source: "caidazi" }] }),
       mode: "pi-local-host",
       audits: [{ operation: "search" }],
     });
@@ -53,6 +53,43 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.askPi).toHaveBeenCalledOnce();
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, source: "caidazi" });
     expect(useLabStore.getState().liveDataError).toBe("");
+  });
+
+  it("hydrates detailed chart and company fields without inventing missing values", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockResolvedValue({
+      text: JSON.stringify({ quote: { symbol: "600519", price: 1297.4, changePercent: 0.39, previousClose: 1292.3, source: "caidazi" }, seriesByRange: { "日K": [{ time: "2026-08-28", open: 1289, high: 1297.89, low: 1288, close: 1297.4 }] }, fundamentals: { revenue: null, roe: 28.4 }, companyDescription: "真实简介" }),
+      mode: "pi-local-host",
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshQuoteDetails("600519")).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, previousClose: 1292.3, companyDescription: "真实简介" });
+    expect(useLabStore.getState().liveQuotes["600519"].seriesByRange["日K"]).toHaveLength(1);
+  });
+
+  it("loads one real chart range on demand and keeps empty ranges empty", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      quoteDetailsLoaded: { "600519": true },
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockResolvedValue({
+      text: JSON.stringify({ series: [{ time: "2026-08-28", open: 1289, high: 1297.89, low: 1288, close: 1297.4, volume: 1612600 }] }),
+      mode: "pi-local-host",
+      audits: [{ operation: "search" }, { operation: "inspect" }, { operation: "call" }],
+    });
+
+    await expect(useLabStore.getState().refreshQuoteSeries("600519", "日K")).resolves.toBe(true);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().liveQuotes["600519"].seriesByRange["日K"]).toHaveLength(1);
+    expect(useLabStore.getState().quoteSeriesLoaded["600519"]["日K"]).toBe(true);
   });
 
   it("replaces partial output with an error instead of appending another message", async () => {
