@@ -352,10 +352,11 @@ fn frame_text(message: &Value) -> Option<String> {
     if let Some(text) = content.as_str() {
         return Some(text.to_owned());
     }
-    let values = content.as_array()?.iter().filter_map(|part| {
-        (part.get("type").and_then(Value::as_str) == Some("text"))
-            .then(|| part.get("text").and_then(Value::as_str).unwrap_or_default())
-    });
+    let values = content
+        .as_array()?
+        .iter()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+        .map(|part| part.get("text").and_then(Value::as_str).unwrap_or_default());
     let text = values.collect::<Vec<_>>().join("");
     (!text.is_empty()).then_some(text)
 }
