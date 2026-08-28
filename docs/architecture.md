@@ -26,6 +26,8 @@ WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex`
 
 Runtime 启动前由 Host 在同一把状态锁内完成 `Stopped/Crashed → Starting` 预约，多个并发启动请求只有一个能够继续创建 executor 与 Pi 子进程。Host 对出站 JSONL 也执行 1 MiB 上限；Pi 的 stdout JSONL 与 stderr 诊断均由有界逐段读取器处理，超长单行会在固定内存内被丢弃和报告，不会先无限扩张缓冲区再做长度检查。
 
+每次 Runtime 启动都会分配单调递增的 generation，并在读取配置或创建任何运行资源前进入 `Starting`。停止或退出发生在启动窗口时会为该 generation 留下取消标记；启动流程在准备资源、创建 executor 和安装子进程前分别复查，已创建的局部资源会被回收。writer、stdout、stderr、watcher 与 QVeris 审计也绑定 generation，旧进程的迟到退出或 I/O 错误不能清空新 Runtime 的 pending 请求、代理或状态。
+
 “同步模型”只将 Host 从 `/models` 获取并验证过的“网关 + 目录”候选暂存在当前进程内，不写磁盘、不重启 Runtime。网关地址变化时禁止直接复用旧目录；保存时只接受与表单网关完全匹配的可信候选。刷新后若原默认模型已下线，Host 会回退到首个可用模型，并在生成 Pi 配置前再次校验所选模型确实属于当前目录。Host 会丢弃非聊天、空 ID、超长或含控制字符的模型项，去除重复 ID，并限制目录条目数与配置文件体积，避免异常上游目录污染 UI 或 Pi 配置。
 
 “保存并应用”由单个 Host command 完成：先组合磁盘当前值与匹配的内存候选并校验，再等待旧 Runtime 完全停止、原子写入并启动新 Runtime。只有完整应用成功才清除本次候选；并发到达的更新候选不会被旧保存操作清除。新配置无法启动时，Host 会恢复旧配置并尝试恢复旧 Runtime，避免前端跨多个 command 编排造成磁盘配置与运行状态分裂。

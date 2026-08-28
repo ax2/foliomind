@@ -77,6 +77,8 @@ struct Inner {
     writer: Option<mpsc::Sender<Value>>,
     pending: HashMap<String, mpsc::Sender<Result<Value, String>>>,
     status: RuntimeStatus,
+    generation: u64,
+    cancelled_start_generation: Option<u64>,
     executor: Option<RunExecutor>,
     staged_model_catalog: Option<StagedModelCatalog>,
 }
@@ -96,6 +98,8 @@ impl Default for PiHost {
                 writer: None,
                 pending: HashMap::new(),
                 status: RuntimeStatus::default(),
+                generation: 0,
+                cancelled_start_generation: None,
                 executor: None,
                 staged_model_catalog: None,
             })),
@@ -103,6 +107,19 @@ impl Default for PiHost {
             credentials: Arc::new(OsCredentialStore),
         }
     }
+}
+
+fn mark_start_cancelled(inner: &mut Inner) -> bool {
+    if inner.child.is_some() || inner.status.state != RuntimeState::Starting {
+        return false;
+    }
+    inner.cancelled_start_generation = Some(inner.generation);
+    inner.status = RuntimeStatus {
+        state: RuntimeState::Stopping,
+        pid: None,
+        detail: None,
+    };
+    true
 }
 
 impl PiHost {
@@ -151,36 +168,57 @@ impl PiHost {
     }
 
     fn start(&self, app: AppHandle) -> Result<RuntimeStatus, String> {
-        self.ensure_startable()?;
-        let binary = resolve_pi_binary(&app);
-        let extension = resolve_bridge_extension(&app)?;
-        let finance_skill = resolve_finance_skill(&app)?;
-        let bundled_bash = resolve_bundled_bash(&app)?;
-        let settings = config::load(&app)?;
-        self.reserve_start()?;
+        let generation = self.reserve_start()?;
         self.publish(&app, "status", None);
+        let (binary, extension, finance_skill, bundled_bash, settings) =
+            match (|| -> Result<_, String> {
+                Ok((
+                    resolve_pi_binary(&app),
+                    resolve_bridge_extension(&app)?,
+                    resolve_finance_skill(&app)?,
+                    resolve_bundled_bash(&app)?,
+                    config::load(&app)?,
+                ))
+            })() {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.finish_failed_start(&app, generation, &error);
+                    return Err(error);
+                }
+            };
+        if !self.start_is_current(generation)? {
+            self.finish_cancelled_start(&app, generation);
+            return Err("Pi runtime start was cancelled".into());
+        }
         let audit_app = app.clone();
+        let audit_host = self.clone();
         let audit = Arc::new(move |event: AuditEvent| {
-            let _ = audit_app.emit(
-                EVENT_NAME,
-                serde_json::json!({ "kind": "qveris_audit", "audit": event }),
-            );
+            if let Ok(inner) = audit_host.inner.lock() {
+                if inner.generation == generation && inner.status.state == RuntimeState::Running {
+                    let _ = audit_app.emit(
+                        EVENT_NAME,
+                        serde_json::json!({ "kind": "qveris_audit", "audit": event }),
+                    );
+                }
+            }
         });
-        let (executor, bridge) = RunExecutor::start(
+        let (executor, bridge) = match RunExecutor::start(
             self.credentials.clone(),
             settings.capability_base_url.clone(),
             settings.model_gateway_base_url.clone(),
             audit,
-        )
-        .inspect_err(|error| {
-            self.set_status(
-                &app,
-                RuntimeState::Crashed,
-                None,
-                Some(error.clone()),
-                "crash",
-            );
-        })?;
+        ) {
+            Ok(started) => started,
+            Err(error) => {
+                self.finish_failed_start(&app, generation, &error);
+                return Err(error);
+            }
+        };
+        if !self.start_is_current(generation)? {
+            executor.stop();
+            self.finish_cancelled_start(&app, generation);
+            return Err("Pi runtime start was cancelled".into());
+        }
         let agent_dir = match config::write_pi_config(
             &app,
             &settings,
@@ -190,16 +228,15 @@ impl PiHost {
             Ok(path) => path,
             Err(error) => {
                 executor.stop();
-                self.set_status(
-                    &app,
-                    RuntimeState::Crashed,
-                    None,
-                    Some(error.clone()),
-                    "crash",
-                );
+                self.finish_failed_start(&app, generation, &error);
                 return Err(error);
             }
         };
+        if !self.start_is_current(generation)? {
+            executor.stop();
+            self.finish_cancelled_start(&app, generation);
+            return Err("Pi runtime start was cancelled".into());
+        }
         let mut command = process_command::new_command(binary);
         command
             .arg("--extension")
@@ -227,54 +264,69 @@ impl PiHost {
             Ok(child) => child,
             Err(error) => {
                 executor.stop();
-                self.set_status(
-                    &app,
-                    RuntimeState::Crashed,
-                    None,
-                    Some(error.to_string()),
-                    "crash",
-                );
-                return Err(format!("cannot start Pi RPC runtime: {error}"));
+                let error = format!("cannot start Pi RPC runtime: {error}");
+                self.finish_failed_start(&app, generation, &error);
+                return Err(error);
             }
         };
         let pid = child.id();
-        let stdin = child.stdin.take().ok_or("Pi stdin was not piped")?;
-        let stdout = child.stdout.take().ok_or("Pi stdout was not piped")?;
-        let stderr = child.stderr.take().ok_or("Pi stderr was not piped")?;
+        let (stdin, stdout, stderr) =
+            match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
+                (Some(stdin), Some(stdout), Some(stderr)) => (stdin, stdout, stderr),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    executor.stop();
+                    let error = "Pi runtime pipes are unavailable";
+                    self.finish_failed_start(&app, generation, error);
+                    return Err(error.into());
+                }
+            };
         let child = Arc::new(Mutex::new(child));
         let (writer, writer_rx) = mpsc::channel();
-        {
+        let installed = {
             let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-            inner.child = Some(child.clone());
-            inner.writer = Some(writer);
-            inner.executor = Some(executor);
-            inner.status = RuntimeStatus {
-                state: RuntimeState::Running,
-                pid: Some(pid),
-                detail: None,
-            };
+            if inner.generation == generation
+                && inner.status.state == RuntimeState::Starting
+                && inner.cancelled_start_generation != Some(generation)
+            {
+                inner.child = Some(child.clone());
+                inner.writer = Some(writer);
+                inner.executor = Some(executor);
+                inner.status = RuntimeStatus {
+                    state: RuntimeState::Running,
+                    pid: Some(pid),
+                    detail: None,
+                };
+                self.spawn_writer(stdin, writer_rx, app.clone(), generation);
+                self.spawn_stdout(stdout, app.clone(), generation);
+                self.spawn_stderr(stderr, app.clone(), generation);
+                self.spawn_watcher(child.clone(), app.clone(), generation);
+                let _ = app.emit(
+                    EVENT_NAME,
+                    RuntimeEvent {
+                        kind: "started".into(),
+                        status: inner.status.clone(),
+                        frame: None,
+                    },
+                );
+                true
+            } else {
+                false
+            }
+        };
+        if !installed {
+            if let Ok(mut process) = child.lock() {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
+            self.finish_cancelled_start(&app, generation);
+            return Err("Pi runtime start was cancelled".into());
         }
-        self.publish(&app, "started", None);
-        self.spawn_writer(stdin, writer_rx, app.clone());
-        self.spawn_stdout(stdout, app.clone());
-        self.spawn_stderr(stderr, app.clone());
-        self.spawn_watcher(child, app);
         Ok(self.status())
     }
 
-    fn ensure_startable(&self) -> Result<(), String> {
-        let inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-        if matches!(
-            inner.status.state,
-            RuntimeState::Stopped | RuntimeState::Crashed
-        ) {
-            Ok(())
-        } else {
-            Err("Pi runtime is already active".into())
-        }
-    }
-
-    fn reserve_start(&self) -> Result<(), String> {
+    fn reserve_start(&self) -> Result<u64, String> {
         let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
         if !matches!(
             inner.status.state,
@@ -282,24 +334,104 @@ impl PiHost {
         ) {
             return Err("Pi runtime is already active".into());
         }
+        inner.generation = inner.generation.wrapping_add(1);
+        inner.cancelled_start_generation = None;
         inner.status = RuntimeStatus {
             state: RuntimeState::Starting,
             pid: None,
             detail: None,
         };
-        Ok(())
+        Ok(inner.generation)
+    }
+
+    fn start_is_current(&self, generation: u64) -> Result<bool, String> {
+        let inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
+        Ok(inner.generation == generation
+            && inner.status.state == RuntimeState::Starting
+            && inner.cancelled_start_generation != Some(generation))
+    }
+
+    fn finish_cancelled_start(&self, app: &AppHandle, generation: u64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.generation == generation {
+                inner.child = None;
+                inner.writer = None;
+                inner.executor = None;
+                inner.cancelled_start_generation = None;
+                inner.status = RuntimeStatus::default();
+                let _ = app.emit(
+                    EVENT_NAME,
+                    RuntimeEvent {
+                        kind: "stopped".into(),
+                        status: inner.status.clone(),
+                        frame: None,
+                    },
+                );
+            }
+        }
+    }
+
+    fn finish_failed_start(&self, app: &AppHandle, generation: u64, error: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.generation == generation {
+                if inner.cancelled_start_generation == Some(generation)
+                    || inner.status.state == RuntimeState::Stopping
+                {
+                    inner.cancelled_start_generation = None;
+                    inner.status = RuntimeStatus::default();
+                    let _ = app.emit(
+                        EVENT_NAME,
+                        RuntimeEvent {
+                            kind: "stopped".into(),
+                            status: inner.status.clone(),
+                            frame: None,
+                        },
+                    );
+                } else {
+                    inner.status = RuntimeStatus {
+                        state: RuntimeState::Crashed,
+                        pid: None,
+                        detail: Some(error.to_owned()),
+                    };
+                    let _ = app.emit(
+                        EVENT_NAME,
+                        RuntimeEvent {
+                            kind: "crash".into(),
+                            status: inner.status.clone(),
+                            frame: None,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     fn stop(&self, app: AppHandle) -> Result<RuntimeStatus, String> {
         let (child, executor) = {
             let mut inner = self.inner.lock().map_err(|_| "host lock poisoned")?;
-            if inner.child.is_none() {
-                return Ok(inner.status.clone());
-            }
-            inner.status.state = RuntimeState::Stopping;
-            (inner.child.clone().unwrap(), inner.executor.take())
+            let resources = if inner.child.is_none() {
+                if mark_start_cancelled(&mut inner) {
+                    (None, None)
+                } else {
+                    return Ok(inner.status.clone());
+                }
+            } else {
+                inner.status.state = RuntimeState::Stopping;
+                (inner.child.clone(), inner.executor.take())
+            };
+            let _ = app.emit(
+                EVENT_NAME,
+                RuntimeEvent {
+                    kind: "stopping".into(),
+                    status: inner.status.clone(),
+                    frame: None,
+                },
+            );
+            resources
         };
-        self.publish(&app, "stopping", None);
+        let Some(child) = child else {
+            return Ok(self.status());
+        };
         if let Some(executor) = executor {
             executor.stop();
         }
@@ -319,10 +451,7 @@ impl PiHost {
     fn stop_and_wait(&self, app: AppHandle, timeout: Duration) -> Result<(), String> {
         match self.status().state {
             RuntimeState::Stopped | RuntimeState::Crashed => return Ok(()),
-            RuntimeState::Starting => {
-                return Err("Pi runtime is still starting; retry settings apply shortly".into())
-            }
-            RuntimeState::Running => {
+            RuntimeState::Starting | RuntimeState::Running => {
                 self.stop(app)?;
             }
             RuntimeState::Stopping => {}
@@ -338,10 +467,12 @@ impl PiHost {
     }
 
     fn shutdown(&self) {
-        let (child, executor, pending) = {
+        let (generation, child, executor, pending) = {
             let Ok(mut inner) = self.inner.lock() else {
                 return;
             };
+            let generation = inner.generation;
+            mark_start_cancelled(&mut inner);
             inner.status = RuntimeStatus {
                 state: RuntimeState::Stopping,
                 pid: inner.status.pid,
@@ -349,6 +480,7 @@ impl PiHost {
             };
             inner.writer = None;
             (
+                generation,
                 inner.child.take(),
                 inner.executor.take(),
                 inner
@@ -374,7 +506,9 @@ impl PiHost {
             }
         }
         if let Ok(mut inner) = self.inner.lock() {
-            inner.status = RuntimeStatus::default();
+            if inner.generation == generation {
+                inner.status = RuntimeStatus::default();
+            }
         }
     }
 
@@ -416,40 +550,66 @@ impl PiHost {
             inner.pending.remove(id);
         }
     }
-    fn resolve(&self, id: &str, frame: Value) {
+    #[cfg(test)]
+    fn is_generation_running(&self, generation: u64) -> bool {
+        self.inner.lock().is_ok_and(|inner| {
+            inner.generation == generation && inner.status.state == RuntimeState::Running
+        })
+    }
+    fn publish_for_running_generation(
+        &self,
+        app: &AppHandle,
+        generation: u64,
+        kind: &str,
+        frame: Option<Value>,
+    ) {
+        if let Ok(inner) = self.inner.lock() {
+            if inner.generation == generation && inner.status.state == RuntimeState::Running {
+                let _ = app.emit(
+                    EVENT_NAME,
+                    RuntimeEvent {
+                        kind: kind.into(),
+                        status: inner.status.clone(),
+                        frame,
+                    },
+                );
+            }
+        }
+    }
+    fn resolve(&self, generation: u64, id: &str, frame: Value) {
         if let Ok(mut inner) = self.inner.lock() {
+            if inner.generation != generation {
+                return;
+            }
             if let Some(reply) = inner.pending.remove(id) {
                 let _ = reply.send(Ok(frame));
             }
         }
     }
-    fn fail_all(&self, reason: &str) {
+    fn fail_all(&self, generation: u64, reason: &str) -> bool {
         if let Ok(mut inner) = self.inner.lock() {
+            if inner.generation != generation {
+                return false;
+            }
             for (_, reply) in inner.pending.drain() {
                 let _ = reply.send(Err(reason.into()));
             }
             inner.writer = None;
+            return true;
         }
+        false
     }
-    fn fail_pending(&self, reason: &str) {
+    fn fail_pending(&self, generation: u64, reason: &str) -> bool {
         if let Ok(mut inner) = self.inner.lock() {
+            if inner.generation != generation {
+                return false;
+            }
             for (_, reply) in inner.pending.drain() {
                 let _ = reply.send(Err(reason.into()));
             }
+            return true;
         }
-    }
-    fn set_status(
-        &self,
-        app: &AppHandle,
-        state: RuntimeState,
-        pid: Option<u32>,
-        detail: Option<String>,
-        kind: &str,
-    ) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.status = RuntimeStatus { state, pid, detail };
-        }
-        self.publish(app, kind, None);
+        false
     }
 
     fn spawn_writer(
@@ -457,6 +617,7 @@ impl PiHost {
         mut stdin: impl Write + Send + 'static,
         rx: mpsc::Receiver<Value>,
         app: AppHandle,
+        generation: u64,
     ) {
         let host = self.clone();
         std::thread::spawn(move || {
@@ -464,7 +625,12 @@ impl PiHost {
                 let encoded = match encode_jsonl(&value) {
                     Ok(v) => v,
                     Err(e) => {
-                        host.publish(&app, "protocol_error", Some(Value::String(e)));
+                        host.publish_for_running_generation(
+                            &app,
+                            generation,
+                            "protocol_error",
+                            Some(Value::String(e)),
+                        );
                         continue;
                     }
                 };
@@ -473,14 +639,25 @@ impl PiHost {
                     .and_then(|_| stdin.flush())
                     .is_err()
                 {
-                    host.fail_all("Pi runtime stdin write failed");
-                    host.publish(&app, "transport_error", None);
+                    if host.fail_all(generation, "Pi runtime stdin write failed") {
+                        host.publish_for_running_generation(
+                            &app,
+                            generation,
+                            "transport_error",
+                            None,
+                        );
+                    }
                     break;
                 }
             }
         });
     }
-    fn spawn_stdout(&self, stdout: impl std::io::Read + Send + 'static, app: AppHandle) {
+    fn spawn_stdout(
+        &self,
+        stdout: impl std::io::Read + Send + 'static,
+        app: AppHandle,
+        generation: u64,
+    ) {
         let host = self.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
@@ -491,49 +668,77 @@ impl PiHost {
                             if let Some(id) =
                                 frame.get("id").and_then(Value::as_str).map(str::to_owned)
                             {
-                                host.resolve(&id, frame);
+                                host.resolve(generation, &id, frame);
                             } else {
-                                host.publish(&app, "event", Some(frame));
+                                host.publish_for_running_generation(
+                                    &app,
+                                    generation,
+                                    "event",
+                                    Some(frame),
+                                );
                             }
                         }
                         Err(error) => {
-                            host.fail_pending("Pi runtime emitted invalid JSONL");
-                            host.publish(&app, "protocol_error", Some(Value::String(error)));
+                            if host.fail_pending(generation, "Pi runtime emitted invalid JSONL") {
+                                host.publish_for_running_generation(
+                                    &app,
+                                    generation,
+                                    "protocol_error",
+                                    Some(Value::String(error)),
+                                );
+                            }
                         }
                     },
                     Ok(BoundedLine::TooLong) => {
-                        host.fail_pending("Pi runtime emitted an oversized JSONL frame");
-                        host.publish(
-                            &app,
-                            "protocol_error",
-                            Some(Value::String("Pi JSONL frame exceeds 1 MiB".into())),
-                        );
+                        if host
+                            .fail_pending(generation, "Pi runtime emitted an oversized JSONL frame")
+                        {
+                            host.publish_for_running_generation(
+                                &app,
+                                generation,
+                                "protocol_error",
+                                Some(Value::String("Pi JSONL frame exceeds 1 MiB".into())),
+                            );
+                        }
                     }
                     Ok(BoundedLine::Eof) => break,
                     Err(_) => {
-                        host.fail_all("Pi runtime stdout read failed");
-                        host.publish(&app, "transport_error", None);
+                        if host.fail_all(generation, "Pi runtime stdout read failed") {
+                            host.publish_for_running_generation(
+                                &app,
+                                generation,
+                                "transport_error",
+                                None,
+                            );
+                        }
                         break;
                     }
                 }
             }
         });
     }
-    fn spawn_stderr(&self, stderr: impl std::io::Read + Send + 'static, app: AppHandle) {
+    fn spawn_stderr(
+        &self,
+        stderr: impl std::io::Read + Send + 'static,
+        app: AppHandle,
+        generation: u64,
+    ) {
         let host = self.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stderr);
             loop {
                 match read_bounded_line(&mut reader, MAX_DIAGNOSTIC_LINE_BYTES) {
-                    Ok(BoundedLine::Line(raw)) => host.publish(
+                    Ok(BoundedLine::Line(raw)) => host.publish_for_running_generation(
                         &app,
+                        generation,
                         "diagnostic",
                         Some(Value::String(
                             String::from_utf8_lossy(&raw).chars().take(4096).collect(),
                         )),
                     ),
-                    Ok(BoundedLine::TooLong) => host.publish(
+                    Ok(BoundedLine::TooLong) => host.publish_for_running_generation(
                         &app,
+                        generation,
                         "diagnostic",
                         Some(Value::String(
                             "Pi stderr line exceeded 16 KiB and was discarded".into(),
@@ -544,7 +749,7 @@ impl PiHost {
             }
         });
     }
-    fn spawn_watcher(&self, child: Arc<Mutex<Child>>, app: AppHandle) {
+    fn spawn_watcher(&self, child: Arc<Mutex<Child>>, app: AppHandle, generation: u64) {
         let host = self.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_millis(100));
@@ -554,24 +759,63 @@ impl PiHost {
                 .and_then(|mut child| child.try_wait().ok())
                 .flatten();
             if let Some(status) = exit {
-                let next_state = state_after_process_exit(host.status().state);
-                host.fail_all("Pi runtime exited");
-                if let Ok(mut inner) = host.inner.lock() {
-                    inner.child = None;
-                    if let Some(executor) = inner.executor.take() {
+                let cleanup = if let Ok(mut inner) = host.inner.lock() {
+                    let owns_child = inner.generation == generation
+                        && inner
+                            .child
+                            .as_ref()
+                            .is_some_and(|current| Arc::ptr_eq(current, &child));
+                    if !owns_child {
+                        None
+                    } else {
+                        let next_state = state_after_process_exit(inner.status.state);
+                        let pending = inner
+                            .pending
+                            .drain()
+                            .map(|(_, reply)| reply)
+                            .collect::<Vec<_>>();
+                        inner.writer = None;
+                        inner.child = None;
+                        let executor = inner.executor.take();
+                        inner.cancelled_start_generation = None;
+                        inner.status.state = RuntimeState::Stopping;
+                        Some((next_state, pending, executor))
+                    }
+                } else {
+                    None
+                };
+                if let Some((next_state, pending, executor)) = cleanup {
+                    for reply in pending {
+                        let _ = reply.send(Err("Pi runtime exited".into()));
+                    }
+                    if let Some(executor) = executor {
                         executor.stop();
                     }
-                }
-                if next_state == RuntimeState::Stopped {
-                    host.set_status(&app, RuntimeState::Stopped, None, None, "stopped");
-                } else {
-                    host.set_status(
-                        &app,
-                        RuntimeState::Crashed,
-                        None,
-                        Some(status.to_string()),
-                        "crash",
-                    );
+                    if let Ok(mut inner) = host.inner.lock() {
+                        if inner.generation == generation
+                            && inner.status.state == RuntimeState::Stopping
+                        {
+                            let kind = if next_state == RuntimeState::Stopped {
+                                inner.status = RuntimeStatus::default();
+                                "stopped"
+                            } else {
+                                inner.status = RuntimeStatus {
+                                    state: RuntimeState::Crashed,
+                                    pid: None,
+                                    detail: Some(status.to_string()),
+                                };
+                                "crash"
+                            };
+                            let _ = app.emit(
+                                EVENT_NAME,
+                                RuntimeEvent {
+                                    kind: kind.into(),
+                                    status: inner.status.clone(),
+                                    frame: None,
+                                },
+                            );
+                        }
+                    }
                 }
                 break;
             }
@@ -1047,6 +1291,84 @@ mod tests {
             .count();
         assert_eq!(successes, 1);
         assert_eq!(host.status().state, RuntimeState::Starting);
+    }
+    #[test]
+    fn stop_request_cancels_a_start_before_child_installation() {
+        let host = PiHost::default();
+        let generation = host.reserve_start().unwrap();
+        assert!(!host.is_generation_running(generation));
+        {
+            let mut inner = host.inner.lock().unwrap();
+            inner.status.state = RuntimeState::Running;
+        }
+        assert!(host.is_generation_running(generation));
+        {
+            let mut inner = host.inner.lock().unwrap();
+            inner.status.state = RuntimeState::Starting;
+            assert!(mark_start_cancelled(&mut inner));
+            assert_eq!(inner.cancelled_start_generation, Some(generation));
+            assert_eq!(inner.status.state, RuntimeState::Stopping);
+        }
+        assert!(!host.start_is_current(generation).unwrap());
+    }
+    #[test]
+    fn shutdown_keeps_a_start_cancellation_tombstone_until_the_next_generation() {
+        let host = PiHost::default();
+        let cancelled_generation = host.reserve_start().unwrap();
+        host.shutdown();
+
+        assert_eq!(host.status(), RuntimeStatus::default());
+        assert_eq!(
+            host.inner.lock().unwrap().cancelled_start_generation,
+            Some(cancelled_generation)
+        );
+        assert!(!host.start_is_current(cancelled_generation).unwrap());
+
+        let next_generation = host.reserve_start().unwrap();
+        assert_ne!(next_generation, cancelled_generation);
+        assert_eq!(host.inner.lock().unwrap().cancelled_start_generation, None);
+    }
+    #[test]
+    fn stale_runtime_threads_cannot_resolve_or_fail_a_new_generation() {
+        let host = PiHost::default();
+        let stale_generation = host.reserve_start().unwrap();
+        {
+            let mut inner = host.inner.lock().unwrap();
+            inner.status = RuntimeStatus::default();
+        }
+        let current_generation = host.reserve_start().unwrap();
+        assert_ne!(stale_generation, current_generation);
+
+        let (reply, response) = mpsc::channel();
+        host.inner
+            .lock()
+            .unwrap()
+            .pending
+            .insert("current-request".into(), reply);
+
+        host.resolve(
+            stale_generation,
+            "current-request",
+            serde_json::json!({"id":"current-request","ok":false}),
+        );
+        assert!(!host.fail_all(stale_generation, "stale runtime failed"));
+        assert!(matches!(
+            response.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        host.resolve(
+            current_generation,
+            "current-request",
+            serde_json::json!({"id":"current-request","ok":true}),
+        );
+        assert_eq!(
+            response
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap()["ok"],
+            true
+        );
     }
     #[test]
     fn bounded_line_reader_discards_oversized_frames_without_losing_the_next_line() {
