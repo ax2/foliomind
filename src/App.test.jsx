@@ -295,4 +295,24 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("完成取消中")).toBeInTheDocument();
     expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在完成取消请求…");
   });
+
+  it("disables Runtime settings while a late cancellation command is pending", async () => {
+    useLabStore.setState({ runtimeMode: "pi-rpc", runtimeCancelPending: true });
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("桌面端")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存并应用" })).toBeDisabled();
+    expect(screen.getByLabelText("Gateway Base URL")).toBeDisabled();
+    expect(screen.getByText("请等待当前分析结束后再应用设置")).toBeInTheDocument();
+  });
 });

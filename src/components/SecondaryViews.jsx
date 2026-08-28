@@ -37,6 +37,7 @@ export function SkillsView() {
 export function SettingsView() {
   const runtimeMode = useLabStore((state) => state.runtimeMode);
   const runtimeConfiguring = useLabStore((state) => state.runtimeConfiguring);
+  const runtimeCancelPending = useLabStore((state) => state.runtimeCancelPending);
   const beginRuntimeConfiguration = useLabStore((state) => state.beginRuntimeConfiguration);
   const endRuntimeConfiguration = useLabStore((state) => state.endRuntimeConfiguration);
   const setSettingsNotice = useLabStore((state) => state.setSettingsNotice);
@@ -99,11 +100,11 @@ export function SettingsView() {
   };
 
   const modelOptions = form.models ?? [];
-  const analysisActive = ["running", "cancelling"].includes(runtimeMode);
+  const analysisActive = runtimeCancelPending || ["running", "cancelling"].includes(runtimeMode);
   const gatewayChanged = normalizeEndpoint(form.modelGatewayBaseUrl) !== normalizeEndpoint(status.settings.modelGatewayBaseUrl);
   const selectedModelAvailable = modelOptions.some((model) => model.id === form.modelId);
   const modelStatus = gatewayChanged ? "网关地址已变化，请先同步模型" : modelOptions.length ? `${modelOptions.length} 个可用模型` : "尚未同步模型";
-  const formDisabled = busy || runtimeConfiguring || loadState !== "ready";
+  const formDisabled = busy || runtimeConfiguring || runtimeCancelPending || loadState !== "ready";
   const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : "桌面端";
   const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? "已配置" : "未配置";
   return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy || runtimeConfiguring}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>
