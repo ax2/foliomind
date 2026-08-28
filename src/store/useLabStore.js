@@ -15,10 +15,11 @@ export const initialLabState = {
   rules: [{ id: "r1", symbol: "600519", name: "批价波动监控", enabled: true }],
   runtimeMode: "ready",
   runtimeConfiguring: false,
+  runtimeCancelPending: false,
   settingsNotice: null,
 };
 
-export const useLabStore = create((set, get) => ({
+export const useLabStore = create((set) => ({
   ...initialLabState,
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
@@ -29,7 +30,7 @@ export const useLabStore = create((set, get) => ({
   beginRuntimeConfiguration: () => {
     let acquired = false;
     set((state) => {
-      if (state.runtimeConfiguring || ["running", "cancelling"].includes(state.runtimeMode)) return {};
+      if (state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {};
       acquired = true;
       return { runtimeConfiguring: true };
     });
@@ -45,7 +46,7 @@ export const useLabStore = create((set, get) => ({
     const assistantId = crypto.randomUUID();
     let acquired = false;
     set((state) => {
-      if (state.runtimeConfiguring || ["running", "cancelling"].includes(state.runtimeMode)) return {};
+      if (state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {};
       acquired = true;
       return {
         runtimeMode: "running",
@@ -91,16 +92,17 @@ export const useLabStore = create((set, get) => ({
   cancelMessage: async () => {
     let acquired = false;
     set((state) => {
-      if (state.runtimeMode !== "running") return {};
+      if (state.runtimeMode !== "running" || state.runtimeCancelPending) return {};
       acquired = true;
-      return { runtimeMode: "cancelling" };
+      return { runtimeMode: "cancelling", runtimeCancelPending: true };
     });
     if (!acquired) return false;
     try {
       await abortPi();
+      set({ runtimeCancelPending: false });
       return true;
     } catch {
-      set((state) => state.runtimeMode === "cancelling" ? { runtimeMode: "running" } : {});
+      set((state) => ({ runtimeCancelPending: false, ...(state.runtimeMode === "cancelling" ? { runtimeMode: "running" } : {}) }));
       return false;
     }
   },

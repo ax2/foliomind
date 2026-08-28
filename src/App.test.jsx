@@ -285,4 +285,14 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("取消中")).toBeInTheDocument();
     expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在停止本轮分析…");
   });
+
+  it("keeps the composer locked until a late cancellation command settles", () => {
+    useLabStore.setState({ runtimeMode: "pi-rpc", runtimeCancelPending: true });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+    expect(screen.getByRole("button", { name: "正在完成取消" })).toBeDisabled();
+    expect(screen.getByLabelText("分析问题")).toBeDisabled();
+    expect(screen.getByText("完成取消中")).toBeInTheDocument();
+    expect(screen.getByLabelText("分析问题")).toHaveAttribute("placeholder", "正在完成取消请求…");
+  });
 });
