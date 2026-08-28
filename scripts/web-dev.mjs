@@ -2,12 +2,16 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { startLocalHost } from "./local-host.mjs";
 
-function availablePort(preferred) {
-  return new Promise((resolve) => {
-    const probe = createServer();
-    probe.once("error", () => resolve(preferred + 1));
-    probe.listen(preferred, "127.0.0.1", () => probe.close(() => resolve(preferred)));
-  });
+async function availablePort(preferred) {
+  for (let port = preferred; port < preferred + 100; port += 1) {
+    const available = await new Promise((resolve) => {
+      const probe = createServer();
+      probe.once("error", () => { probe.close(() => resolve(false)); });
+      probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
+    });
+    if (available) return port;
+  }
+  throw new Error(`无法在 ${preferred} 开始找到可用本地端口`);
 }
 
 const port = await availablePort(Number(process.env.FOLIOMIND_HOST_PORT || 43123));
