@@ -1283,10 +1283,8 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building FolioMind");
-    let mut web_host = match web_host::WebHost::start(
-        app.handle().clone(),
-        (*app.state::<PiHost>()).clone(),
-    ) {
+    let mut web_host =
+        match web_host::WebHost::start(app.handle().clone(), (*app.state::<PiHost>()).clone()) {
         Ok(host) => Some(host),
         Err(error) => {
             eprintln!("local web host unavailable: {error}");
