@@ -1,7 +1,7 @@
 import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { ChatView, MarketView, MonitorView, NotificationsView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
+import { ChatView, MarketView, MonitorView, NotificationsView, PortfolioView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
 import { LIVE_QUOTE_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
 import { useEffect } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
@@ -18,6 +18,7 @@ export function App() {
   const userStateLoaded = useLabStore((state) => state.userStateLoaded);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
+  const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl].join("|");
   useEffect(() => {
     void hydrateUserState();
     void hydrateIntegrationStatus();
@@ -29,10 +30,11 @@ export function App() {
     void refreshLiveData();
     const timer = window.setInterval(() => { void refreshLiveData(); }, LIVE_QUOTE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [userStateLoaded, integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, refreshLiveData]);
+  }, [userStateLoaded, integrationRefreshKey, refreshLiveData]);
   const renderView = () => {
     if (activeView === "market") return <div className="secondary-view-shell"><LiveQuotesStrip /><MarketView /></div>;
     if (activeView === "monitor") return <div className="secondary-view-shell"><LiveQuotesStrip /><MonitorView /></div>;
+    if (activeView === "portfolio") return <PortfolioView />;
     if (activeView === "notifications") return <NotificationsView />;
     if (activeView === "skills") return <SkillsView />;
     if (activeView === "chat") return <ChatView />;

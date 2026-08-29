@@ -8,6 +8,7 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WATCHLIST: usize = 200;
 const MAX_RULES: usize = 200;
 const MAX_NOTIFICATIONS: usize = 500;
+const MAX_PORTFOLIO_POSITIONS: usize = 200;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -47,10 +48,23 @@ pub struct Notification {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PortfolioPosition {
+    pub id: String,
+    pub symbol: String,
+    pub name: String,
+    pub market: String,
+    pub quantity: f64,
+    pub average_cost: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserState {
     pub watchlist: Vec<WatchItem>,
     pub monitor_rules: Vec<MonitorRule>,
     pub notifications: Vec<Notification>,
+    #[serde(default)]
+    pub portfolio_positions: Vec<PortfolioPosition>,
 }
 
 impl Default for UserState {
@@ -93,6 +107,7 @@ impl Default for UserState {
                 },
             ],
             notifications: Vec::new(),
+            portfolio_positions: Vec::new(),
         }
     }
 }
@@ -120,6 +135,7 @@ pub fn validate(state: &UserState) -> Result<(), String> {
     if state.watchlist.len() > MAX_WATCHLIST
         || state.monitor_rules.len() > MAX_RULES
         || state.notifications.len() > MAX_NOTIFICATIONS
+        || state.portfolio_positions.len() > MAX_PORTFOLIO_POSITIONS
     {
         return Err("user state exceeds size limit".into());
     }
@@ -148,6 +164,21 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         validate_text(&notification.body, "notification body", 4096)?;
         validate_text(&notification.severity, "notification severity", 32)?;
         validate_text(&notification.created_at, "notification timestamp", 64)?;
+    }
+    for position in &state.portfolio_positions {
+        validate_text(&position.id, "portfolio position id", 64)?;
+        validate_text(&position.symbol, "portfolio position symbol", 64)?;
+        validate_text(&position.name, "portfolio position name", 128)?;
+        validate_text(&position.market, "portfolio position market", 64)?;
+        if !position.quantity.is_finite()
+            || position.quantity <= 0.0
+            || position.quantity > 1_000_000_000.0
+            || !position.average_cost.is_finite()
+            || position.average_cost <= 0.0
+            || position.average_cost > 1_000_000_000.0
+        {
+            return Err("portfolio position value is invalid".into());
+        }
     }
     Ok(())
 }

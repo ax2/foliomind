@@ -1,9 +1,10 @@
-import { Bell, BellRinging, ChartLineUp, ChatCircleDots, Gear, GridFour, Star, Storefront } from "@phosphor-icons/react";
+import { Bell, BellRinging, Briefcase, ChartLineUp, ChatCircleDots, Gear, GridFour, Star, Storefront } from "@phosphor-icons/react";
 import { useLabStore } from "../store/useLabStore.js";
 
 const nav = [
   ["watchlist", "自选", Star],
   ["market", "行情", ChartLineUp],
+  ["portfolio", "组合", Briefcase],
   ["monitor", "盯盘", Bell],
   ["notifications", "消息", BellRinging],
   ["chat", "对话", ChatCircleDots],

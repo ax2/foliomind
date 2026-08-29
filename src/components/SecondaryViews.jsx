@@ -1,15 +1,81 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRinging, CheckCircle, MagnifyingGlass, Play, Plus, Trash, X } from "@phosphor-icons/react";
+import { Bell, BellRinging, Briefcase, CheckCircle, MagnifyingGlass, Play, Plus, Trash, X } from "@phosphor-icons/react";
 import { monitorEvents, skills } from "../data/market.js";
 import { monitorStrategies, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { formatPercent, formatPrice } from "../lib/quoteFormatting.js";
+import { portfolioMetrics } from "../lib/portfolio.js";
 import { friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error) => friendlySettingsMessage(error);
+
+const portfolioFormDefaults = { symbol: "", name: "", market: "", quantity: "", averageCost: "" };
+
+export function PortfolioView() {
+  const positions = useLabStore((state) => state.portfolioPositions);
+  const watchlist = useLabStore((state) => state.watchlist);
+  const liveQuotes = useLabStore((state) => state.liveQuotes);
+  const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const savePortfolioPosition = useLabStore((state) => state.savePortfolioPosition);
+  const removePortfolioPosition = useLabStore((state) => state.removePortfolioPosition);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState(portfolioFormDefaults);
+  const metrics = portfolioMetrics(positions, liveQuotes);
+  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const money = (value) => value == null ? "—" : formatPrice(value);
+  const openCreate = () => {
+    const first = watchlist[0];
+    setEditing(null);
+    setError("");
+    setForm(first ? { ...portfolioFormDefaults, symbol: first.symbol, name: first.name, market: first.market } : portfolioFormDefaults);
+    setDialogOpen(true);
+  };
+  const openEdit = (position) => {
+    setEditing(position);
+    setError("");
+    setForm({ symbol: position.symbol, name: position.name, market: position.market, quantity: String(position.quantity), averageCost: String(position.averageCost) });
+    setDialogOpen(true);
+  };
+  const selectSymbol = (symbol) => {
+    const item = watchlist.find((entry) => entry.symbol === symbol);
+    setForm((value) => ({ ...value, symbol, name: item?.name || value.name || symbol, market: item?.market || value.market }));
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await savePortfolioPosition({ ...form, id: editing?.id || "" });
+      setDialogOpen(false);
+    } catch (submitError) {
+      setError(submitError?.message || "暂时无法保存这笔持仓，请检查输入后重试。");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const deletePosition = async (position) => {
+    await removePortfolioPosition(position.id);
+  };
+  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></header>
+    <p className="security-note">只使用已返回的真实行情计算；缺少现价的持仓会显示为“—”，不会用预览数字填充。</p>
+    <section className="portfolio-summary" aria-label="组合概览">
+      <article className="portfolio-card"><span>当前市值</span><strong>{money(metrics.totalMarketValue)}</strong><small>{metrics.pricedCount ? `${metrics.pricedCount}/${metrics.totalCount} 个持仓有行情` : "等待真实行情"}</small></article>
+      <article className="portfolio-card"><span>持仓成本</span><strong>{money(metrics.totalCost)}</strong><small>{metrics.totalCount ? `${metrics.totalCount} 个持仓` : "尚未添加持仓"}</small></article>
+      <article className={`portfolio-card ${metrics.totalPnl == null ? "" : metrics.totalPnl >= 0 ? "positive" : "negative"}`}><span>未实现盈亏</span><strong>{money(metrics.totalPnl)}</strong><small>{metrics.totalPnlPercent == null ? "等待真实行情" : formatPercent(metrics.totalPnlPercent)}</small></article>
+      <article className="portfolio-card"><span>行情覆盖</span><strong>{metrics.totalCount ? `${metrics.pricedCount}/${metrics.totalCount}` : "—"}</strong><small>{realDataMode ? "自动定时更新" : "配置数据模型后更新"}</small></article>
+    </section>
+    {!realDataMode && positions.length > 0 && <div className="settings-notice">配置数据凭据并同步模型后，组合会自动使用真实行情计算。</div>}
+    {realDataMode && positions.length > 0 && metrics.pricedCount < metrics.totalCount && <div className="settings-notice">已覆盖 {metrics.pricedCount}/{metrics.totalCount} 个持仓；缺少现价的项目暂不计入市值和盈亏。</div>}
+    {positions.length === 0 ? <div className="empty-state portfolio-empty"><Briefcase size={30} /><strong>还没有持仓</strong><p>添加持仓后，这里会汇总真实行情与盈亏。</p><button className="primary-action" onClick={openCreate}><Plus size={16} />添加第一笔持仓</button></div> : <section className="portfolio-table" aria-label="持仓明细"><div className="portfolio-table-head"><span>标的</span><span>数量</span><span>成本</span><span>现价</span><span>市值</span><span>未实现盈亏</span><span>占比</span><span>操作</span></div>{metrics.rows.map((row) => <div className="portfolio-row" key={row.id}><span><strong>{row.name}</strong><small>{row.symbol}{row.market ? ` · ${row.market}` : ""}</small></span><span>{row.quantity}</span><span>{money(row.averageCost)}</span><span>{money(row.currentPrice)}</span><span>{money(row.marketValue)}</span><span className={row.pnl == null ? "" : row.pnl >= 0 ? "up" : "down"}>{money(row.pnl)}{row.pnlPercent == null ? "" : ` (${formatPercent(row.pnlPercent)})`}</span><span>{row.weight == null ? "—" : formatPercent(row.weight)}</span><span className="portfolio-actions"><button className="icon-button" aria-label={`编辑${row.symbol}持仓`} onClick={() => openEdit(row)}>编辑</button><button className="icon-button" aria-label={`删除${row.symbol}持仓`} onClick={() => { void deletePosition(row); }}>删除</button></span></div>)}</section>}
+    {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card portfolio-modal" onSubmit={submit}><div className="modal-heading"><h2>{editing ? "编辑持仓" : "添加持仓"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">保存后会使用真实行情计算市值与未实现盈亏。</p><label>标的<select aria-label="持仓标的" value={form.symbol} onChange={(event) => selectSymbol(event.target.value)} required>{!form.symbol && <option value="">请选择标的</option>}{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}{editing && !watchlist.some((item) => item.symbol === editing.symbol) && <option value={editing.symbol}>{editing.name}（{editing.symbol}）</option>}</select></label><label>持仓数量<input aria-label="持仓数量" type="number" min="0.0001" step="any" value={form.quantity} onChange={(event) => setForm((value) => ({ ...value, quantity: event.target.value }))} required /></label><label>平均成本<input aria-label="平均成本" type="number" min="0.01" step="0.01" value={form.averageCost} onChange={(event) => setForm((value) => ({ ...value, averageCost: event.target.value }))} required /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-action" type="submit" disabled={busy}>{busy ? "保存中…" : "保存持仓"}</button></form></div>}
+  </div>;
+}
 
 export function MarketView() {
   const watchlist = useLabStore((state) => state.watchlist);
