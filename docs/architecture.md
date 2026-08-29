@@ -12,6 +12,8 @@
 
 本地 Web 调试时，`npm run web:dev` 同时启动 Vite 和独立 Dev Host，默认监听 `127.0.0.1:43123`（端口冲突时自动递增）。Dev Host 复用同一 HTTP 路由和 Search → Inspect → Call 策略，直接代理模型网关和 QVeris 工具；因此修改 Web/Host 代码后无需安装新桌面版本。Web UI 先通过允许的 localhost Origin 获取一次性会话令牌，再以 `X-FolioMind-Host` 请求头访问配置、凭据、用户状态和运行时 API。该 HTTP 入口仅允许回环请求和本地开发 Origin，不作为公网服务。
 
+金融查询首次成功后，Web Host 会按数据类型、渠道地址和模型隔离保存工具选择与参数模板；后续请求优先使用内置 `foliomind_data` 直接 Call，缓存失效再回退到一次 Discover。自选行情刷新使用受限并发（默认 2，localhost 开发面板可调至 1–4），避免多个标的串行等待，也不会无限制地冲击上游服务。凭据、模型或渠道变更会使相关缓存失效。
+
 盯盘服务由 WebView 调度（桌面端每 30 秒检查到期规则），同一时间只允许一条 Pi 检查任务，避免与用户对话并发占用 Runtime。只有在 API Key 和模型均已配置时才能新建或执行盯盘；每次检查都要求 Pi 使用内置 `qveris-finance-research` Skill 执行 `Search → Inspect → Call`，要求返回带 `triggered`、来源和数据截至时间的结构化结果；触发结果和失败都会写入站内消息，用户可在消息中心标记已读。
 
 QVeris 的 `session_id`、响应视图、返回模式和最大响应大小属于 Host 策略字段，不向模型暴露，也不接受 Skill 覆盖。Host 会对查询、标识符、候选工具数量和调用参数体设置独立上限，再写入本轮 `product_run_id`。
