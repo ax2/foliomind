@@ -10,6 +10,7 @@ const MAX_BODY = 512 * 1024;
 const DEFAULT_CAPABILITY = "https://qveris.ai/api/v1";
 const DEFAULT_GATEWAY = "https://aigateway.qveris.ai/v1";
 const BRIDGE_LIMIT = 20;
+export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
 const token = `fh_${randomUUID()}`;
 const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
   process.env.XDG_CONFIG_HOME || (platform() === "win32" ? process.env.APPDATA || join(homedir(), "AppData", "Roaming") : join(homedir(), ".config")),
@@ -34,7 +35,7 @@ const devLogs = [];
 const devVariables = {
   toolCacheEnabled: true,
   requestTimeoutMs: 120_000,
-  maxConcurrentDataRequests: 1,
+  maxConcurrentDataRequests: DEFAULT_MAX_CONCURRENT_DATA_REQUESTS,
   logLevel: "info",
 };
 

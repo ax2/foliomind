@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, classifyRequest, isRetryableUpstreamError, isRetryableUpstreamStatus, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, classifyRequest, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
+
+test("uses two concurrent data requests by default for local web refreshes", () => {
+  assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
 
 test("classifies finance requests for tool caching", () => {
   assert.equal(classifyRequest("查询贵州茅台 A股实时行情快照"), "quote");
