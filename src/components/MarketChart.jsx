@@ -11,7 +11,7 @@ function normalizeSeries(series) {
   }).filter((point) => point.time != null && Number.isFinite(point.value));
 }
 
-export function MarketChart({ series = [], range = "分时", loading = false, error = "" }) {
+export function MarketChart({ series = [], range = "分时", loading = false, error = "", onRetry }) {
   const ref = useRef(null);
   const points = useMemo(() => normalizeSeries(series), [series]);
   useEffect(() => {
@@ -32,7 +32,7 @@ export function MarketChart({ series = [], range = "分时", loading = false, er
     return () => chart.remove();
   }, [points, range]);
   if (loading) return <div className="market-chart chart-empty" aria-label="正在获取真实行情">正在获取 {range} 真实数据…</div>;
-  if (error) return <div className="market-chart chart-empty" role="status" aria-label={`${range}数据暂不可用`}>该周期暂时没有可用数据，系统会稍后自动重试。</div>;
+  if (error) return <div className="market-chart chart-empty" role="status" aria-label={`${range}数据暂不可用`}><span>该周期暂时没有可用数据，系统会稍后自动重试。</span>{onRetry && <button className="secondary-button" onClick={onRetry}>立即重试</button>}</div>;
   if (points.length < 2) return <div className="market-chart chart-empty" aria-label={`暂无真实${range}数据`}>暂无真实{range}数据；有新数据后会自动显示。</div>;
   return <div className="market-chart" ref={ref} aria-label={`真实${range}数据图表`} />;
 }
