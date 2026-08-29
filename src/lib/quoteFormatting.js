@@ -1,4 +1,34 @@
 const numberValue = (value) => Number(value);
+export const QUOTE_STALE_AFTER_MS = 15 * 60 * 1000;
+
+function timestampValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 10_000_000_000 ? value * 1000 : value;
+  const text = String(value ?? "").trim();
+  if (!text) return NaN;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const number = Number(text);
+    return number < 10_000_000_000 ? number * 1000 : number;
+  }
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+export function quoteFreshness(value, now = Date.now(), staleAfterMs = QUOTE_STALE_AFTER_MS) {
+  const timestamp = timestampValue(value);
+  if (!Number.isFinite(timestamp)) return { state: "unknown", timestamp: null, ageMs: null };
+  const ageMs = now - timestamp;
+  // A provider clock can be a few minutes ahead. Treat a large future skew as
+  // unknown instead of claiming that the quote is fresh.
+  if (ageMs < -5 * 60 * 1000) return { state: "unknown", timestamp, ageMs };
+  return { state: ageMs > staleAfterMs ? "stale" : "fresh", timestamp, ageMs };
+}
+
+export function formatQuoteFreshness(value, now = Date.now()) {
+  const freshness = quoteFreshness(value, now);
+  if (freshness.state === "unknown") return "数据时间未知";
+  const time = new Date(freshness.timestamp).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return freshness.state === "stale" ? `可能已延迟 · 数据时间 ${time}` : `数据时间 ${time}`;
+}
 
 export function formatPrice(value) {
   const number = numberValue(value);

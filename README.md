@@ -54,7 +54,7 @@ Rust Host
 1. 保存数据服务 API Key。该密钥优先进入操作系统凭据库；Linux 本地调试若未运行 Secret Service，则使用权限为 `0600` 的用户配置文件回退，避免设置页保存失败。
 2. 可使用内置的 QVeris 兼容配置（工具地址 `https://qveris.ai/api/v1`、模型地址 `https://aigateway.qveris.ai/v1`），也可以按部署环境替换为兼容服务。
 3. 点击“同步模型”，从网关的 `/models` 原子读取并保存当前可用模型，再选择 Pi 默认模型并应用。更换网关地址后必须重新同步，已下线的默认模型会安全回退到目录中的首个可用模型。
-4. 在自选股页面点击“实时数据”，Agent 会使用内置 Skill 查询并返回 provider、工具 ID、来源和截至时间。任何没有来源和截至时间的数据都不会进入行情、组合或盯盘结果。
+4. 在自选股页面点击“实时数据”，Agent 会使用内置 Skill 查询并返回 provider、工具 ID、来源和截至时间。行情卡会根据 provider 时间标记“数据时间未知”或“可能已延迟”，不会把缺少时间戳的数据冒充实时数据；没有可识别真实价格的数据不会进入行情、组合或盯盘结果。
 
 研究筛选目前以“我的自选”为明确数据范围；添加更多标的或安装额外数据 Skill 后，仍需等真实行情返回才会进入筛选结果。组合风险洞察只展示可解释的已计价暴露，不输出没有数据依据的综合风险分数。
 
@@ -107,10 +107,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.19`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.20`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.19 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.20 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。
