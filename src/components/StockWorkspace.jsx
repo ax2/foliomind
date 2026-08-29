@@ -1,7 +1,7 @@
-import { BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
+import { ArrowsClockwise, BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
 import { useEffect } from "react";
 import { stocks } from "../data/market.js";
-import { formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
+import { formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "../lib/quoteFormatting.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { MarketChart } from "./MarketChart.jsx";
 
@@ -26,7 +26,9 @@ export function StockWorkspace() {
   const quoteSeriesLoaded = useLabStore((state) => state.quoteSeriesLoaded);
   const quoteSeriesError = useLabStore((state) => state.quoteSeriesError);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
+  const liveDataError = useLabStore((state) => state.liveDataError);
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
+  const refreshLiveData = useLabStore((state) => state.refreshLiveData);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const sendMessage = useLabStore((state) => state.sendMessage);
   const setActiveView = useLabStore((state) => state.setActiveView);
@@ -41,12 +43,22 @@ export function StockWorkspace() {
   const changeAmount = hasQuote && Number.isFinite(quote.changeAmount) ? quote.changeAmount : change != null && Number.isFinite(quote.previousClose) ? price - Number(quote.previousClose) : null;
   const freshness = quoteFreshness(quote?.asOf);
   const series = quote?.seriesByRange?.[chartRange] || (chartRange === "分时" ? quote?.series : []) || [];
+  const provider = integrationStatus?.settings?.dataProvider || "qveris_finance";
+  const channel = integrationStatus?.settings?.dataChannel || "qveris-cap";
+  const healthState = !realDataMode ? "preview" : liveDataLoading ? "loading" : hasQuote ? freshness.state : liveDataError ? "error" : "empty";
+  const healthTitle = { preview: "预览模式", loading: "正在获取真实行情", fresh: "真实行情 · 数据新鲜", stale: "真实行情 · 可能已延迟", unknown: "真实行情 · 数据时间未知", error: "暂未获取到行情", empty: "等待真实行情" }[healthState];
+  const healthDetail = hasQuote ? `${provider} · MKT.L1.RT · ${formatQuoteFreshness(quote.asOf)}` : realDataMode ? `${provider} · ${channel}${liveDataLastRefreshAt ? ` · 最近尝试 ${formatRefreshTime(liveDataLastRefreshAt)}` : ""}` : "配置模型后显示真实行情";
   return (
     <main className="stock-workspace">
       <header className="stock-header">
         <div><div className="stock-mark">{stock.name.slice(0, 1)}</div><h1>{stock.name}<span>{stock.symbol}</span></h1><small>{stock.market}</small><small>{stock.category}</small></div>
-        <div><button className="live-data-button" aria-label="获取实时数据" onClick={() => { setActiveView("chat"); void sendMessage(`请使用已配置的金融数据工具，严格按 Search → Inspect → Call 查询 ${stock.name}（${stock.symbol}）的最新行情、数据截至时间和来源，并明确区分实时或延迟数据。`); }}><Sparkle size={18} />实时数据</button><button aria-label="收藏"><BookmarkSimple size={20} /></button><button aria-label="更多"><DotsThree size={22} /></button></div>
+        <div><button className="live-data-button" aria-label="获取实时数据" onClick={() => { setActiveView("chat"); void sendMessage(`请使用内置 foliomind_data 直连 ${provider} CAP 查询 ${stock.name}（${stock.symbol}）的最新行情、数据截至时间和来源；只返回真实数据，不要编造。`); }}><Sparkle size={18} />实时数据</button><button aria-label="收藏"><BookmarkSimple size={20} /></button><button aria-label="更多"><DotsThree size={22} /></button></div>
       </header>
+      <section className={`data-health-strip data-health-${healthState}`} aria-label="行情数据状态">
+        <span className="data-health-dot" aria-hidden="true" />
+        <div className="data-health-copy"><strong>{healthTitle}</strong><small>{healthDetail}</small></div>
+        <button className="data-health-action" disabled={healthState === "loading"} onClick={() => { if (realDataMode) void refreshLiveData(); else setActiveView("settings"); }}><ArrowsClockwise size={14} />{realDataMode ? healthState === "loading" ? "更新中…" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button>
+      </section>
       <section className="quote-overview">
         <div className={change == null || change >= 0 ? "primary-price up" : "primary-price down"}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small className={hasQuote ? `quote-source quote-source-${freshness.state}` : ""}>{hasQuote ? `数据源 · ${quote.source || "真实数据"} · ${formatQuoteFreshness(quote.asOf)}` : realDataMode ? liveDataLoading ? "正在查询真实行情" : "暂无已查询数据 · 点击实时数据获取" : "配置模型后显示真实行情"}</small></div>
         <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.[key])}</dd></dl>)}</div>
