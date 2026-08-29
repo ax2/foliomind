@@ -132,6 +132,12 @@ export function isRetryableUpstreamStatus(status) {
   return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
 }
 
+export function isRetryableUpstreamError(error) {
+  if (error?.name === "AbortError" || error?.code === "ABORT_ERR") return false;
+  const status = Number(error?.status);
+  return Number.isFinite(status) ? isRetryableUpstreamStatus(status) : true;
+}
+
 export function retryDelayMs(attempt, retryAfterMs = 0) {
   const serverDelay = Number.isFinite(Number(retryAfterMs)) ? Math.max(0, Number(retryAfterMs)) : 0;
   const exponentialDelay = 500 * (2 ** Math.max(0, Number(attempt) || 0));
@@ -140,10 +146,12 @@ export function retryDelayMs(attempt, retryAfterMs = 0) {
 
 export async function upstreamWithRetry(url, options = {}, signal, attempts = 2) {
   for (let attempt = 0; ; attempt += 1) {
+    if (signal?.aborted) throw signal.reason || new Error("aborted");
     try { return await upstream(url, options, signal); }
     catch (error) {
-      if (!isRetryableUpstreamStatus(error?.status) || attempt >= attempts) throw error;
+      if (signal?.aborted || !isRetryableUpstreamError(error) || attempt >= attempts) throw error;
       await new Promise((resolve, reject) => {
+        if (signal?.aborted) { reject(signal.reason || new Error("aborted")); return; }
         const timer = setTimeout(resolve, retryDelayMs(attempt, error?.retryAfterMs));
         if (signal) signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason || new Error("aborted")); }, { once: true });
       });
