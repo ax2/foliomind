@@ -70,7 +70,7 @@ npm run web:dev
 
 浏览器打开终端打印的 Web 地址（默认 `http://127.0.0.1:5173`；端口被占用时会自动递增并打印新的地址）后，设置页会显示“本地开发 Host”。Dev Host 与桌面端共享同一套 Host HTTP 协议，并直接代理模型、Search → Inspect → Call 和对话，因此修改前端或 Host 逻辑后刷新页面即可验证，不需要重新安装桌面包。API Key 保存在用户配置目录下权限为 `0600` 的文件中，浏览器只持有当前标签页的短期会话令牌。
 
-本地 Web Host 会把金融数据首次成功的 Search/Inspect/Call 结果固化为按数据类型、数据渠道和模型隔离的工具缓存。行情、基本面和历史序列下一次优先通过内置 `foliomind_data` 工具直接 Call；工具过期或渠道变化时会自动清除缓存并回退到一次重新发现。QVeris 数据调用和模型网关遇到 408/425/429/5xx 等瞬时错误时使用有界指数退避，并尊重上游 `Retry-After`，取消请求会立即打断等待；桌面端内置桥接器对 Search/Inspect/Call 采用同一策略，保证 Web 调试与安装版行为一致。价格异动盯盘在本地 Host 中也直接复用固化行情工具并在前端计算阈值，避免每次检查重新调用模型编排；缓存未命中仍回退到真实 Pi 查询。自选行情首次刷新会按开发者面板中的并发上限并行请求，避免多个标的串行等待；后续刷新优先命中固化工具。缓存只保存工具标识和参数模板，不保存 API Key。行情轮询会感知浏览器可见性：页面进入后台时暂停请求，回到前台或窗口重新获得焦点时立即刷新，减少无效调用并尽快恢复最新行情。localhost 页面右下角的“开发者面板”可以上拉查看 Host 调用日志、模型/凭据状态、缓存命中情况和请求耗时，并通过白名单安全调整调试变量；生产浏览器和桌面端不会显示该面板。
+本地 Web Host 会把金融数据首次成功的 Search/Inspect/Call 结果固化为按数据类型、数据渠道和模型隔离的工具缓存。行情、基本面和历史序列下一次优先通过内置 `foliomind_data` 工具直接 Call；工具过期或渠道变化时会自动清除缓存并回退到一次重新发现。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待；桌面端内置桥接器对 Search/Inspect/Call 采用同一策略，保证 Web 调试与安装版行为一致。价格异动盯盘在本地 Host 中也直接复用固化行情工具并在前端计算阈值，避免每次检查重新调用模型编排；缓存未命中仍回退到真实 Pi 查询。自选行情首次刷新会按开发者面板中的并发上限并行请求，避免多个标的串行等待；后续刷新优先命中固化工具。缓存只保存工具标识和参数模板，不保存 API Key。行情轮询会感知浏览器可见性：页面进入后台时暂停请求，回到前台或窗口重新获得焦点时立即刷新，减少无效调用并尽快恢复最新行情。localhost 页面右下角的“开发者面板”可以上拉查看 Host 调用日志、模型/凭据状态、缓存命中情况和请求耗时，并通过白名单安全调整调试变量；生产浏览器和桌面端不会显示该面板。
 
 如需验证真实 Tauri 窗口，再使用 `npm run desktop:dev`；这不是 Web 调试的前置条件。
 
@@ -107,10 +107,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.24`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.25`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.24 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.25 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。
