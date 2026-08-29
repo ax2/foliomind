@@ -12,6 +12,9 @@ export const MONITOR_INTERVAL_MS = 30_000;
 export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items).slice(0, 8).map((item) => ({ ...item }));
 let persistenceQueue = Promise.resolve();
+let liveRequestGeneration = 0;
+let detailsRequestGeneration = 0;
+let seriesRequestGeneration = 0;
 
 function persistSnapshot(snapshot) {
   persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions }));
@@ -174,7 +177,7 @@ function dataChannelChanged(previous, next) {
 }
 
 const quoteRefreshReset = {
-  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "",
+  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "", liveDataLoading: false,
   quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {},
   quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {},
 };
@@ -186,11 +189,20 @@ export const useLabStore = create((set, get) => ({
     try { get().setIntegrationStatus(await loadIntegrationStatus()); }
     catch (error) { set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) }); }
   },
-  setIntegrationStatus: (integrationStatus) => set((state) => ({ integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(dataChannelChanged(state.integrationStatus, integrationStatus) ? quoteRefreshReset : {}) })),
+  setIntegrationStatus: (integrationStatus) => set((state) => {
+    const changed = dataChannelChanged(state.integrationStatus, integrationStatus);
+    if (changed) {
+      liveRequestGeneration += 1;
+      detailsRequestGeneration += 1;
+      seriesRequestGeneration += 1;
+    }
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}) };
+  }),
   refreshLiveData: async () => {
     const state = get();
     const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
     if (!configured || !state.watchlist.length || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling") return false;
+    const requestGeneration = ++liveRequestGeneration;
     set({ liveDataLoading: true, liveDataError: "" });
     const errors = [];
     let received = 0;
@@ -199,14 +211,17 @@ export const useLabStore = create((set, get) => ({
         try {
           const marketSymbol = qverisSymbol(item.symbol);
           const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）A股实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`, { settleTimeoutMs: 60_000 });
+          if (requestGeneration !== liveRequestGeneration) return false;
           const quotes = liveQuotesFromReply(reply.text, [item.symbol]);
           if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
           received += 1;
           set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLastRefreshAt: nowIso() }));
         } catch (error) {
+          if (requestGeneration !== liveRequestGeneration) return false;
           errors.push(`${item.name}：${friendlyDataMessage(error)}`);
         }
       }
+      if (requestGeneration !== liveRequestGeneration) return false;
       if (!received) {
         set({ liveDataLoading: false, liveDataError: errors.join("；") || "暂时没有可用数据，系统会稍后再查" });
         return false;
@@ -228,14 +243,17 @@ export const useLabStore = create((set, get) => ({
     const item = state.watchlist.find((entry) => entry.symbol === symbol);
     const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
     if (!configured || !item || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling" || state.quoteDetailsLoading[symbol] || state.quoteDetailsLoaded[symbol]) return false;
+    const requestGeneration = ++detailsRequestGeneration;
     set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
     try {
       const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`, { settleTimeoutMs: 90_000 });
+      if (requestGeneration !== detailsRequestGeneration) return false;
       const details = detailedQuoteFromReply(reply.text);
       if (!details) throw new Error("数据服务暂未返回可识别的行情详情");
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], ...details.quote, reportPeriod: details.reportPeriod } }, quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
       return true;
     } catch (error) {
+      if (requestGeneration !== detailsRequestGeneration) return false;
       set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: friendlyDataMessage(error) } }));
       return false;
     }
@@ -250,14 +268,17 @@ export const useLabStore = create((set, get) => ({
     const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
     const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
     if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
+    const requestGeneration = ++seriesRequestGeneration;
     set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
     const rangeRequest = { 分时: "今天的1分钟或5分钟分时", "5日": "最近5个交易日日线", 日K: "最近90个交易日日线", 周K: "最近52周周线", 月K: "最近60个月月线", 季K: "最近20个季度线", 年K: "最近10年年线" }[range] || range;
     try {
       const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`, { settleTimeoutMs: 60_000 });
+      if (requestGeneration !== seriesRequestGeneration) return false;
       const series = seriesFromReply(reply.text);
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
       return true;
     } catch (error) {
+      if (requestGeneration !== seriesRequestGeneration) return false;
       set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: friendlyDataMessage(error) } } }));
       return false;
     }
