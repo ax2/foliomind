@@ -519,6 +519,9 @@ v1.1 将产品设计收敛为「真实数据工作台 + 可解释的 Agent」：
 | `quote` | `MKT.L1.RT` | `symbol` | price、change、changePercent、timestamp、volume、OHLCV |
 | `details` | `REF.COMPANY_PROFILE` + `FUNDAMENTALS.DERIVED_RATIOS` | `symbol` | company、description、valuation、asOf |
 | `series` | `MKT.BARS.EOD` | symbol、startDate、endDate | time、open、high、low、close、volume |
+| `core_event` | `EVENT.CALENDAR.CORP` | `symbol`，可选 event_type、日期范围 | events、eventCount、date、type、title |
+| `capital_flow` | `FLOW.LARGE_ORDER` | `symbol`，可选日期范围 | capitalFlow、mainNetInflow、date、net_flow |
+| `sentiment` | `NEWS.FIN.TAGGED` | `symbol`，可选日期范围 | news、sentiment、sentimentScore、publishedAt |
 
 默认 provider 为 `qveris_finance`，本地缓存保存工具 id、参数 schema、返回 schema、能力说明和目录版本；未来切换渠道时只替换适配层。页面应优先走固化 CAP，只有 CAP 不可用才回退发现流程。
 
@@ -528,9 +531,9 @@ v1.1 将产品设计收敛为「真实数据工作台 + 可解释的 Agent」：
 
 #### Stage 0 · 可信底座（当前版本）
 
-**交付**：固化 `qveris_finance` CAP schema；直连调用与发现流程回退；统一真实数据归一化；Web/桌面开发面板；API Key 前缀和调用日志；安装包升级身份稳定。
+**交付**：固化 `qveris_finance` CAP schema；直连调用与发现流程回退；统一真实数据归一化；Web/桌面开发面板；API Key 前缀和调用日志；安装包升级身份稳定；行情、事件、资金流和舆情四类真实能力可按稳定 schema 消费。
 
-**验收**：四类 CAP 可返回真实数据；无凭据时不显示样例值；失败可重试；桌面和 Web 都能查看运行状态；旧版本安装不会先卸载新版本。
+**验收**：六类 CAP kind（quote、details、series、core_event、capital_flow、sentiment；details 同时返回 fundamentals）可返回真实数据或明确空状态；无凭据时不显示样例值；失败可重试；桌面和 Web 都能查看运行状态；旧版本安装不会先卸载新版本。
 
 #### Stage 1 · 工作台清晰化（本次及下一轮）
 
@@ -654,3 +657,15 @@ Stage 2A 先交付规则表达能力和数据契约，不把事件、资金或�
 4. 下一增量继续补充 `core_event / capital_flow / sentiment` 的 CAP 字段映射、工具覆盖率和逐条工具调用明细；在能力目录未验证前，界面不宣称已覆盖这些数据。
 
 本轮验收：条件规则执行后可在盯盘页展开最近检查记录，备份/恢复保留审计时间线，单元测试覆盖触发记录和脱敏字段。
+
+### 11.15 Stage 2C 真实条件数据直连（本轮增量）
+
+本轮将盯盘条件所需的非行情字段接入已验证的 QVeris Finance CAP，并保持其它数据渠道可替换：
+
+1. `core_event` 固化 `qveris_finance.event_calendar_corp`（`EVENT.CALENDAR.CORP`），覆盖分红、拆股、股东会等已排期公司事件；它不代表公告全文或限售解禁日历。
+2. `capital_flow` 固化 `qveris_finance.flow_large_order`（`FLOW.LARGE_ORDER`），按订单规模返回个股资金流，并以最近可用交易日的 `main_net / net_flow` 作为条件字段。
+3. `sentiment` 固化 `qveris_finance.news_fin_tagged`（`NEWS.FIN.TAGGED`），返回新闻标题、摘要、来源、时间和情绪标签；市场范围过滤暂不透传，避免上游参数映射错误。
+4. 本地 Web Host 对所需 kind 并行发起 CAP 调用；字段完整时在客户端使用三值逻辑直接判定，字段缺失或上游明确失败时保持 `unknown` 并只回退一次 Pi 解读，不把空数据当成“未触发”。
+5. 能力目录版本从 1 升为 2，新增归一化、不可用响应和盯盘直连回归测试；目录记录 tool_id、参数、返回字段、能力 ID、provider 与覆盖边界。
+
+验收：事件、资金流、舆情规则在本地 Host 有真实响应时无需模型往返即可完成条件判定；空响应进入待核实状态；每次检查仍写入来源、数据截至时间、条件结果和调用审计。`event_calendar_macro` 已探测但因上游返回能力信封不一致，本轮不纳入稳定目录。
