@@ -11,6 +11,14 @@ export function formatPercent(value) {
   return Number.isFinite(number) ? `${number >= 0 ? "+" : ""}${number.toFixed(2)}%` : "—";
 }
 
+export function formatRefreshTime(value, now = Date.now()) {
+  const timestamp = Date.parse(String(value ?? ""));
+  if (!Number.isFinite(timestamp)) return "尚未更新";
+  const age = Math.max(0, now - timestamp);
+  const time = new Date(timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return age >= 120_000 ? `可能已过期 · 最近更新 ${time}` : `最近更新 ${time}`;
+}
+
 export function formatAmount(value, kind) {
   const number = numberValue(value);
   if (!Number.isFinite(number)) return "—";
