@@ -47,6 +47,12 @@ async def main() -> None:
             checks.append({"flow": label, "passed": True})
 
         await click_and_capture("行情", "implementation-market.png", "市场行情")
+        await click_and_capture("筛选", "implementation-research.png", "研究筛选")
+        await expect(page.get_by_text("需要真实数据才能筛选", exact=True)).to_be_visible()
+        checks.append({"flow": "真实数据筛选空状态", "passed": True})
+        await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")
+        await expect(page.get_by_text("还没有持仓", exact=True)).to_be_visible()
+        checks.append({"flow": "组合风险空状态", "passed": True})
         await click_and_capture("盯盘", "implementation-monitor.png", "个股盯盘")
         new_monitor = page.get_by_role("button", name="新建盯盘")
         if await new_monitor.is_disabled():
@@ -93,6 +99,14 @@ async def main() -> None:
           columns: getComputedStyle(document.querySelector('.app-shell')).gridTemplateColumns,
         })""")
         checks.append({"flow": "视口无溢出", "passed": layout["scrollWidth"] == layout["clientWidth"] and layout["scrollHeight"] == layout["clientHeight"], "detail": layout})
+        await page.set_viewport_size({"width": 390, "height": 844})
+        await page.reload(wait_until="networkidle")
+        mobile_layout = await page.evaluate("""() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        })""")
+        checks.append({"flow": "移动端视口无横向溢出", "passed": mobile_layout["scrollWidth"] == mobile_layout["clientWidth"], "detail": mobile_layout})
+        await page.screenshot(path=OUTPUT / "implementation-mobile-final.png")
         await browser.close()
 
     report = {

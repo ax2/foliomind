@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRinging, Briefcase, CheckCircle, MagnifyingGlass, Play, Plus, Trash, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, Briefcase, CheckCircle, Funnel, Info, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, Warning, X } from "@phosphor-icons/react";
 import { monitorEvents, skills } from "../data/market.js";
 import { monitorStrategies, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { formatPercent, formatPrice } from "../lib/quoteFormatting.js";
-import { portfolioMetrics } from "../lib/portfolio.js";
+import { portfolioMetrics, portfolioRiskMetrics } from "../lib/portfolio.js";
 import { friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
@@ -27,6 +27,7 @@ export function PortfolioView() {
   const [error, setError] = useState("");
   const [form, setForm] = useState(portfolioFormDefaults);
   const metrics = portfolioMetrics(positions, liveQuotes);
+  const risk = portfolioRiskMetrics(positions, liveQuotes);
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const money = (value) => value == null ? "—" : formatPrice(value);
   const openCreate = () => {
@@ -70,6 +71,10 @@ export function PortfolioView() {
       <article className={`portfolio-card ${metrics.totalPnl == null ? "" : metrics.totalPnl >= 0 ? "positive" : "negative"}`}><span>未实现盈亏</span><strong>{money(metrics.totalPnl)}</strong><small>{metrics.totalPnlPercent == null ? "等待真实行情" : formatPercent(metrics.totalPnlPercent)}</small></article>
       <article className="portfolio-card"><span>行情覆盖</span><strong>{metrics.totalCount ? `${metrics.pricedCount}/${metrics.totalCount}` : "—"}</strong><small>{realDataMode ? "自动定时更新" : "配置数据模型后更新"}</small></article>
     </section>
+    <section className="risk-overview" aria-label="组合风险洞察">
+      <div className="risk-overview-heading"><div><h2>风险洞察</h2><small>只基于已返回的真实行情；数据不足时不生成风险评分。</small></div><ShieldCheck size={22} /></div>
+      {positions.length === 0 ? <p className="risk-empty">添加持仓并获取真实行情后，这里会显示集中度与数据覆盖情况。</p> : <><div className="risk-metrics"><article><span>最大持仓</span><strong>{risk.topPosition?.name || "—"}</strong><small>{risk.topWeight == null ? "等待真实行情" : `${formatPercent(risk.topWeight)} 组合占比`}</small></article><article><span>行情覆盖</span><strong>{risk.pricedCoverage == null ? "—" : formatPercent(risk.pricedCoverage)}</strong><small>{metrics.pricedCount}/{metrics.totalCount} 个持仓</small></article><article><span>未计价成本</span><strong>{risk.missingCostWeight == null ? "—" : formatPercent(risk.missingCostWeight)}</strong><small>{risk.missingCostWeight == null ? "等待真实行情" : "暂未纳入市值计算"}</small></article></div><div className="risk-signal-list">{risk.signals.length ? risk.signals.map((signal) => <article className={`risk-signal ${signal.level}`} key={`${signal.level}-${signal.title}`}><span>{signal.level === "critical" ? <Warning size={17} /> : signal.level === "warning" ? <Warning size={17} /> : <Info size={17} />}</span><div><strong>{signal.title}</strong><p>{signal.detail}</p></div></article>) : <p className="risk-empty">当前没有可确认的风险信号；补齐历史行情后才会计算波动率与相关性。</p>}</div></>}
+    </section>
     {!realDataMode && positions.length > 0 && <div className="settings-notice">配置数据凭据并同步模型后，组合会自动使用真实行情计算。</div>}
     {realDataMode && positions.length > 0 && metrics.pricedCount < metrics.totalCount && <div className="settings-notice">已覆盖 {metrics.pricedCount}/{metrics.totalCount} 个持仓；缺少现价的项目暂不计入市值和盈亏。</div>}
     {positions.length === 0 ? <div className="empty-state portfolio-empty"><Briefcase size={30} /><strong>还没有持仓</strong><p>添加持仓后，这里会汇总真实行情与盈亏。</p><button className="primary-action" onClick={openCreate}><Plus size={16} />添加第一笔持仓</button></div> : <section className="portfolio-table" aria-label="持仓明细"><div className="portfolio-table-head"><span>标的</span><span>数量</span><span>成本</span><span>现价</span><span>市值</span><span>未实现盈亏</span><span>占比</span><span>操作</span></div>{metrics.rows.map((row) => <div className="portfolio-row" key={row.id}><span><strong>{row.name}</strong><small>{row.symbol}{row.market ? ` · ${row.market}` : ""}</small></span><span>{row.quantity}</span><span>{money(row.averageCost)}</span><span>{money(row.currentPrice)}</span><span>{money(row.marketValue)}</span><span className={row.pnl == null ? "" : row.pnl >= 0 ? "up" : "down"}>{money(row.pnl)}{row.pnlPercent == null ? "" : ` (${formatPercent(row.pnlPercent)})`}</span><span>{row.weight == null ? "—" : formatPercent(row.weight)}</span><span className="portfolio-actions"><button className="icon-button" aria-label={`编辑${row.symbol}持仓`} onClick={() => openEdit(row)}>编辑</button><button className="icon-button" aria-label={`删除${row.symbol}持仓`} onClick={() => { void deletePosition(row); }}>删除</button></span></div>)}</section>}
@@ -87,6 +92,33 @@ export function MarketView() {
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const returnedQuotes = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price));
   return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><span>{realDataMode ? "仅显示已返回的真实数据" : "配置模型后显示真实行情"}</span></header><div className="index-board">{realDataMode && returnedQuotes.length ? returnedQuotes.map((item) => { const quote = liveQuotes[item.symbol]; return <article key={item.symbol}><span>{item.name} <small>{item.symbol}</small></span><strong>{formatPrice(quote.price)}</strong><small className={quote.change >= 0 ? "up" : "down"}>{formatPercent(quote.change)}</small><em>{quote.source || "数据服务"}{quote.asOf ? ` · ${quote.asOf}` : ""}</em></article>; }) : <div className="empty-state"><strong>{realDataMode ? "暂无已查询的市场数据" : "行情预览"}</strong><p>{realDataMode ? "数据正在获取中，返回后将显示在这里。" : "当前未配置真实模型，预览数据不会用于投资判断。"}</p></div>}</div><section className="market-table"><h2>我的自选</h2><div className="table-head"><span>名称 / 代码</span><span>最新价</span><span>涨跌幅</span><span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol]; return <div className="table-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span>{Number.isFinite(quote?.price) ? formatPrice(quote.price) : "—"}</span><span className={quote?.change >= 0 ? "up" : "down"}>{formatPercent(quote?.change)}</span><span>{item.market}</span></div>; })}</section></div>;
+}
+
+export function ResearchView() {
+  const watchlist = useLabStore((state) => state.watchlist);
+  const liveQuotes = useLabStore((state) => state.liveQuotes);
+  const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const refreshLiveData = useLabStore((state) => state.refreshLiveData);
+  const liveDataLoading = useLabStore((state) => state.liveDataLoading);
+  const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
+  const [query, setQuery] = useState("");
+  const [direction, setDirection] = useState("all");
+  const [onlyPriced, setOnlyPriced] = useState(false);
+  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const filtered = watchlist.filter((item) => {
+    const quote = liveQuotes[item.symbol];
+    const change = Number(quote?.change);
+    const matchesQuery = !normalizedQuery || `${item.name} ${item.symbol} ${item.market} ${item.category}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery);
+    const matchesDirection = direction === "all" || (direction === "up" && change >= 0) || (direction === "down" && change < 0);
+    return matchesQuery && matchesDirection && (!onlyPriced || Number.isFinite(quote?.price));
+  });
+  const returnedCount = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price)).length;
+  return <div className="secondary-page research-page"><header><div><h1>研究筛选</h1><p>在我的自选中按真实行情筛选标的，不用示例数据填充。</p></div><button className="secondary-button" disabled={!realDataMode || liveDataLoading} onClick={() => { void refreshLiveData(); }}><ArrowsClockwise size={16} />{liveDataLoading ? "更新中…" : "刷新真实数据"}</button></header>
+    <div className="research-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、代码或市场…" aria-label="搜索标的" /></label><div className="filter-group" aria-label="涨跌方向"><button className={direction === "all" ? "active" : ""} onClick={() => setDirection("all")}>全部</button><button className={direction === "up" ? "active" : ""} onClick={() => setDirection("up")}>上涨</button><button className={direction === "down" ? "active" : ""} onClick={() => setDirection("down")}>下跌</button></div><button className={`filter-toggle${onlyPriced ? " active" : ""}`} aria-pressed={onlyPriced} onClick={() => setOnlyPriced((value) => !value)}><Funnel size={15} />仅显示有行情</button></div>
+    {!realDataMode ? <div className="empty-state research-empty"><Funnel size={30} /><strong>需要真实数据才能筛选</strong><p>请先在设置中配置凭据、同步模型并应用，筛选器不会使用预览价格。</p></div> : returnedCount === 0 ? <div className="empty-state research-empty"><ArrowsClockwise size={30} /><strong>尚无可用行情</strong><p>数据服务尚未返回自选行情，可点击右上角刷新，或检查设置。</p><button className="primary-action" disabled={liveDataLoading} onClick={() => { void refreshLiveData(); }}>重新获取</button></div> : filtered.length === 0 ? <div className="empty-state research-empty"><MagnifyingGlass size={30} /><strong>没有符合条件的标的</strong><p>调整搜索词或筛选条件后再试。</p></div> : <section className="research-table" aria-label="真实行情筛选结果"><div className="research-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>市盈率</span><span>市净率</span><span>数据时间</span></div>{filtered.map((item) => { const quote = liveQuotes[item.symbol]; const hasQuote = Number.isFinite(quote?.price); return <div className="research-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol} · {item.market || item.category}</small></span><span>{hasQuote ? formatPrice(quote.price) : "—"}</span><span className={Number.isFinite(quote?.change) ? quote.change >= 0 ? "up" : "down" : ""}>{formatPercent(quote?.change)}</span><span>{quote?.pe == null ? "—" : String(quote.pe)}</span><span>{quote?.pb == null ? "—" : String(quote.pb)}</span><span>{quote?.asOf || "—"}</span></div>; })}</section>}
+    <p className="security-note">范围：我的自选 · {returnedCount}/{watchlist.length} 个标的已返回行情{liveDataLastRefreshAt ? ` · 最近更新 ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : ""}。估值字段缺失时保持空值。</p>
+  </div>;
 }
 
 export function MonitorView() {
