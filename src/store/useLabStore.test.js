@@ -56,6 +56,19 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveDataError).toBe("");
   });
 
+  it("keeps upstream data errors friendly and free of gateway details", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockRejectedValue(new Error("HTTP 503 https://secret-gateway.example/api/v1 timeout"));
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(false);
+    expect(useLabStore.getState().liveDataError).toBe("贵州茅台：数据响应较慢，系统会稍后自动重试");
+    expect(useLabStore.getState().liveDataError).not.toContain("secret-gateway");
+  });
+
   it("persists portfolio positions with normalized numbers", async () => {
     const saved = await useLabStore.getState().savePortfolioPosition({ symbol: " aapl ", name: "Apple", market: "US", quantity: "2", averageCost: "100" });
     expect(saved).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100 });
