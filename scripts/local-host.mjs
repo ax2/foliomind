@@ -62,6 +62,16 @@ async function clearToolCache() { try { await unlink(toolCacheFile); } catch { /
 function cacheKey(kind, settings) {
   return [kind, settings?.capabilityBaseUrl || DEFAULT_CAPABILITY, settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY, settings?.modelId || ""].join("|");
 }
+async function reserveCacheWarmup(message, settings) {
+  const kind = classifyRequest(message);
+  if (!kind || !devVariables.toolCacheEnabled) return null;
+  const key = cacheKey(kind, settings);
+  return cacheWarmupGate.acquire(key, async () => {
+    const cache = await readToolCache();
+    const entry = cache[key];
+    return Boolean(entry?.toolId && entry?.searchId);
+  });
+}
 export function classifyRequest(message) {
   const text = String(message || "");
   if (/实时行情|行情快照|最新价|报价|quote/i.test(text)) return "quote";
@@ -82,6 +92,34 @@ export function adaptParameters(template, symbol, range) {
 function cacheSummary(cache) {
   return Object.entries(cache || {}).map(([key, entry]) => ({ key, kind: entry.kind, toolId: entry.toolId, searchId: entry.searchId, createdAt: entry.createdAt, lastUsedAt: entry.lastUsedAt, hitCount: Number(entry.hitCount) || 0 }));
 }
+
+// Multiple watchlist rows can start at the same time.  Keep only the first
+// cache miss responsible for Search → Inspect → Call; the other requests wait
+// for that warm-up and then let the model use foliomind_data directly.
+export function createCacheWarmupGate() {
+  const pending = new Map();
+  return {
+    async acquire(key, isReady) {
+      while (true) {
+        if (await isReady()) return null;
+        const existing = pending.get(key);
+        if (existing) {
+          await existing;
+          continue;
+        }
+        let resolve;
+        const promise = new Promise((complete) => { resolve = complete; });
+        pending.set(key, promise);
+        return () => {
+          if (pending.get(key) === promise) pending.delete(key);
+          resolve();
+        };
+      }
+    },
+  };
+}
+
+const cacheWarmupGate = createCacheWarmupGate();
 
 async function readJson(path, fallback) {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return fallback; }
@@ -263,7 +301,7 @@ async function queryCachedData(input, settings, key, signal) {
   logInvocation({ type: "data", operation: "cached-call", kind, toolId: entry.toolId, cacheHit: true, durationMs: Date.now() - startedAt });
   return result;
 }
-async function promptAgent(message, settings, key, signal) {
+async function runPromptAgent(message, settings, key, signal) {
   const model = settings.modelId || settings.models?.[0]?.id;
   if (!model) throw new Error("请先在设置中同步 QVeris 模型并选择模型");
   const runId = `product_${randomUUID()}`;
@@ -304,6 +342,15 @@ async function promptAgent(message, settings, key, signal) {
     }
   }
   throw new Error("模型工具调用超过最大轮数");
+}
+
+async function promptAgent(message, settings, key, signal) {
+  const releaseWarmup = await reserveCacheWarmup(message, settings);
+  try {
+    return await runPromptAgent(message, settings, key, signal);
+  } finally {
+    releaseWarmup?.();
+  }
 }
 
 async function route(req, body) {
