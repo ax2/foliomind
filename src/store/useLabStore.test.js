@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn() }));
+const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn(), queryCachedData: vi.fn() }));
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
-vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true }));
+vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true, queryCachedData: runtime.queryCachedData }));
 vi.mock("../lib/userState.js", () => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
@@ -12,6 +12,7 @@ describe("lab store streaming lifecycle", () => {
   beforeEach(() => {
     runtime.askPi.mockReset();
     runtime.abortPi.mockReset();
+    runtime.queryCachedData.mockReset();
     useLabStore.setState({
       ...initialLabState,
       messages: initialLabState.messages.map((message) => ({ ...message })),
@@ -156,6 +157,35 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.askPi).toHaveBeenCalledOnce();
     expect(useLabStore.getState().rules[0].lastCheckedAt).toBeTruthy();
     expect(useLabStore.getState().notifications).toHaveLength(0);
+  });
+
+  it("treats an invalid monitor timestamp as due instead of silently skipping it", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-1", symbol: "600519", strategyId: "news_risk", threshold: 1, intervalSeconds: 300, enabled: true, lastCheckedAt: "not-a-date" }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ triggered: false, title: "贵州茅台 · 公告与舆情", summary: "检查完成", severity: "info" }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().runDueMonitorChecks()).resolves.toBe(true);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+  });
+
+  it("evaluates a cached price quote directly for local monitor checks", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(runtime.queryCachedData).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().notifications[0]).toMatchObject({ severity: "warning", source: "data-service" });
+    expect(useLabStore.getState().notifications[0].body).toContain("+4.20%");
   });
 
   it("allows a failed quote detail request to be retried manually", async () => {

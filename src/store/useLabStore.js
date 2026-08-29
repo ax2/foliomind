@@ -72,7 +72,8 @@ function normalizeRule(rule) {
 function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
   const body = String(result.summary || result.body || reply.text || "检查完成，请打开对话查看完整的来源与审计记录。").trim();
-  return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: reply.mode === "pi-rpc" ? "data-service" : "browser-demo" };
+  const dataServiceMode = ["pi-rpc", "pi-local-host", "standalone-dev-host"].includes(reply.mode);
+  return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: dataServiceMode ? "data-service" : "browser-demo" };
 }
 function quoteFromReply(text) {
   const value = findJsonObject(text);
@@ -170,6 +171,25 @@ function liveQuotesFromReply(text, symbols) {
     if (quote) result[symbol] = quote;
     return result;
   }, {});
+}
+
+function priceMonitorResult(rule, item, quote) {
+  const change = Number(quote?.change);
+  if (!Number.isFinite(change)) throw new Error("数据服务未返回可识别的涨跌幅");
+  const threshold = Math.max(0, Number(rule.threshold) || 0);
+  const triggered = Math.abs(change) >= threshold;
+  const direction = change > 0 ? "上涨" : change < 0 ? "下跌" : "持平";
+  const price = Number.isFinite(Number(quote.price)) ? `最新价 ${Number(quote.price).toFixed(2)}，` : "";
+  const asOf = String(quote.asOf || "数据时间未知");
+  const source = String(quote.source || "数据服务");
+  return {
+    triggered,
+    title: `${item?.name || rule.symbol} · ${strategyFor(rule.strategyId).name}`,
+    summary: `${price}${direction} ${change >= 0 ? "+" : ""}${change.toFixed(2)}%，阈值 ${threshold.toFixed(2)}%。数据截至 ${asOf}，来源 ${source}。`,
+    severity: triggered ? "warning" : "info",
+    asOf,
+    source,
+  };
 }
 
 function resolveLiveQuoteConcurrency() {
@@ -401,8 +421,25 @@ export const useLabStore = create((set, get) => ({
     if (!acquired) return false;
     const strategy = strategyFor(rule.strategyId);
     try {
-      const reply = await askPi(`执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。阈值：${rule.threshold}${strategy.unit}。${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true或false,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`, { settleTimeoutMs: 120_000 });
-      const parsed = findJsonObject(reply.text); const result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
+      let reply; let result; let parsed = null;
+      if (strategy.id === "price_change" && isLocalWebRuntime() && typeof queryCachedData === "function") {
+        const prompt = `使用内置 qveris-finance-research Skill 查询 ${item?.name || rule.symbol}（${rule.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${qverisSymbol(rule.symbol)}。只做一次 Search、一次 Inspect、一次 Call，不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${rule.symbol}","price":null,"changePercent":null,"changeAmount":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
+        reply = await askFinancialData(prompt, "quote", rule.symbol, "", { settleTimeoutMs: 60_000 });
+        const quote = Object.values(liveQuotesFromReply(reply.text, [rule.symbol]))[0];
+        if (quote) {
+          result = priceMonitorResult(rule, item, quote);
+          parsed = result;
+        } else {
+          // A cache miss falls back to Pi. Keep compatibility with an older
+          // model that may still return the monitor-shaped JSON envelope.
+          parsed = findJsonObject(reply.text);
+          if (!parsed || typeof parsed.triggered !== "boolean") throw new Error("数据服务未返回可识别的盯盘结果");
+          result = parsed;
+        }
+      } else {
+        reply = await askPi(`执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。阈值：${rule.threshold}${strategy.unit}。${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true或false,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`, { settleTimeoutMs: 120_000 });
+        parsed = findJsonObject(reply.text); result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
+      }
       set((state) => { const shouldNotify = result.triggered === true || reply.mode === "browser-demo" || !parsed; const notification = shouldNotify ? notificationFromResult(rule, item, result, reply) : null; return { monitorBusy: false, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: result.triggered ? nowIso() : candidate.lastTriggeredAt } : candidate), notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications }; }); await get().persistUserState(); return true;
     } catch (error) {
       const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试"); set((state) => ({ monitorBusy: false, notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: nowIso(), read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
@@ -414,7 +451,11 @@ export const useLabStore = create((set, get) => ({
     const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
     if (!hostRuntime || !state.userStateLoaded || !configured || state.monitorBusy) return false;
     const now = Date.now();
-    const due = state.rules.find((rule) => rule.enabled && (!rule.lastCheckedAt || now - Date.parse(rule.lastCheckedAt) >= rule.intervalSeconds * 1000));
+    const due = state.rules.find((rule) => {
+      if (!rule.enabled || !rule.lastCheckedAt) return rule.enabled;
+      const checkedAt = Date.parse(rule.lastCheckedAt);
+      return !Number.isFinite(checkedAt) || now - checkedAt >= rule.intervalSeconds * 1000;
+    });
     return due ? get().runMonitorCheck(due.id) : false;
   },
   beginRuntimeConfiguration: () => { let acquired = false; set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeConfiguring: true }; }); return acquired; },
