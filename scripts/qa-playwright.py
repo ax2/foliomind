@@ -48,9 +48,14 @@ async def main() -> None:
 
         await click_and_capture("行情", "implementation-market.png", "市场行情")
         await click_and_capture("盯盘", "implementation-monitor.png", "个股盯盘")
-        await page.get_by_role("button", name="新建盯盘").click()
-        await page.get_by_text("成交量异常监控", exact=True).wait_for()
-        checks.append({"flow": "新建盯盘规则", "passed": True})
+        new_monitor = page.get_by_role("button", name="新建盯盘")
+        if await new_monitor.is_disabled():
+            await expect(page.get_by_text("请先配置数据凭据、同步模型并保存，盯盘只接受真实数据。", exact=True)).to_be_visible()
+            checks.append({"flow": "未配置时安全禁用盯盘", "passed": True})
+        else:
+            await new_monitor.click()
+            await page.get_by_text("成交量异常监控", exact=True).wait_for()
+            checks.append({"flow": "新建盯盘规则", "passed": True})
 
         await click_and_capture("技能", "implementation-skills.png", "Skill 市场")
         skill_card = page.locator(".skill-grid article").filter(has_text="公告与舆情")
@@ -59,7 +64,7 @@ async def main() -> None:
         await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible()
         checks.append({"flow": "安装 Skill", "passed": True})
 
-        await click_and_capture("设置", "implementation-settings.png", "QVeris 数据与模型凭证")
+        await click_and_capture("设置", "implementation-settings.png", "数据与模型凭证")
         await expect(page.get_by_label("Gateway Base URL")).to_have_value("https://aigateway.qveris.ai/v1")
         await expect(page.get_by_text("未配置", exact=True)).to_be_visible()
         checks.append({"flow": "真实数据与模型设置", "passed": True})
