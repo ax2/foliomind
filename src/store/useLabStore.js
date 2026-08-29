@@ -33,6 +33,12 @@ function qverisSymbol(value) {
   if (/^(000|001|002|003|300|301)\d{3}$/.test(raw)) return `${raw}.SZ`;
   return raw;
 }
+function marketContext(item) {
+  const market = String(item?.market || item?.category || "").toLocaleUpperCase("zh-CN");
+  if (/NASDAQ|NYSE|AMEX|美股|US/.test(market)) return "美股";
+  if (/HKEX|港股|香港|HK/.test(market)) return "港股";
+  return "A股";
+}
 function findJsonObject(text) {
   const source = String(text ?? "");
   const first = source.indexOf("{");
@@ -254,7 +260,7 @@ export const useLabStore = create((set, get) => ({
         try {
           if (requestGeneration !== liveRequestGeneration) return false;
           const marketSymbol = qverisSymbol(item.symbol);
-          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）A股实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
+          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
           const reply = await askFinancialData(prompt, "quote", item.symbol, "", { settleTimeoutMs: 60_000 });
           if (requestGeneration !== liveRequestGeneration) return false;
           const quotes = liveQuotesFromReply(reply.text, [item.symbol]);

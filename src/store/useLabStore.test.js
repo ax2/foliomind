@@ -80,6 +80,19 @@ describe("lab store streaming lifecycle", () => {
     expect(Object.keys(useLabStore.getState().liveQuotes)).toHaveLength(4);
   });
 
+  it("uses the selected instrument market instead of labeling every quote as A-share", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "AAPL", name: "Apple Inc.", market: "NASDAQ", category: "科技" }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "AAPL", price: 227.57 }] }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(runtime.askPi.mock.calls[0][0]).toContain("美股实时行情快照");
+    expect(runtime.askPi.mock.calls[0][0]).not.toContain("A股实时行情快照");
+  });
+
   it("keeps upstream data errors friendly and free of gateway details", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
