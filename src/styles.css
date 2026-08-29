@@ -1194,6 +1194,10 @@ textarea:focus-visible {
 .status-pill { border-radius: 999px; padding: 4px 9px; background: #f3f4f6; color: #7b8490; font-size: 10px; }
 .status-pill.ok { background: #eaf8f2; color: #16805b; }
 .settings-notice { margin: 14px 2px; color: #526071; font-size: 11px; }
+.update-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #526071; font-size: 11px; }
+.update-status a { color: var(--blue); text-decoration: none; white-space: nowrap; }
+.update-status a:hover { text-decoration: underline; }
+.update-note { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .settings-notice.error { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f1c9c5; border-radius: 8px; padding: 10px 12px; background: #fff7f6; color: #a33b32; }
 .settings-notice.error button { border: 1px solid #e3aba6; border-radius: 6px; padding: 7px 11px; background: #fff; color: #8f3028; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .live-data-button { width: auto !important; padding: 0 10px !important; gap: 5px; color: var(--blue) !important; font-size: 11px; }

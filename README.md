@@ -23,6 +23,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - Run-scoped 数据执行桥，只向 Pi 暴露 Search、Inspect、Call 三阶段能力。
 - 内置金融研究 Skill，强制真实外部数据遵循 Search → Inspect → Call；QVeris 适配器可作为默认数据通道，也可以替换为兼容的自托管服务。
 - 设置页可将数据服务 API Key 保存到系统凭据库、同步动态模型目录并选择 Pi 默认模型。
+- 设置页可检查 GitHub 最新公开版本并直达发布页；安装包仍提供 SHA-256 校验，自动更新待平台签名密钥接入后启用。
 - 内置兼容 OpenAI API 的模型网关配置；Pi 只访问带短期令牌的本机回环代理，不接触长期 API Key。
 - 内置 Pi Bash 工具；Windows 安装包捆绑经过 SHA-256 校验的 PortableGit/Bash，所有桌面子进程均以无控制台窗口方式启动。
 - WebView 对话在桌面环境通过 Tauri command 调用真实 Pi RPC；普通浏览器预览使用明确的演示回退。
@@ -113,10 +114,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.29`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.30`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.29 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.30 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。
