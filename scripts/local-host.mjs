@@ -41,7 +41,8 @@ const devVariables = {
 function redact(value) {
   return String(value || "")
     .replace(/Bearer\s+[^\s,;"']+/gi, "Bearer [REDACTED]")
-    .replace(/(?:api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;"']+/gi, "$1=[REDACTED]")
+    .replace(/(api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;"']+/gi, (_match, key) => `${key}=[REDACTED]`)
+    .replace(/([?&](?:api[_-]?key|token|secret)=)[^&\s]+/gi, "$1[REDACTED]")
     .replace(/\b(?:sk|cap)_[A-Za-z0-9._-]+\b/g, "[REDACTED]")
     .slice(0, 800);
 }
@@ -52,7 +53,7 @@ function logInvocation(event) {
   while (devLogs.length > 500) devLogs.shift();
 }
 function safeSettings(settings) {
-  return { capabilityBaseUrl: settings?.capabilityBaseUrl || DEFAULT_CAPABILITY, modelGatewayBaseUrl: settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY, modelId: settings?.modelId || "", modelCount: Array.isArray(settings?.models) ? settings.models.length : 0 };
+  return { capabilityBaseUrl: redact(settings?.capabilityBaseUrl || DEFAULT_CAPABILITY), modelGatewayBaseUrl: redact(settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY), modelId: redact(settings?.modelId || ""), modelCount: Array.isArray(settings?.models) ? settings.models.length : 0 };
 }
 async function readToolCache() { return await readJson(toolCacheFile, {}); }
 async function writeToolCache(value) { await atomicJson(toolCacheFile, value); }
