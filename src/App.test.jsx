@@ -142,6 +142,30 @@ describe("FolioMind core flows", () => {
     expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
   });
 
+  it("shows the source and freshness of a real quote in the stock workspace", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        dataChannel: "qveris-cap",
+        dataProvider: "qveris_finance",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    useLabStore.setState({ userStateLoaded: true, refreshLiveData: vi.fn().mockResolvedValue(true), liveQuotes: { "600519": { price: 1297.4, change: 0.4, asOf: new Date().toISOString(), source: "ths_ifind" } } });
+
+    render(<App />);
+    const healthStrip = await screen.findByRole("region", { name: "行情数据状态" });
+    expect(healthStrip).toHaveTextContent("真实行情");
+    expect(healthStrip).toHaveTextContent("qveris_finance");
+    expect(healthStrip).toHaveTextContent("MKT.L1.RT");
+    expect(healthStrip).toHaveTextContent("刷新");
+  });
+
   it("pauses background quote polling and refreshes when the page returns", async () => {
     const refreshLiveData = vi.fn().mockResolvedValue(true);
     integrationMocks.loadIntegrationStatus.mockResolvedValue({

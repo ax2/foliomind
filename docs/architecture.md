@@ -14,7 +14,7 @@
 
 本地 Web 调试时，`npm run web:dev` 同时启动 Vite 和独立 Dev Host，默认监听 `127.0.0.1:43123`（端口冲突时自动递增）。Dev Host 复用同一 HTTP 路由和 Search → Inspect → Call 策略，直接代理模型网关和 QVeris 工具；因此修改 Web/Host 代码后无需安装新桌面版本。Web UI 先通过允许的 localhost Origin 获取一次性会话令牌，再以 `X-FolioMind-Host` 请求头访问配置、凭据、用户状态和运行时 API。该 HTTP 入口仅允许回环请求和本地开发 Origin，不作为公网服务。
 
-金融查询首次成功后，Web Host 会按数据类型、渠道地址和模型隔离保存工具选择与参数模板；后续请求优先使用内置 `foliomind_data` 直接 Call，缓存失效再回退到一次 Discover。QVeris 和模型网关的瞬时 408/425/429/5xx 失败以及可恢复的网络错误会经过有界指数退避重试，并尊重上游 `Retry-After`；已取消的请求不会重试，取消信号会打断退避等待。桌面端 Rust 桥接器对 Search/Inspect/Call 采用相同的重试分类、退避上限和停止取消语义，避免安装版与 Web 调试版出现不同的上游故障表现。自选行情刷新使用受限并发（默认 2，localhost 开发面板可调至 1–4），避免多个标的串行等待，也不会无限制地冲击上游服务。前端轮询仅在页面可见时执行，进入后台会跳过请求，回到前台或窗口重新获得焦点时立即触发一次刷新。凭据、模型或渠道变更会使相关缓存失效。
+金融查询默认使用 QVeris CAP 的 `qveris_finance` provider。Web Host 将稳定的 capability/tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到本地 `tool-selection-cache.json`，行情、公司资料、估值和历史日线直接调用 CAP；CAP 不可用时再回退到 Search → Inspect → Call。对外仍提供稳定的 `foliomind_data(kind, symbol, range)` schema，未来可替换为其它渠道而不影响页面。QVeris 和模型网关的瞬时 408/425/429/5xx 失败以及可恢复的网络错误会经过有界指数退避重试，并尊重上游 `Retry-After`；已取消的请求不会重试，取消信号会打断退避等待。桌面端 Rust 桥接器对 Search/Inspect/Call 采用相同的重试分类、退避上限和停止取消语义。自选行情刷新使用受限并发（默认 2，localhost 开发面板可调至 1–4），避免多个标的串行等待。localhost 与桌面端均显示本机开发者面板，分别展示 Host 或 Pi/QVeris 事件日志；密钥和原始提示词不会写入日志。凭据、模型或渠道变更会使相关缓存失效。
 
 当多个本地 Web 请求同时遇到同一类工具缓存未命中时，Host 使用按数据类型和渠道隔离的 warm-up gate 合并 Discover 流程：首个请求负责 Search → Inspect → Call 并固化参数模板，等待者在完成后继续使用 `foliomind_data` 直接调用；若首个请求失败，等待者会接管预热，避免死锁或永久等待。
 
@@ -70,4 +70,4 @@ Rust Host 清理继承环境，不向 Pi 传递任何 `QVERIS_*`、OAuth 或控�
 
 ## Windows 与 macOS
 
-Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。生产发布仍需在对应平台补齐代码签名、公证、自动更新签名和干净安装烟测。
+Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳定 WiX UpgradeCode 和 current-user NSIS 模式，升级覆盖应用文件且不触碰安装目录之外的用户配置。生产发布仍需在对应平台补齐代码签名、公证、自动更新签名和干净安装烟测。

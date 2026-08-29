@@ -21,7 +21,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - Tauri 2 Rust Host 管理 `pi --mode rpc` JSONL 子进程。
 - 固定并校验 Pi 0.84.2，桌面构建自动下载对应 Windows/macOS Runtime 并随安装包分发。
 - Run-scoped 数据执行桥，只向 Pi 暴露 Search、Inspect、Call 三阶段能力。
-- 内置金融研究 Skill，强制真实外部数据遵循 Search → Inspect → Call；QVeris 适配器可作为默认数据通道，也可以替换为兼容的自托管服务。
+- 内置金融研究 Skill；行情页面默认直连 QVeris CAP 的 `qveris_finance` 能力（`MKT.L1.RT`、`REF.COMPANY_PROFILE`、`FUNDAMENTALS.DERIVED_RATIOS`、`MKT.BARS.EOD`），本地保存稳定的 tool schema，缓存失效时才回退 Search → Inspect → Call。QVeris 适配器可替换为兼容的自托管服务。
 - 设置页可将数据服务 API Key 保存到系统凭据库、同步动态模型目录并选择 Pi 默认模型。
 - 设置页可检查 GitHub 最新公开版本并直达发布页；安装包仍提供 SHA-256 校验，自动更新待平台签名密钥接入后启用。
 - 设置页支持导出/导入本地 JSON 备份，迁移自选、盯盘、消息与持仓；API Key、模型配置、缓存和运行日志不会进入备份。
@@ -78,7 +78,7 @@ npm run web:dev
 
 浏览器打开终端打印的 Web 地址（默认 `http://127.0.0.1:5173`；端口被占用时会自动递增并打印新的地址）后，设置页会显示“本地开发 Host”。Dev Host 与桌面端共享同一套 Host HTTP 协议，并直接代理模型、Search → Inspect → Call 和对话，因此修改前端或 Host 逻辑后刷新页面即可验证，不需要重新安装桌面包。API Key 保存在用户配置目录下权限为 `0600` 的文件中，浏览器只持有当前标签页的短期会话令牌。
 
-本地 Web Host 会把金融数据首次成功的 Search/Inspect/Call 结果固化为按数据类型、数据渠道和模型隔离的工具缓存。行情、基本面和历史序列下一次优先通过内置 `foliomind_data` 工具直接 Call；工具过期或渠道变化时会自动清除缓存并回退到一次重新发现。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待；桌面端内置桥接器对 Search/Inspect/Call 采用同一策略，保证 Web 调试与安装版行为一致。价格异动盯盘在本地 Host 中也直接复用固化行情工具并在前端计算阈值，避免每次检查重新调用模型编排；缓存未命中仍回退到真实 Pi 查询。自选行情首次刷新默认以 2 路受限并发请求（可在开发者面板调至 1–4），避免多个标的串行等待，也不会无限制冲击上游；后续刷新优先命中固化工具。缓存只保存工具标识和参数模板，不保存 API Key。行情轮询会感知浏览器可见性：页面进入后台时暂停请求，回到前台或窗口重新获得焦点时立即刷新，减少无效调用并尽快恢复最新行情。localhost 页面右下角的“开发者面板”可以上拉查看 Host 调用日志、模型/凭据状态、缓存命中情况和请求耗时，并通过白名单安全调整调试变量；生产浏览器和桌面端不会显示该面板。
+本地 Web Host 会把 `qveris_finance` CAP 的 tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到用户配置目录的 `tool-selection-cache.json`。行情、基本面和历史序列优先直连 CAP；能力不可用时再回退到一次 Search → Inspect → Call。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待。价格异动盯盘也复用 CAP 行情工具，避免每次检查重新调用模型编排；自选行情默认以 2 路受限并发请求。行情轮询会感知浏览器可见性。localhost 页面和桌面端右下角的“开发者面板”均可查看运行时、API Key 前缀、模型/CAP 调用日志、耗时和能力目录；密钥与原始提示词不会记录。
 
 如需验证真实 Tauri 窗口，再使用 `npm run desktop:dev`；这不是 Web 调试的前置条件。
 
@@ -117,10 +117,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.31`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.32`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode 与 current-user 安装模式，更新时覆盖应用文件而不是要求用户手动卸载；配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.31 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.32 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。

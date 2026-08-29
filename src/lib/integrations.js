@@ -6,6 +6,8 @@ export const defaultIntegrationSettings = {
   modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
   modelId: "",
   models: [],
+  dataChannel: "qveris-cap",
+  dataProvider: "qveris_finance",
 };
 
 export function apiKeyPrefix(value) {
