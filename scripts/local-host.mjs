@@ -189,7 +189,7 @@ async function qverisOperation(operation, input, settings, key, runId, phases, s
     logInvocation({ type: "qveris", operation, status: Number(error.status) || 502, durationMs: Date.now() - startedAt, detail: error.message });
     throw error;
   }
-  logInvocation({ type: "qveris", operation, status: 200, durationMs: Date.now() - startedAt, cacheHit: operation === "call" && false });
+  logInvocation({ type: "qveris", operation, status: 200, durationMs: Date.now() - startedAt, cacheHit: false });
   if (operation === "search") { const searchId = String(result.search_id || result.result?.search_id || ""); const ids = idsFromSearch(result); if (!searchId || !ids.size) throw new Error("Search 返回缺少 search_id 或候选工具"); phases.searches.set(searchId, ids); }
   if (operation === "inspect") for (const id of input.tool_ids) phases.inspected.add(`${input.search_id}:${id}`);
   return result;
