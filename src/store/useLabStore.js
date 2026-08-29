@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { skills, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
-import { isLocalWebRuntime } from "../lib/localHost.js";
+import { isLocalWebRuntime, queryCachedData } from "../lib/localHost.js";
 import { loadIntegrationStatus } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
@@ -131,26 +131,28 @@ function normalizeLiveQuote(value) {
 
 function detailedQuoteFromReply(text) {
   const value = findJsonObject(text) || {};
-  const quote = normalizeLiveQuote(value.quote) || normalizeLiveQuote(value.quotes?.[0]) || normalizeLiveQuote(value);
-  const rawSeries = value.seriesByRange || value.series_by_range || {};
+  const source = value.data && typeof value.data === "object" ? value.data : value.result && typeof value.result === "object" ? value.result : value;
+  const quote = normalizeLiveQuote(source.quote) || normalizeLiveQuote(source.quotes?.[0]) || normalizeLiveQuote(source);
+  const rawSeries = source.seriesByRange || source.series_by_range || {};
   const seriesByRange = Object.fromEntries(Object.entries(rawSeries).filter(([, points]) => Array.isArray(points)));
-  if (Array.isArray(value.series) && !seriesByRange["分时"]) seriesByRange["分时"] = value.series;
-  const fundamentals = value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {};
-  if (!quote && !Object.keys(fundamentals).length && !value.companyDescription && !value.company_description && !Object.keys(seriesByRange).length) return null;
+  if (Array.isArray(source.series) && !seriesByRange["分时"]) seriesByRange["分时"] = source.series;
+  const fundamentals = source.fundamentals && typeof source.fundamentals === "object" ? source.fundamentals : {};
+  if (!quote && !Object.keys(fundamentals).length && !source.companyDescription && !source.company_description && !Object.keys(seriesByRange).length) return null;
   return {
-    quote: { ...(quote || {}), seriesByRange, fundamentals: { ...(quote?.fundamentals || {}), ...fundamentals }, companyDescription: String(value.companyDescription || value.company_description || quote?.companyDescription || "") },
-    reportPeriod: String(value.reportPeriod || value.report_period || ""),
+    quote: { ...(quote || {}), seriesByRange, fundamentals: { ...(quote?.fundamentals || {}), ...fundamentals }, companyDescription: String(source.companyDescription || source.company_description || quote?.companyDescription || "") },
+    reportPeriod: String(source.reportPeriod || source.report_period || ""),
   };
 }
 function seriesFromReply(text) {
   const value = findJsonObject(text);
-  const series = Array.isArray(value?.series) ? value.series : Array.isArray(value?.data) ? value.data : findJsonArray(text);
+  const source = value?.data && typeof value.data === "object" ? value.data : value?.result && typeof value.result === "object" ? value.result : value;
+  const series = Array.isArray(source?.series) ? source.series : Array.isArray(source?.data) ? source.data : findJsonArray(text);
   return series.filter((point) => point && typeof point === "object");
 }
 
 function liveQuotesFromReply(text, symbols) {
   const value = findJsonObject(text);
-  const items = Array.isArray(value?.quotes) ? value.quotes : Array.isArray(value) ? value : [];
+  const items = Array.isArray(value?.quotes) ? value.quotes : Array.isArray(value?.data?.quotes) ? value.data.quotes : Array.isArray(value?.result?.quotes) ? value.result.quotes : Array.isArray(value) ? value : [value?.quote, value?.data, value?.result, value].filter(Boolean);
   const canonical = (symbol) => String(symbol ?? "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "");
   const allowed = new Set(symbols.map(canonical));
   return items.reduce((result, item) => {
@@ -160,6 +162,21 @@ function liveQuotesFromReply(text, symbols) {
     if (quote) result[symbol] = quote;
     return result;
   }, {});
+}
+
+async function askFinancialData(prompt, kind, symbol, range, options) {
+  if (isLocalWebRuntime()) {
+    try {
+      const cached = await queryCachedData({ kind, symbol: qverisSymbol(symbol), range }, { timeoutMs: options?.settleTimeoutMs || 90_000 });
+      return { text: JSON.stringify(cached.data ?? cached), mode: cached.mode || "pi-local-host", audits: cached.audits || [{ operation: "cached-call", outcome: "success" }], cacheHit: cached.cacheHit === true };
+    } catch (error) {
+      if (error?.code !== "TOOL_CACHE_MISS") {
+        // A stale tool is discarded by the Host; one normal Pi run below will
+        // rediscover and solidify a replacement tool.
+      }
+    }
+  }
+  return askPi(prompt, options);
 }
 
 export const initialLabState = {
@@ -211,9 +228,15 @@ export const useLabStore = create((set, get) => ({
       for (const item of state.watchlist) {
         try {
           const marketSymbol = qverisSymbol(item.symbol);
-          const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）A股实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`, { settleTimeoutMs: 60_000 });
+          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）A股实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
+          const reply = await askFinancialData(prompt, "quote", item.symbol, "", { settleTimeoutMs: 60_000 });
           if (requestGeneration !== liveRequestGeneration) return false;
           const quotes = liveQuotesFromReply(reply.text, [item.symbol]);
+          if (!Object.keys(quotes).length && reply.cacheHit) {
+            const rediscovered = await askPi(prompt, { settleTimeoutMs: 60_000 });
+            const recovered = liveQuotesFromReply(rediscovered.text, [item.symbol]);
+            if (Object.keys(recovered).length) { received += 1; set((current) => ({ liveQuotes: { ...current.liveQuotes, ...recovered }, liveDataLastRefreshAt: nowIso() })); continue; }
+          }
           if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
           received += 1;
           set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLastRefreshAt: nowIso() }));
@@ -247,9 +270,11 @@ export const useLabStore = create((set, get) => ({
     const requestGeneration = ++detailsRequestGeneration;
     set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
     try {
-      const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`, { settleTimeoutMs: 90_000 });
+      const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`;
+      const reply = await askFinancialData(prompt, "details", item.symbol, "", { settleTimeoutMs: 90_000 });
       if (requestGeneration !== detailsRequestGeneration) return false;
-      const details = detailedQuoteFromReply(reply.text);
+      let details = detailedQuoteFromReply(reply.text);
+      if (!details && reply.cacheHit) details = detailedQuoteFromReply((await askPi(prompt, { settleTimeoutMs: 90_000 })).text);
       if (!details) throw new Error("数据服务暂未返回可识别的行情详情");
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], ...details.quote, reportPeriod: details.reportPeriod } }, quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
       return true;
@@ -273,7 +298,8 @@ export const useLabStore = create((set, get) => ({
     set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
     const rangeRequest = { 分时: "今天的1分钟或5分钟分时", "5日": "最近5个交易日日线", 日K: "最近90个交易日日线", 周K: "最近52周周线", 月K: "最近60个月月线", 季K: "最近20个季度线", 年K: "最近10年年线" }[range] || range;
     try {
-      const reply = await askPi(`使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`, { settleTimeoutMs: 60_000 });
+      const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`;
+      const reply = await askFinancialData(prompt, "series", item.symbol, rangeRequest, { settleTimeoutMs: 60_000 });
       if (requestGeneration !== seriesRequestGeneration) return false;
       const series = seriesFromReply(reply.text);
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
