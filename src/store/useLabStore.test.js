@@ -228,6 +228,20 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications).toHaveLength(2);
   });
 
+  it("keeps an auditable monitor timeline for triggered checks", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "qveris_finance.mkt_l1_rt" }] });
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ ruleId: "rule-1", symbol: "600519", outcome: "triggered", triggered: true, source: "data-service", asOf: "2026-08-29 10:00:00", conditionResults: [true] });
+    expect(useLabStore.getState().monitorHistory[0].audits[0]).toMatchObject({ operation: "cached-call", toolId: "qveris_finance.mkt_l1_rt" });
+  });
+
   it("allows a failed quote detail request to be retried manually", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

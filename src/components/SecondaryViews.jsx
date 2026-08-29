@@ -189,6 +189,7 @@ function ConditionBuilder({ conditions, logic, onLogicChange, onConditionChange,
 
 export function MonitorView() {
   const rules = useLabStore((state) => state.rules);
+  const monitorHistory = useLabStore((state) => state.monitorHistory);
   const watchlist = useLabStore((state) => state.watchlist);
   const toggleRule = useLabStore((state) => state.toggleRule);
   const addRule = useLabStore((state) => state.addRule);
@@ -215,10 +216,11 @@ export function MonitorView() {
       <div className="rule-list-heading"><h2>运行中的规则</h2><small>{rules.length} 条 · 每条规则独立检查，重复触发自动去重</small></div>
       {rules.length === 0 ? <p className="rule-empty">还没有规则；创建第一条条件后，运行状态和触发记录会显示在这里。</p> : rules.map((rule) => {
         const strategy = strategyFor(rule.strategyId);
-        return <article key={rule.id}><Bell size={20} /><div><strong>{ruleConditionSummary(rule)}</strong><small>{rule.symbol} · {rule.logic === "OR" ? "任一条件" : "全部条件"} · 每 {rule.intervalSeconds >= 60 ? `${Math.round(rule.intervalSeconds / 60)} 分钟` : `${rule.intervalSeconds} 秒`} 检查</small><small>{rule.lastTriggeredAt ? `最近触发 ${new Date(rule.lastTriggeredAt).toLocaleString("zh-CN")}` : rule.lastCheckedAt ? `最近检查 ${new Date(rule.lastCheckedAt).toLocaleString("zh-CN")}` : "尚未检查"} · {strategy.name}</small></div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id); }} aria-label={`立即检查${rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => { void deleteRule(rule.id); }}><Trash size={15} /></button></article>;
+        const history = monitorHistory.filter((entry) => entry.ruleId === rule.id).slice(0, 8);
+        return <article key={rule.id}><Bell size={20} /><div><strong>{ruleConditionSummary(rule)}</strong><small>{rule.symbol} · {rule.logic === "OR" ? "任一条件" : "全部条件"} · 每 {rule.intervalSeconds >= 60 ? `${Math.round(rule.intervalSeconds / 60)} 分钟` : `${rule.intervalSeconds} 秒`} 检查</small><small>{rule.lastTriggeredAt ? `最近触发 ${new Date(rule.lastTriggeredAt).toLocaleString("zh-CN")}` : rule.lastCheckedAt ? `最近检查 ${new Date(rule.lastCheckedAt).toLocaleString("zh-CN")}` : "尚未检查"} · {strategy.name}</small>{history.length > 0 ? <details className="monitor-history"><summary>查看最近 {history.length} 次检查</summary><div className="monitor-history-list">{history.map((entry) => <div className="monitor-history-entry" key={entry.id}><span className={`monitor-outcome ${entry.outcome}`} aria-label={entry.outcome === "triggered" ? "已触发" : entry.outcome === "not_triggered" ? "未触发" : entry.outcome === "error" ? "检查失败" : "待核实"}>{entry.outcome === "triggered" ? "触发" : entry.outcome === "not_triggered" ? "未触发" : entry.outcome === "error" ? "失败" : "待核实"}</span><div><strong>{new Date(entry.checkedAt).toLocaleString("zh-CN")}</strong><small>{entry.summary}</small><small>{entry.asOf ? `数据截至 ${entry.asOf}` : "数据截至时间未返回"} · {entry.source === "data-service" ? "真实数据服务" : "浏览器预览"}{entry.audits?.length ? ` · ${entry.audits.length} 条审计` : ""}</small></div></div>)}</div></details> : <small className="monitor-history-empty">暂无检查记录；运行一次后会保留结果与数据来源。</small>}</div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id); }} aria-label={`立即检查${rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => { void deleteRule(rule.id); }}><Trash size={15} /></button></article>;
       })}
     </section>
-    {realDataMode ? <p className="security-note">没有已返回的真实信号。运行规则后，结果将出现在消息中心；最近触发时间会保留在本地状态中，完整触发详情将在后续版本接入。</p> : null}
+    {realDataMode ? <p className="security-note">检查结果会保留在本地审计时间线；缺失字段显示为“待核实”，不会当作未触发。历史记录最多保留 500 条。</p> : null}
     {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card condition-modal" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘条件</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">规则创建分三步：选择标的、组合真实数据条件、设定检查频率。</p><label>标的<select value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label><ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}
   </div>;
 }
@@ -270,6 +272,7 @@ export function SettingsView() {
   const rules = useLabStore((state) => state.rules);
   const notifications = useLabStore((state) => state.notifications);
   const portfolioPositions = useLabStore((state) => state.portfolioPositions);
+  const monitorHistory = useLabStore((state) => state.monitorHistory);
   const replaceUserState = useLabStore((state) => state.replaceUserState);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const integrationStatusLoading = useLabStore((state) => state.integrationStatusLoading);
@@ -378,7 +381,7 @@ export function SettingsView() {
   const updateMessage = updateState === "error" ? updateError : latestRelease ? compareVersions(latestRelease.version, currentVersion) > 0 ? `发现新版本 ${latestRelease.version}` : `当前已是最新版本（${currentVersion}）` : `当前版本 ${currentVersion}；发布页可查看安装包与校验和。`;
   const exportBackup = () => {
     try {
-      const content = serializeUserStateBackup({ watchlist, rules, notifications, portfolioPositions });
+      const content = serializeUserStateBackup({ watchlist, rules, notifications, portfolioPositions, monitorHistory });
       const blob = new Blob([content], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

@@ -61,6 +61,29 @@ function sanitizePositions(items) {
   })).filter((item) => item.id && item.symbol && item.name && item.quantity !== null && item.averageCost !== null && item.quantity > 0 && item.averageCost >= 0);
 }
 
+function sanitizeMonitorHistory(items) {
+  return (Array.isArray(items) ? items : []).slice(0, 500).map((item) => ({
+    id: text(item?.id, 128),
+    ruleId: text(item?.ruleId, 128),
+    symbol: text(item?.symbol, 64).toUpperCase(),
+    checkedAt: text(item?.checkedAt, 64),
+    outcome: ["triggered", "not_triggered", "unknown", "error"].includes(item?.outcome) ? item.outcome : "unknown",
+    triggered: typeof item?.triggered === "boolean" ? item.triggered : null,
+    title: text(item?.title, 256),
+    summary: text(item?.summary, 4096),
+    severity: ["info", "warning", "critical"].includes(item?.severity) ? item.severity : "info",
+    source: text(item?.source, 64),
+    asOf: text(item?.asOf, 128),
+    conditionResults: Array.isArray(item?.conditionResults) ? item.conditionResults.slice(0, 6).map((value) => typeof value === "boolean" ? value : null) : [],
+    audits: Array.isArray(item?.audits) ? item.audits.slice(0, 12).map((audit) => ({
+      operation: text(audit?.operation, 64),
+      outcome: text(audit?.outcome, 64),
+      toolId: text(audit?.toolId ?? audit?.tool_id, 160),
+      capability: text(audit?.capability, 128),
+    })).filter((audit) => audit.operation || audit.outcome || audit.toolId || audit.capability) : [],
+  })).filter((item) => item.id && item.ruleId && item.symbol && item.checkedAt);
+}
+
 /** Build a portable backup without credentials, model settings, or runtime state. */
 export function userStateBackupData(state = {}) {
   return {
@@ -68,6 +91,7 @@ export function userStateBackupData(state = {}) {
     monitorRules: sanitizeRules(state.monitorRules ?? state.rules),
     notifications: sanitizeNotifications(state.notifications),
     portfolioPositions: sanitizePositions(state.portfolioPositions),
+    monitorHistory: sanitizeMonitorHistory(state.monitorHistory),
   };
 }
 
@@ -82,7 +106,7 @@ export function parseUserStateBackup(raw) {
     throw new Error("备份文件版本不受支持");
   }
   const data = userStateBackupData(value.data);
-  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length) {
+  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length) {
     throw new Error("备份文件中没有可恢复的数据");
   }
   return data;
