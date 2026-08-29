@@ -4,6 +4,7 @@ export const LOCAL_HOST_UNAVAILABLE = "LOCAL_HOST_UNAVAILABLE";
 
 let sessionToken = null;
 let sessionRequest = null;
+let developerVariables = null;
 
 export function isLocalWebRuntime() {
   if (typeof window === "undefined" || Boolean(window.__TAURI_INTERNALS__)) return false;
@@ -85,12 +86,20 @@ export function queryCachedData(input, options = {}) {
   return localHostRequest("/api/data/query", { ...options, method: "POST", body: JSON.stringify({ input }) });
 }
 
-export function loadDeveloperOverview(options = {}) {
-  return localHostRequest("/api/dev/overview", options);
+export async function loadDeveloperOverview(options = {}) {
+  const overview = await localHostRequest("/api/dev/overview", options);
+  if (overview?.variables && typeof overview.variables === "object") developerVariables = { ...overview.variables };
+  return overview;
 }
 
-export function updateDeveloperVariables(variables, options = {}) {
-  return localHostRequest("/api/dev/variables", { ...options, method: "PATCH", body: JSON.stringify(variables) });
+export async function updateDeveloperVariables(variables, options = {}) {
+  const result = await localHostRequest("/api/dev/variables", { ...options, method: "PATCH", body: JSON.stringify(variables) });
+  if (result?.variables && typeof result.variables === "object") developerVariables = { ...result.variables };
+  return result;
+}
+
+export function getDeveloperVariable(name, fallback) {
+  return developerVariables && Object.hasOwn(developerVariables, name) ? developerVariables[name] : fallback;
 }
 
 export function clearDeveloperLogs(options = {}) {

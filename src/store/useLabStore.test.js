@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn() }));
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
-vi.mock("../lib/localHost.js", () => ({ isLocalWebRuntime: () => true }));
+vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true }));
 vi.mock("../lib/userState.js", () => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
@@ -55,6 +55,29 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.askPi).toHaveBeenCalledOnce();
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, source: "caidazi" });
     expect(useLabStore.getState().liveDataError).toBe("");
+  });
+
+  it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {
+    const watchlist = [
+      { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },
+      { symbol: "300750", name: "宁德时代", market: "沪深", category: "新能源" },
+      { symbol: "600036", name: "招商银行", market: "沪深", category: "银行" },
+      { symbol: "601318", name: "中国平安", market: "沪深", category: "保险" },
+    ];
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } }, userStateLoaded: true, watchlist });
+    let active = 0;
+    let maxActive = 0;
+    runtime.askPi.mockImplementation(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 8));
+      active -= 1;
+      return { text: JSON.stringify({ quotes: watchlist.map((item) => ({ symbol: item.symbol, price: 100 })) }), mode: "pi-local-host", audits: [] };
+    });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(maxActive).toBe(2);
+    expect(Object.keys(useLabStore.getState().liveQuotes)).toHaveLength(4);
   });
 
   it("keeps upstream data errors friendly and free of gateway details", async () => {

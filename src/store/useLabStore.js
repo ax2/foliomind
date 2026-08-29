@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { skills, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
-import { isLocalWebRuntime, queryCachedData } from "../lib/localHost.js";
+import { getDeveloperVariable, isLocalWebRuntime, queryCachedData } from "../lib/localHost.js";
 import { loadIntegrationStatus } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
@@ -11,6 +11,8 @@ import { normalizePortfolioPosition } from "../lib/portfolio.js";
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
 export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
+const DEFAULT_LIVE_QUOTE_CONCURRENCY = 2;
+const MAX_LIVE_QUOTE_CONCURRENCY = 4;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items).slice(0, 8).map((item) => ({ ...item }));
 let persistenceQueue = Promise.resolve();
 let liveRequestGeneration = 0;
@@ -164,6 +166,28 @@ function liveQuotesFromReply(text, symbols) {
   }, {});
 }
 
+function resolveLiveQuoteConcurrency() {
+  if (!isLocalWebRuntime()) return DEFAULT_LIVE_QUOTE_CONCURRENCY;
+  const configured = Number(getDeveloperVariable("maxConcurrentDataRequests", DEFAULT_LIVE_QUOTE_CONCURRENCY));
+  if (Number.isInteger(configured)) return Math.max(1, Math.min(MAX_LIVE_QUOTE_CONCURRENCY, configured));
+  return DEFAULT_LIVE_QUOTE_CONCURRENCY;
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+  return results;
+}
+
 async function askFinancialData(prompt, kind, symbol, range, options) {
   if (isLocalWebRuntime()) {
     try {
@@ -225,8 +249,10 @@ export const useLabStore = create((set, get) => ({
     const errors = [];
     let received = 0;
     try {
-      for (const item of state.watchlist) {
+      const concurrency = resolveLiveQuoteConcurrency();
+      await mapWithConcurrency(state.watchlist, concurrency, async (item) => {
         try {
+          if (requestGeneration !== liveRequestGeneration) return false;
           const marketSymbol = qverisSymbol(item.symbol);
           const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）A股实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
           const reply = await askFinancialData(prompt, "quote", item.symbol, "", { settleTimeoutMs: 60_000 });
@@ -235,16 +261,18 @@ export const useLabStore = create((set, get) => ({
           if (!Object.keys(quotes).length && reply.cacheHit) {
             const rediscovered = await askPi(prompt, { settleTimeoutMs: 60_000 });
             const recovered = liveQuotesFromReply(rediscovered.text, [item.symbol]);
-            if (Object.keys(recovered).length) { received += 1; set((current) => ({ liveQuotes: { ...current.liveQuotes, ...recovered }, liveDataLastRefreshAt: nowIso() })); continue; }
+            if (Object.keys(recovered).length) { received += 1; set((current) => ({ liveQuotes: { ...current.liveQuotes, ...recovered }, liveDataLastRefreshAt: nowIso() })); return true; }
           }
           if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
           received += 1;
           set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLastRefreshAt: nowIso() }));
+          return true;
         } catch (error) {
           if (requestGeneration !== liveRequestGeneration) return false;
           errors.push(`${item.name}：${friendlyDataMessage(error)}`);
+          return false;
         }
-      }
+      });
       if (requestGeneration !== liveRequestGeneration) return false;
       if (!received) {
         set({ liveDataLoading: false, liveDataError: errors.join("；") || "暂时没有可用数据，系统会稍后再查" });
