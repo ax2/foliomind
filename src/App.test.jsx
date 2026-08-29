@@ -62,7 +62,8 @@ describe("FolioMind core flows", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "筛选" }));
     expect(screen.getByRole("heading", { name: "研究筛选" })).toBeInTheDocument();
-    expect(screen.getByText("需要真实数据才能筛选")).toBeInTheDocument();
+    expect(screen.getByText("连接真实数据后开始")).toBeInTheDocument();
+    expect(screen.getByText(/不会使用示例行情填充/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "搜索标的" })).toBeInTheDocument();
   });
 
@@ -105,12 +106,12 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByText("等待真实行情").length).toBeGreaterThan(0);
   });
 
-  it("routes a sample monitor signal to QVeris verification", async () => {
+  it("does not show sample monitor signals without a real data connection", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
-    fireEvent.click(screen.getAllByRole("button", { name: "核实并分析" })[0]);
-    expect(await screen.findByText(/待核实线索/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "对话" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("连接真实数据后开始")).toBeInTheDocument();
+    expect(screen.queryByText(/预览线索/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "核实并分析" })).not.toBeInTheDocument();
   });
 
   it("shows real integration controls without claiming a missing credential is configured", async () => {
