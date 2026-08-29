@@ -67,7 +67,7 @@ function findJsonArray(text) {
 }
 function normalizeRule(rule) {
   const strategy = strategyFor(rule.strategyId);
-  return { id: String(rule.id ?? createId("rule")), symbol: String(rule.symbol ?? "600519"), strategyId: strategy.id, threshold: Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : strategy.defaultThreshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null };
+  return { id: String(rule.id ?? createId("rule")), symbol: String(rule.symbol ?? "600519"), strategyId: strategy.id, threshold: Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : strategy.defaultThreshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null };
 }
 function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
@@ -440,7 +440,18 @@ export const useLabStore = create((set, get) => ({
         reply = await askPi(`执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。阈值：${rule.threshold}${strategy.unit}。${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true或false,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`, { settleTimeoutMs: 120_000 });
         parsed = findJsonObject(reply.text); result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
       }
-      set((state) => { const shouldNotify = result.triggered === true || reply.mode === "browser-demo" || !parsed; const notification = shouldNotify ? notificationFromResult(rule, item, result, reply) : null; return { monitorBusy: false, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: result.triggered ? nowIso() : candidate.lastTriggeredAt } : candidate), notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications }; }); await get().persistUserState(); return true;
+      set((state) => {
+        const triggered = result.triggered === true;
+        // Alerts are edge-triggered: keep one notification while a condition
+        // remains true, then allow a new notification after it resets.
+        const shouldNotify = (triggered && rule.lastSignalTriggered !== true) || reply.mode === "browser-demo" || !parsed;
+        const notification = shouldNotify ? notificationFromResult(rule, item, result, reply) : null;
+        return {
+          monitorBusy: false,
+          rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: triggered ? nowIso() : candidate.lastTriggeredAt, lastSignalTriggered: triggered } : candidate),
+          notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications,
+        };
+      }); await get().persistUserState(); return true;
     } catch (error) {
       const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试"); set((state) => ({ monitorBusy: false, notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: nowIso(), read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
     }

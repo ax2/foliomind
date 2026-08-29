@@ -188,6 +188,29 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications[0].body).toContain("+4.20%");
   });
 
+  it("notifies on a trigger edge instead of repeating the same alert every poll", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    const quote = (changePercent) => ({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+    runtime.queryCachedData.mockResolvedValueOnce(quote(4.2)).mockResolvedValueOnce(quote(4.2)).mockResolvedValueOnce(quote(1.2)).mockResolvedValueOnce(quote(4.5));
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
+    await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+    expect(useLabStore.getState().rules[0].lastSignalTriggered).toBe(true);
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+    expect(useLabStore.getState().rules[0].lastSignalTriggered).toBe(false);
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
+    expect(useLabStore.getState().notifications).toHaveLength(2);
+  });
+
   it("allows a failed quote detail request to be retried manually", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

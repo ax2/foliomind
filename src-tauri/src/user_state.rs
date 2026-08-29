@@ -31,6 +31,8 @@ pub struct MonitorRule {
     pub enabled: bool,
     pub last_checked_at: Option<String>,
     pub last_triggered_at: Option<String>,
+    #[serde(default)]
+    pub last_signal_triggered: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -94,6 +96,7 @@ impl Default for UserState {
                     enabled: true,
                     last_checked_at: None,
                     last_triggered_at: None,
+                    last_signal_triggered: None,
                 },
                 MonitorRule {
                     id: "r2".into(),
@@ -104,6 +107,7 @@ impl Default for UserState {
                     enabled: true,
                     last_checked_at: None,
                     last_triggered_at: None,
+                    last_signal_triggered: None,
                 },
             ],
             notifications: Vec::new(),
