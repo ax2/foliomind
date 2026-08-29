@@ -1,10 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, classifyRequest, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, classifyRequest, createCacheWarmupGate, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
+
+test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {
+  const gate = createCacheWarmupGate();
+  let ready = false;
+  const releaseOwner = await gate.acquire("quote", async () => ready);
+  let waiterFinished = false;
+  const waiter = gate.acquire("quote", async () => ready).then((release) => {
+    waiterFinished = true;
+    return release;
+  });
+  await Promise.resolve();
+  assert.equal(waiterFinished, false);
+  // The first owner failed before writing a cache entry.  The waiter becomes
+  // the new owner instead of remaining blocked forever.
+  releaseOwner();
+  await Promise.resolve();
+  assert.equal(waiterFinished, false);
+  ready = true;
+  const releaseWaiter = await waiter;
+  assert.equal(waiterFinished, true);
+  assert.equal(typeof releaseWaiter, "function");
+  releaseWaiter();
 });
 
 test("classifies finance requests for tool caching", () => {

@@ -75,6 +75,8 @@ npm run web:dev
 
 如需验证真实 Tauri 窗口，再使用 `npm run desktop:dev`；这不是 Web 调试的前置条件。
 
+当多个自选标的首次同时刷新且工具缓存尚未命中时，Host 会合并同类请求，只执行一次 Search → Inspect → Call 预热，其余请求等待缓存固化后直接复用，减少首屏重复发现工具。
+
 为避免长期凭据通过明文链路泄露，远程数据服务地址必须使用 HTTPS；只有 `localhost`、`127.0.0.0/8` 和 `::1` 回环地址允许使用 HTTP。基础地址不能包含 query 或 fragment。
 
 ## 本地开发
@@ -108,10 +110,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.27`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.28`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.27 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.28 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。
