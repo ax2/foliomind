@@ -1,6 +1,6 @@
 {
   "name": "foliomind",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-notification": "2.3.3",
     "@tauri-apps/plugin-opener": "2.5.4",
     "@vitejs/plugin-react": "5.0.4",
     "lightweight-charts": "^5.2.1",

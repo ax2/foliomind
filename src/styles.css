@@ -1078,6 +1078,9 @@ textarea:focus-visible {
 .notification strong { font-size: 13px; }
 .notification p { margin: 5px 0; color: #657181; font-size: 11px; line-height: 1.55; }
 .notification small { color: var(--muted); font-size: 10px; }
+.notification-actions { display: flex; align-items: center; gap: 10px; }
+.notification-preference { display: inline-flex; align-items: center; gap: 6px; color: #607188; font-size: 11px; white-space: nowrap; }
+.notification-preference input { accent-color: var(--blue); }
 .unread-dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: var(--blue); }
 .empty-state { display: grid; justify-items: center; gap: 8px; margin: 18vh auto; color: var(--muted); text-align: center; }
 .empty-state svg { color: #9bbce8; }

@@ -6,6 +6,7 @@ import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultI
 import { formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
 import { portfolioMetrics, portfolioRiskMetrics } from "../lib/portfolio.js";
 import { friendlySettingsMessage } from "../lib/friendlyMessages.js";
+import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 
@@ -149,7 +150,25 @@ export function NotificationsView() {
   const notifications = useLabStore((state) => state.notifications);
   const markNotificationRead = useLabStore((state) => state.markNotificationRead);
   const markAllNotificationsRead = useLabStore((state) => state.markAllNotificationsRead);
-  return <div className="secondary-page notifications-page"><header><div><h1>站内消息</h1><p>盯盘触发、数据查询结果与运行状态都会保存在这里</p></div><button className="secondary-button" disabled={!notifications.some((item) => !item.read)} onClick={markAllNotificationsRead}>全部标为已读</button></header>{notifications.length === 0 ? <div className="empty-state"><BellRinging size={30} /><strong>还没有盯盘消息</strong><p>启用一条策略后，Pi 会按间隔检查真实数据。</p></div> : <div className="notification-list">{notifications.map((item) => <article className={item.read ? "notification read" : "notification unread"} key={item.id} onClick={() => markNotificationRead(item.id)}><div className={`notification-severity ${item.severity}`} /><div><strong>{item.title}</strong><p>{item.body}</p><small>{new Date(item.createdAt).toLocaleString("zh-CN")} · {item.source === "data-service" ? "真实数据服务" : "浏览器预览"}</small></div>{!item.read && <span className="unread-dot" />}</article>)}</div>}</div>;
+  const [systemEnabled, setSystemEnabled] = useState(() => systemNotificationsEnabled());
+  const [systemNotice, setSystemNotice] = useState("");
+  const toggleSystemNotifications = async () => {
+    setSystemNotice("");
+    if (systemEnabled) {
+      setSystemNotificationsEnabled(false);
+      setSystemEnabled(false);
+      return;
+    }
+    const granted = await requestSystemNotificationPermission();
+    if (!granted) {
+      setSystemNotice("未获得系统通知权限；站内消息仍会正常保存。请在系统设置中允许后重试。");
+      return;
+    }
+    setSystemNotificationsEnabled(true);
+    setSystemEnabled(true);
+    setSystemNotice("系统通知已开启，新的盯盘触发会同时显示在系统通知中心。");
+  };
+  return <div className="secondary-page notifications-page"><header><div><h1>站内消息</h1><p>盯盘触发、数据查询结果与运行状态都会保存在这里</p></div><div className="notification-actions"><label className="notification-preference"><input type="checkbox" checked={systemEnabled} onChange={() => { void toggleSystemNotifications(); }} />系统通知</label><button className="secondary-button" disabled={!notifications.some((item) => !item.read)} onClick={markAllNotificationsRead}>全部标为已读</button></div></header>{systemNotice && <p className="settings-notice" role="status">{systemNotice}</p>}{notifications.length === 0 ? <div className="empty-state"><BellRinging size={30} /><strong>还没有盯盘消息</strong><p>启用一条策略后，Pi 会按间隔检查真实数据。</p></div> : <div className="notification-list">{notifications.map((item) => <article className={item.read ? "notification read" : "notification unread"} key={item.id} onClick={() => markNotificationRead(item.id)}><div className={`notification-severity ${item.severity}`} /><div><strong>{item.title}</strong><p>{item.body}</p><small>{new Date(item.createdAt).toLocaleString("zh-CN")} · {item.source === "data-service" ? "真实数据服务" : "浏览器预览"}</small></div>{!item.read && <span className="unread-dot" />}</article>)}</div>}</div>;
 }
 
 export function SkillsView() {

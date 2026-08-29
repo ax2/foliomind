@@ -1280,8 +1280,10 @@ fn user_state_save(
 }
 
 fn main() {
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_notification::init());
+    let app = builder
         .manage(PiHost::default())
         .invoke_handler(tauri::generate_handler![
             runtime_status,
