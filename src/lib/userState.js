@@ -1,5 +1,6 @@
 import { isDesktopRuntime } from "./piRuntime.js";
 import { isLocalWebRuntime, localHostRequest } from "./localHost.js";
+import { normalizeConditions } from "./monitorConditions.js";
 
 const STORAGE_KEY = "foliomind.user-state.v1";
 export const USER_STATE_BACKUP_VERSION = 1;
@@ -26,6 +27,8 @@ function sanitizeRules(items) {
     symbol: text(rule?.symbol, 64).toUpperCase(),
     strategyId: text(rule?.strategyId, 64),
     threshold: finiteNumber(rule?.threshold),
+    conditions: normalizeConditions(rule?.conditions, text(rule?.strategyId, 64)),
+    logic: String(rule?.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND",
     intervalSeconds: finiteNumber(rule?.intervalSeconds),
     enabled: rule?.enabled !== false,
     lastCheckedAt: rule?.lastCheckedAt ? text(rule.lastCheckedAt, 64) : null,

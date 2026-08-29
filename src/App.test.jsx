@@ -90,7 +90,22 @@ describe("FolioMind core flows", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
     fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
-    expect(screen.getByText("成交量异常监控")).toBeInTheDocument();
+    expect(screen.getByText("触发条件")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "条件1类型" })).toHaveValue("price_change");
+    expect(screen.getByRole("combobox", { name: "条件组合逻辑" })).toHaveValue("AND");
+  });
+
+  it("builds an OR rule from multiple real-data conditions", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
+    fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
+    fireEvent.click(screen.getByRole("button", { name: "添加条件" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "条件组合逻辑" }), { target: { value: "OR" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "条件2类型" }), { target: { value: "volume_spike" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "条件2数值" }), { target: { value: "2.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));
+    await waitFor(() => expect(useLabStore.getState().rules.at(-1)).toMatchObject({ logic: "OR", conditions: [{ type: "price_change" }, { type: "volume_spike", value: 2.5 }] }));
+    expect(screen.getAllByText(/涨跌幅/).length).toBeGreaterThan(0);
   });
 
   it("adds a portfolio position and keeps missing live quotes empty", async () => {

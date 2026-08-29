@@ -30,6 +30,13 @@ export const defaultMonitorRules = [
   { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true },
 ];
 
+export const monitorTemplates = [
+  { id: "workday", name: "上班族盯盘", description: "价格大幅波动或公告出现", logic: "OR", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }, { type: "core_event", operator: "gte", value: 1 }], intervalSeconds: 300 },
+  { id: "midterm", name: "中线持仓", description: "价格波动且量能放大", logic: "AND", conditions: [{ type: "price_change", operator: "abs_gte", value: 4 }, { type: "volume_spike", operator: "gte", value: 2.5 }], intervalSeconds: 600 },
+  { id: "risk", name: "回撤防守", description: "跌幅达到风控阈值", logic: "AND", conditions: [{ type: "price_change", operator: "lte", value: -5 }], intervalSeconds: 300 },
+  { id: "events", name: "事件雷达", description: "公告、财报和产业舆情", logic: "OR", conditions: [{ type: "core_event", operator: "gte", value: 1 }, { type: "sentiment", operator: "eq", value: "negative" }], intervalSeconds: 1800 },
+];
+
 export function strategyFor(id) {
   return monitorStrategies.find((strategy) => strategy.id === id) ?? monitorStrategies[0];
 }
