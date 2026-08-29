@@ -119,17 +119,32 @@ async function upstream(url, options = {}, signal) {
   const response = await fetch(url, { ...options, signal, headers: { accept: "application/json", ...(options.headers || {}) } });
   const text = await response.text();
   let body; try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
-  if (!response.ok) { const error = new Error(`上游请求失败（HTTP ${response.status}）`); error.status = response.status; throw error; }
+  if (!response.ok) {
+    const error = new Error(`上游请求失败（HTTP ${response.status}）`);
+    error.status = response.status;
+    const retryAfter = response.headers.get("retry-after");
+    if (retryAfter && /^\d+(?:\.\d+)?$/.test(retryAfter.trim())) error.retryAfterMs = Math.min(30_000, Number(retryAfter) * 1_000);
+    throw error;
+  }
   return body;
 }
-async function upstreamWithRetry(url, options = {}, signal, attempts = 2) {
+export function isRetryableUpstreamStatus(status) {
+  return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+export function retryDelayMs(attempt, retryAfterMs = 0) {
+  const serverDelay = Number.isFinite(Number(retryAfterMs)) ? Math.max(0, Number(retryAfterMs)) : 0;
+  const exponentialDelay = 500 * (2 ** Math.max(0, Number(attempt) || 0));
+  return Math.min(8_000, Math.max(serverDelay, exponentialDelay));
+}
+
+export async function upstreamWithRetry(url, options = {}, signal, attempts = 2) {
   for (let attempt = 0; ; attempt += 1) {
     try { return await upstream(url, options, signal); }
     catch (error) {
-      const retryable = [429, 500, 502, 503, 504].includes(Number(error?.status));
-      if (!retryable || attempt >= attempts) throw error;
+      if (!isRetryableUpstreamStatus(error?.status) || attempt >= attempts) throw error;
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 500 * (attempt + 1));
+        const timer = setTimeout(resolve, retryDelayMs(attempt, error?.retryAfterMs));
         if (signal) signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason || new Error("aborted")); }, { once: true });
       });
     }
@@ -184,7 +199,7 @@ async function qverisOperation(operation, input, settings, key, runId, phases, s
   const startedAt = Date.now();
   let result;
   try {
-    result = await upstream(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify(payload) }, signal);
+    result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify(payload) }, signal);
   } catch (error) {
     logInvocation({ type: "qveris", operation, status: Number(error.status) || 502, durationMs: Date.now() - startedAt, detail: error.message });
     throw error;
