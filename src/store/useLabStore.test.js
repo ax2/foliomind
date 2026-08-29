@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn() }));
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
+vi.mock("../lib/localHost.js", () => ({ isLocalWebRuntime: () => true }));
 vi.mock("../lib/userState.js", () => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
@@ -104,6 +105,21 @@ describe("lab store streaming lifecycle", () => {
 
     await expect(pending).resolves.toBe(false);
     expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLoading: false });
+  });
+
+  it("runs due monitor checks in the local Web Host when real data is configured", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ triggered: false, title: "贵州茅台 · 价格异动", summary: "真实数据检查完成", severity: "info", asOf: "2026-08-29 10:00:00" }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().runDueMonitorChecks()).resolves.toBe(true);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().rules[0].lastCheckedAt).toBeTruthy();
+    expect(useLabStore.getState().notifications).toHaveLength(0);
   });
 
   it("allows a failed quote detail request to be retried manually", async () => {

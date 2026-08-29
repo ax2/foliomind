@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { skills, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
+import { isLocalWebRuntime } from "../lib/localHost.js";
 import { loadIntegrationStatus } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
@@ -347,7 +348,15 @@ export const useLabStore = create((set, get) => ({
       const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试"); set((state) => ({ monitorBusy: false, notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: nowIso(), read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
     }
   },
-  runDueMonitorChecks: async () => { if (!isDesktopRuntime() || !get().userStateLoaded || get().monitorBusy) return false; const now = Date.now(); const due = get().rules.find((rule) => rule.enabled && (!rule.lastCheckedAt || now - Date.parse(rule.lastCheckedAt) >= rule.intervalSeconds * 1000)); return due ? get().runMonitorCheck(due.id) : false; },
+  runDueMonitorChecks: async () => {
+    const state = get();
+    const hostRuntime = isDesktopRuntime() || isLocalWebRuntime();
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    if (!hostRuntime || !state.userStateLoaded || !configured || state.monitorBusy) return false;
+    const now = Date.now();
+    const due = state.rules.find((rule) => rule.enabled && (!rule.lastCheckedAt || now - Date.parse(rule.lastCheckedAt) >= rule.intervalSeconds * 1000));
+    return due ? get().runMonitorCheck(due.id) : false;
+  },
   beginRuntimeConfiguration: () => { let acquired = false; set((state) => { if (state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; return { runtimeConfiguring: true }; }); return acquired; },
   endRuntimeConfiguration: () => set({ runtimeConfiguring: false }),
   setSettingsNotice: (settingsNotice) => set({ settingsNotice }), clearSettingsNotice: () => set({ settingsNotice: null }),
