@@ -37,6 +37,7 @@ async function fetchJson(url, options = {}) {
     if (!response.ok) {
       const error = new Error(body.error || `本地 Host 请求失败（${response.status}）`);
       error.status = response.status;
+      if (body.code) error.code = body.code;
       throw error;
     }
     return body;
@@ -78,6 +79,22 @@ export async function localHostRequest(path, { retry = true, ...options } = {}) 
     }
     throw error;
   }
+}
+
+export function queryCachedData(input, options = {}) {
+  return localHostRequest("/api/data/query", { ...options, method: "POST", body: JSON.stringify({ input }) });
+}
+
+export function loadDeveloperOverview(options = {}) {
+  return localHostRequest("/api/dev/overview", options);
+}
+
+export function updateDeveloperVariables(variables, options = {}) {
+  return localHostRequest("/api/dev/variables", { ...options, method: "PATCH", body: JSON.stringify(variables) });
+}
+
+export function clearDeveloperLogs(options = {}) {
+  return localHostRequest("/api/dev/logs", { ...options, method: "DELETE" });
 }
 
 export function clearLocalHostSession() {
