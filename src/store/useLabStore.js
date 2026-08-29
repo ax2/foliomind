@@ -204,14 +204,17 @@ export const useLabStore = create((set, get) => ({
           received += 1;
           set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLastRefreshAt: nowIso() }));
         } catch (error) {
-          errors.push(`${item.name}：${error instanceof Error ? error.message : String(error)}`);
+          errors.push(`${item.name}：${friendlyDataMessage(error)}`);
         }
       }
-      if (!received) throw new Error(errors.join("；") || "数据服务暂未返回可识别的真实行情");
-      set({ liveDataLoading: false, liveDataError: errors.length ? `部分行情获取失败：${errors.join("；")}` : "" });
+      if (!received) {
+        set({ liveDataLoading: false, liveDataError: errors.join("；") || "暂时没有可用数据，系统会稍后再查" });
+        return false;
+      }
+      set({ liveDataLoading: false, liveDataError: errors.length ? "部分标的暂未更新，系统会稍后自动重试" : "" });
       return true;
     } catch (error) {
-      set({ liveDataLoading: false, liveDataError: error instanceof Error ? error.message : String(error) });
+      set({ liveDataLoading: false, liveDataError: friendlyDataMessage(error) });
       return false;
     }
   },
@@ -233,7 +236,7 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], ...details.quote, reportPeriod: details.reportPeriod } }, quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
       return true;
     } catch (error) {
-      set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: error instanceof Error ? error.message : String(error) } }));
+      set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: friendlyDataMessage(error) } }));
       return false;
     }
   },
@@ -255,7 +258,7 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
       return true;
     } catch (error) {
-      set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: error instanceof Error ? error.message : String(error) } } }));
+      set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: friendlyDataMessage(error) } } }));
       return false;
     }
   },
