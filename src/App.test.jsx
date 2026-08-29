@@ -84,6 +84,19 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("成交量异常监控")).toBeInTheDocument();
   });
 
+  it("adds a portfolio position and keeps missing live quotes empty", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "组合" }));
+    expect(screen.getByRole("heading", { name: "投资组合" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "添加第一笔持仓" }));
+    fireEvent.change(screen.getByLabelText("持仓数量"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("平均成本"), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存持仓" }));
+    expect(await screen.findByText("1 个持仓")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("等待真实行情").length).toBeGreaterThan(0);
+  });
+
   it("routes a sample monitor signal to QVeris verification", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));

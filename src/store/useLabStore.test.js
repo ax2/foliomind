@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn() }));
 
-vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi }));
+vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
+vi.mock("../lib/userState.js", () => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
 
@@ -53,6 +54,26 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.askPi).toHaveBeenCalledOnce();
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, source: "caidazi" });
     expect(useLabStore.getState().liveDataError).toBe("");
+  });
+
+  it("persists portfolio positions with normalized numbers", async () => {
+    const saved = await useLabStore.getState().savePortfolioPosition({ symbol: " aapl ", name: "Apple", market: "US", quantity: "2", averageCost: "100" });
+    expect(saved).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100 });
+    expect(useLabStore.getState().portfolioPositions).toHaveLength(1);
+    await expect(useLabStore.getState().removePortfolioPosition(saved.id)).resolves.toBe(true);
+    expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
+  });
+
+  it("clears stale quotes when the configured data channel changes", () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://one.example", capabilityBaseUrl: "https://data.example" } },
+      liveQuotes: { AAPL: { price: 100 } },
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      quoteDetailsLoaded: { AAPL: true },
+      quoteSeriesLoaded: { AAPL: { 日K: true } },
+    });
+    useLabStore.getState().setIntegrationStatus({ credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://two.example", capabilityBaseUrl: "https://data.example" } });
+    expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLastRefreshAt: null, quoteDetailsLoaded: {}, quoteSeriesLoaded: {} });
   });
 
   it("hydrates detailed chart and company fields without inventing missing values", async () => {
