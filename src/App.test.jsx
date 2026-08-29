@@ -58,6 +58,14 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "5日" })).toHaveClass("active");
   });
 
+  it("opens the real-data research screener with an honest empty state", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    expect(screen.getByRole("heading", { name: "研究筛选" })).toBeInTheDocument();
+    expect(screen.getByText("需要真实数据才能筛选")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "搜索标的" })).toBeInTheDocument();
+  });
+
   it("opens Skills and toggles install state", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /^技能$/ }));

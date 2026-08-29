@@ -43,3 +43,39 @@ export function portfolioMetrics(positions, liveQuotes) {
     totalCount: rows.length,
   };
 }
+
+/**
+ * Returns transparent portfolio risk signals derived only from values that
+ * have actually been returned by the data channel. No risk score is emitted
+ * when the inputs are incomplete.
+ */
+export function portfolioRiskMetrics(positions, liveQuotes) {
+  const metrics = portfolioMetrics(positions, liveQuotes);
+  const pricedRows = metrics.rows.filter((row) => row.hasQuote);
+  const missingRows = metrics.rows.filter((row) => !row.hasQuote);
+  const topPosition = [...pricedRows].sort((left, right) => (right.weight ?? 0) - (left.weight ?? 0))[0] || null;
+  const totalCost = metrics.totalCost;
+  const missingCost = missingRows.reduce((total, row) => total + row.costValue, 0);
+  const missingCostWeight = totalCost > 0 ? (missingCost / totalCost) * 100 : null;
+  const pricedCoverage = metrics.totalCount > 0 ? (metrics.pricedCount / metrics.totalCount) * 100 : null;
+  const signals = [];
+  if (topPosition?.weight >= 50) {
+    signals.push({ level: "critical", title: "单一标的集中度较高", detail: `${topPosition.name} 占已计价组合 ${topPosition.weight.toFixed(1)}%，建议确认是否符合你的风险上限。` });
+  } else if (topPosition?.weight >= 30) {
+    signals.push({ level: "warning", title: "存在集中度暴露", detail: `${topPosition.name} 占已计价组合 ${topPosition.weight.toFixed(1)}%，可以考虑设置单标的上限。` });
+  }
+  if (missingRows.length > 0) {
+    signals.push({ level: "info", title: "部分持仓缺少现价", detail: `${missingRows.length} 个持仓暂未返回真实行情，${missingCostWeight == null ? "暂无法计算" : `约 ${missingCostWeight.toFixed(1)}% 成本暴露`}未纳入市值和盈亏。` });
+  }
+  if (pricedRows.length >= 2 && pricedRows.every((row) => !Array.isArray(row.quote?.series) || row.quote.series.length < 2)) {
+    signals.push({ level: "info", title: "波动率与相关性尚未计算", detail: "当前没有足够的真实历史序列；补齐历史数据后才会计算波动率和相关性。" });
+  }
+  return {
+    topPosition,
+    topWeight: topPosition?.weight ?? null,
+    pricedCoverage,
+    missingCostWeight,
+    signals,
+    hasEnoughDataForRiskModel: pricedRows.length >= 2 && pricedRows.every((row) => Array.isArray(row.quote?.series) && row.quote.series.length >= 2),
+  };
+}
