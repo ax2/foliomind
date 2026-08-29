@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { adaptParameters, classifyRequest } from "./local-host.mjs";
+import { createServer } from "node:http";
+import { adaptParameters, classifyRequest, isRetryableUpstreamStatus, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
 
 test("classifies finance requests for tool caching", () => {
   assert.equal(classifyRequest("查询贵州茅台 A股实时行情快照"), "quote");
@@ -14,4 +15,39 @@ test("adapts a discovered call template without dropping provider parameters", (
   const result = adaptParameters(template, "300750", "最近5个交易日日线");
   assert.deepEqual(result, { symbol: "300750", market: "CN", period: "最近5个交易日日线", nested: { source: "provider" } });
   assert.equal(template.symbol, "600519.SH");
+});
+
+test("uses bounded exponential backoff for transient upstream responses", () => {
+  assert.equal(isRetryableUpstreamStatus(408), true);
+  assert.equal(isRetryableUpstreamStatus(429), true);
+  assert.equal(isRetryableUpstreamStatus(503), true);
+  assert.equal(isRetryableUpstreamStatus(400), false);
+  assert.equal(isRetryableUpstreamStatus(401), false);
+  assert.equal(retryDelayMs(0), 500);
+  assert.equal(retryDelayMs(1), 1_000);
+  assert.equal(retryDelayMs(99), 8_000);
+  assert.equal(retryDelayMs(0, 2_000), 2_000);
+});
+
+test("retries a transient data request before surfacing success", async () => {
+  let attempts = 0;
+  const server = createServer((_request, response) => {
+    attempts += 1;
+    if (attempts === 1) {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "temporary" }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  try {
+    const result = await upstreamWithRetry(`http://127.0.0.1:${address.port}/data`, {}, undefined, 1);
+    assert.deepEqual(result, { ok: true });
+    assert.equal(attempts, 2);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
