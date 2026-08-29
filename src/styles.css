@@ -488,6 +488,7 @@ textarea:focus-visible {
   font-size: 10px;
   cursor: pointer;
 }
+.chart-empty .secondary-button { margin-top: 8px; padding: 6px 10px; font-size: 10px; }
 .source-line {
   color: #89919c;
   font-size: 10px;
@@ -823,7 +824,8 @@ textarea:focus-visible {
 .live-quotes-grid article b { font-size: 15px; align-self: center; }
 .live-quotes-grid article > span { font-size: 11px; text-align: right; }
 .live-quotes-grid article > small { grid-column: 1 / -1; }
-.live-quotes-error { margin: 8px 0 0; color: #b33a3a; font-size: 11px; }
+.live-quotes-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 0; color: #8a6670; font-size: 11px; }
+.live-quotes-error .secondary-button { padding: 5px 9px; font-size: 10px; }
 .secondary-page > header {
   display: flex;
   align-items: center;

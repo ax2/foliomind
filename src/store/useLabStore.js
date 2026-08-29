@@ -215,6 +215,11 @@ export const useLabStore = create((set, get) => ({
       return false;
     }
   },
+  retryLiveData: async () => {
+    if (get().liveDataLoading) return false;
+    set({ liveDataError: "" });
+    return get().refreshLiveData();
+  },
   refreshQuoteDetails: async (symbol) => {
     const state = get();
     const item = state.watchlist.find((entry) => entry.symbol === symbol);
@@ -231,6 +236,10 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: error instanceof Error ? error.message : String(error) } }));
       return false;
     }
+  },
+  retryQuoteDetails: async (symbol) => {
+    set((current) => ({ quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: false }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
+    return get().refreshQuoteDetails(symbol);
   },
   refreshQuoteSeries: async (symbol, range) => {
     const state = get();
@@ -249,6 +258,10 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: error instanceof Error ? error.message : String(error) } } }));
       return false;
     }
+  },
+  retryQuoteSeries: async (symbol, range) => {
+    set((current) => ({ quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: false } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
+    return get().refreshQuoteSeries(symbol, range);
   },
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),

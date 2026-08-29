@@ -76,6 +76,21 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLastRefreshAt: null, quoteDetailsLoaded: {}, quoteSeriesLoaded: {} });
   });
 
+  it("allows a failed quote detail request to be retried manually", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockRejectedValueOnce(new Error("上游暂不可用")).mockResolvedValueOnce({ text: JSON.stringify({ companyDescription: "真实简介" }), mode: "pi-local-host", audits: [] });
+    await expect(useLabStore.getState().refreshQuoteDetails("600519")).resolves.toBe(false);
+    expect(useLabStore.getState().quoteDetailsLoaded["600519"]).toBe(true);
+    await expect(useLabStore.getState().retryQuoteDetails("600519")).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes["600519"].companyDescription).toBe("真实简介");
+    expect(runtime.askPi).toHaveBeenCalledTimes(2);
+  });
+
   it("hydrates detailed chart and company fields without inventing missing values", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

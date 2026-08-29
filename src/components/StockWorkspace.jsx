@@ -17,6 +17,8 @@ export function StockWorkspace() {
   const userStateLoaded = useLabStore((state) => state.userStateLoaded);
   const refreshQuoteDetails = useLabStore((state) => state.refreshQuoteDetails);
   const refreshQuoteSeries = useLabStore((state) => state.refreshQuoteSeries);
+  const retryQuoteDetails = useLabStore((state) => state.retryQuoteDetails);
+  const retryQuoteSeries = useLabStore((state) => state.retryQuoteSeries);
   const quoteDetailsLoading = useLabStore((state) => state.quoteDetailsLoading);
   const quoteDetailsLoaded = useLabStore((state) => state.quoteDetailsLoaded);
   const quoteDetailsError = useLabStore((state) => state.quoteDetailsError);
@@ -50,10 +52,10 @@ export function StockWorkspace() {
       </section>
       <section className="chart-section">
         <div className="range-tabs">{ranges.map((range) => <button key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}<button className="chart-settings"><SlidersHorizontal size={18} /></button></div>
-        <MarketChart series={series} range={chartRange} loading={Boolean(quoteDetailsLoading[symbol] || quoteSeriesLoading[symbol]?.[chartRange])} error={quoteSeriesError[symbol]?.[chartRange] || ""} />
+        <MarketChart series={series} range={chartRange} loading={Boolean(quoteDetailsLoading[symbol] || quoteSeriesLoading[symbol]?.[chartRange])} error={quoteSeriesError[symbol]?.[chartRange] || ""} onRetry={() => { void retryQuoteSeries(symbol, chartRange); }} />
       </section>
       <section className="fundamentals"><h3>关键指标 <small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "真实财务数据"}</small></h3><div>{[["营业收入", "revenue"], ["净利润", "netProfit"], ["毛利率", "grossMargin"], ["净利率", "netMargin"], ["ROE", "roe"]].map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.fundamentals?.[key] ?? quote?.fundamentals?.[label])}</dd><small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "查询详情后显示"}</small></dl>)}</div></section>
-      <section className="company-intro"><h3>公司简介</h3><p>{quote?.companyDescription || (quoteDetailsError[symbol] ? "公司资料暂时未返回，系统会稍后自动重试。" : "正在获取公司简介；没有返回时保持空状态。")}</p></section>
+      <section className="company-intro"><h3>公司简介</h3><p>{quote?.companyDescription || (quoteDetailsError[symbol] ? "公司资料暂时未返回，系统会稍后自动重试。" : "正在获取公司简介；没有返回时保持空状态。")}</p>{quoteDetailsError[symbol] && <button onClick={() => { void retryQuoteDetails(symbol); }}>重新获取详情</button>}</section>
       <footer className="source-line">{realDataMode ? "仅显示已返回的真实数据；空值不会以示例数据填充。" : "当前为界面预览；配置模型后将只显示真实数据。"}</footer>
     </main>
   );
