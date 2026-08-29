@@ -115,6 +115,23 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
   });
 
+  it("replaces portable user data and clears real-data caches", async () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      selectedSymbol: "600519",
+      liveQuotes: { "600519": { price: 1200 } },
+    });
+    await expect(useLabStore.getState().replaceUserState({
+      watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ", category: "科技" }],
+      monitorRules: [{ id: "r1", symbol: "AAPL", strategyId: "price_change", threshold: 5, intervalSeconds: 300, enabled: true }],
+      notifications: [],
+      portfolioPositions: [],
+    })).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "AAPL", liveQuotes: {}, watchlist: [{ symbol: "AAPL" }] });
+    expect(useLabStore.getState().rules[0]).toMatchObject({ symbol: "AAPL", strategyId: "price_change" });
+  });
+
   it("clears stale quotes when the configured data channel changes", () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://one.example", capabilityBaseUrl: "https://data.example" } },
