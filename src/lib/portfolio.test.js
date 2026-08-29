@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioMetrics, portfolioRiskMetrics } from "./portfolio.js";
+import { normalizePortfolioPosition, portfolioMetrics, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -29,5 +29,13 @@ describe("portfolio metrics", () => {
     expect(result.pricedCoverage).toBe(50);
     expect(result.signals.map((signal) => signal.title)).toEqual(expect.arrayContaining(["单一标的集中度较高", "部分持仓缺少现价"]));
     expect(result.hasEnoughDataForRiskModel).toBe(false);
+  });
+
+  it("exports a truthful report with blanks for unpriced positions", () => {
+    const positions = [{ id: "p1", symbol: "AAPL", name: "Apple, Inc.", market: "US", quantity: 2, averageCost: 100 }, { id: "p2", symbol: "MSFT", name: "Microsoft", market: "US", quantity: 1, averageCost: 200 }];
+    expect(portfolioReportRows(positions, { AAPL: { price: 125, asOf: "2026-08-29", source: "CAP" } })[1]).toMatchObject({ currentPrice: null, marketValue: null, quoteSource: "" });
+    const csv = portfolioReportCsv(positions, { AAPL: { price: 125, asOf: "2026-08-29", source: "CAP" } });
+    expect(csv).toContain('"Apple, Inc."');
+    expect(csv).toContain("Microsoft,US,1,200,,,,,,,");
   });
 });

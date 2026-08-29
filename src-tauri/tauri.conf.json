@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "FolioMind",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "identifier": "app.foliomind.desktop",
   "build": {
     "frontendDist": "../dist/client",
@@ -48,6 +48,12 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "wix": {
+        "upgradeCode": "d070ff2d-9ed9-5f0b-a3a7-155f50567bf5"
       }
     }
   }

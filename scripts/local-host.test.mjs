@@ -1,10 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, classifyRequest, createCacheWarmupGate, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, createCacheWarmupGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
+
+test("keeps the qveris_finance CAP contract local and normalizes real envelopes", () => {
+  assert.equal(DEFAULT_DATA_PROVIDER, "qveris_finance");
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.quote.toolId, "qveris_finance.mkt_l1_rt");
+  const result = normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { result: { data: { price: 1297.4, change: 5.1, change_percent: 0.39, timestamp: "2026-08-28T16:01:30", symbol: "600519.SH" }, _meta: { source_provider: "ths_ifind" } } });
+  assert.equal(result.quotes[0].price, 1297.4);
+  assert.equal(result.quotes[0].source, "ths_ifind");
+  const series = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-28", close: 1297.4 }] } });
+  assert.deepEqual(series.series[0], { date: "2026-08-28", close: 1297.4, time: "2026-08-28", value: 1297.4 });
 });
 
 test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {

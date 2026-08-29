@@ -44,6 +44,50 @@ export function portfolioMetrics(positions, liveQuotes) {
   };
 }
 
+function csvCell(value) {
+  const text = value == null ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+/** Return an export-safe snapshot of the current portfolio, preserving blanks for missing real quotes. */
+export function portfolioReportRows(positions, liveQuotes) {
+  const metrics = portfolioMetrics(positions, liveQuotes);
+  return metrics.rows.map((row) => ({
+    symbol: row.symbol,
+    name: row.name,
+    market: row.market,
+    quantity: row.quantity,
+    averageCost: row.averageCost,
+    currentPrice: row.currentPrice,
+    marketValue: row.marketValue,
+    unrealizedPnl: row.pnl,
+    unrealizedPnlPercent: row.pnlPercent,
+    weightPercent: row.weight,
+    quoteAsOf: row.quote?.asOf || "",
+    quoteSource: row.quote?.source || "",
+  }));
+}
+
+export function portfolioReportCsv(positions, liveQuotes) {
+  const columns = [
+    ["symbol", "代码"],
+    ["name", "名称"],
+    ["market", "市场"],
+    ["quantity", "数量"],
+    ["averageCost", "平均成本"],
+    ["currentPrice", "现价"],
+    ["marketValue", "市值"],
+    ["unrealizedPnl", "未实现盈亏"],
+    ["unrealizedPnlPercent", "未实现盈亏百分比"],
+    ["weightPercent", "组合占比百分比"],
+    ["quoteAsOf", "行情截至"],
+    ["quoteSource", "行情来源"],
+  ];
+  const lines = [columns.map(([, label]) => csvCell(label)).join(",")];
+  for (const row of portfolioReportRows(positions, liveQuotes)) lines.push(columns.map(([key]) => csvCell(row[key])).join(","));
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
 /**
  * Returns transparent portfolio risk signals derived only from values that
  * have actually been returned by the data channel. No risk score is emitted

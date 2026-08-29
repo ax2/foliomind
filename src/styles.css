@@ -1053,6 +1053,7 @@ textarea:focus-visible {
 .rule-run:disabled { opacity: .45; cursor: not-allowed; }
 .secondary-button { border: 1px solid #d9dde4; border-radius: 7px; padding: 8px 11px; background: #fff; color: #59616d; cursor: pointer; font-size: 11px; }
 .secondary-button:disabled { opacity: .45; cursor: not-allowed; }
+.page-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgb(19 28 42 / 32%); pointer-events: none; }
 .modal-card { width: min(430px, 100%); display: grid; gap: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 20px 70px rgb(13 31 56 / 20%); pointer-events: auto; }
 .watch-suggestions { display: grid; gap: 4px; margin-top: -6px; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: #fbfcfe; }

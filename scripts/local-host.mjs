@@ -9,6 +9,8 @@ const PORT = Number(process.env.FOLIOMIND_HOST_PORT || 43123);
 const MAX_BODY = 512 * 1024;
 const DEFAULT_CAPABILITY = "https://qveris.ai/api/v1";
 const DEFAULT_GATEWAY = "https://aigateway.qveris.ai/v1";
+export const DEFAULT_DATA_PROVIDER = "qveris_finance";
+export const CAPABILITY_CATALOG_VERSION = 1;
 const BRIDGE_LIMIT = 20;
 export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
 const token = `fh_${randomUUID()}`;
@@ -21,7 +23,7 @@ const credentialFile = join(dataDir, "qveris-api-key");
 const stateFile = join(dataDir, "user-state.json");
 const toolCacheFile = join(dataDir, "tool-selection-cache.json");
 
-const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [] };
+const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [], dataChannel: "qveris-cap", dataProvider: DEFAULT_DATA_PROVIDER };
 const defaultState = {
   watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }, { symbol: "300750", name: "宁德时代", market: "深市", category: "新能源" }],
   monitorRules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }, { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }],
@@ -54,13 +56,13 @@ function logInvocation(event) {
   while (devLogs.length > 500) devLogs.shift();
 }
 function safeSettings(settings) {
-  return { capabilityBaseUrl: redact(settings?.capabilityBaseUrl || DEFAULT_CAPABILITY), modelGatewayBaseUrl: redact(settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY), modelId: redact(settings?.modelId || ""), modelCount: Array.isArray(settings?.models) ? settings.models.length : 0 };
+  return { capabilityBaseUrl: redact(settings?.capabilityBaseUrl || DEFAULT_CAPABILITY), modelGatewayBaseUrl: redact(settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY), modelId: redact(settings?.modelId || ""), dataChannel: String(settings?.dataChannel || "qveris-cap"), dataProvider: String(settings?.dataProvider || DEFAULT_DATA_PROVIDER), modelCount: Array.isArray(settings?.models) ? settings.models.length : 0 };
 }
 async function readToolCache() { return await readJson(toolCacheFile, {}); }
 async function writeToolCache(value) { await atomicJson(toolCacheFile, value); }
 async function clearToolCache() { try { await unlink(toolCacheFile); } catch { /* idempotent */ } }
 function cacheKey(kind, settings) {
-  return [kind, settings?.capabilityBaseUrl || DEFAULT_CAPABILITY, settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY, settings?.modelId || ""].join("|");
+  return [kind, settings?.dataChannel || "qveris-cap", settings?.dataProvider || DEFAULT_DATA_PROVIDER, settings?.capabilityBaseUrl || DEFAULT_CAPABILITY, settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY, settings?.modelId || ""].join("|");
 }
 async function reserveCacheWarmup(message, settings) {
   const kind = classifyRequest(message);
@@ -90,7 +92,113 @@ export function adaptParameters(template, symbol, range) {
   return params;
 }
 function cacheSummary(cache) {
-  return Object.entries(cache || {}).map(([key, entry]) => ({ key, kind: entry.kind, toolId: entry.toolId, searchId: entry.searchId, createdAt: entry.createdAt, lastUsedAt: entry.lastUsedAt, hitCount: Number(entry.hitCount) || 0 }));
+  return Object.entries(cache || {}).filter(([key]) => !key.startsWith("__")).map(([key, entry]) => ({ key, kind: entry.kind, toolId: entry.toolId, searchId: entry.searchId, provider: entry.provider, capability: entry.capability, createdAt: entry.createdAt, lastUsedAt: entry.lastUsedAt, hitCount: Number(entry.hitCount) || 0 }));
+}
+
+// qveris_finance is a CAP provider: the capability ID is stable while QVeris
+// routes each request to the best underlying source.  Keep this small contract
+// local so normal page loads do not pay the Search → Inspect round trip.
+export const BUILTIN_CAPABILITY_CATALOG = Object.freeze({
+  quote: { toolId: "qveris_finance.mkt_l1_rt", capability: "MKT.L1.RT", description: "实时或近实时 Level 1 行情快照", parameters: { symbol: "string" }, returns: ["price", "change", "change_percent", "timestamp", "volume", "open", "high", "low", "previous_close", "turnover_amount", "currency", "symbol"] },
+  details: { toolId: "qveris_finance.ref_company_profile", capability: "REF.COMPANY_PROFILE", description: "上市公司基础概况与静态资料", parameters: { symbol: "string" }, returns: ["name", "exchange", "currency", "country", "industry", "description", "sector", "website", "employees", "market_cap", "symbol"] },
+  fundamentals: { toolId: "qveris_finance.fundamentals_derived_ratios", capability: "FUNDAMENTALS.DERIVED_RATIOS", description: "估值与盈利指标快照", parameters: { symbol: "string" }, returns: ["symbol", "market_cap", "pe_ttm", "pb_ratio", "ps_ratio_ttm", "ev_to_ebitda", "peg_ratio", "dividend_yield", "as_of_date"] },
+  series: { toolId: "qveris_finance.mkt_bars_eod", capability: "MKT.BARS.EOD", description: "历史日线 OHLCV 时间序列", parameters: { symbol: "string", start_date: "string", end_date: "string" }, returns: ["symbol", "date", "open", "high", "low", "close", "volume"] },
+});
+
+const QVERIS_FINANCE_PROVIDER_SUMMARY = Object.freeze({
+  capabilityCount: 141,
+  domains: ["主数据", "实时行情与K线", "财务报表与估值", "新闻与事件", "资金流", "基金与ETF", "指数", "宏观/汇率/商品", "固定收益", "衍生品", "技术分析", "加密资产", "ESG与风险"],
+});
+
+function capabilityCatalog(settings) {
+  return {
+    version: CAPABILITY_CATALOG_VERSION,
+    channel: String(settings?.dataChannel || "qveris-cap"),
+    provider: String(settings?.dataProvider || DEFAULT_DATA_PROVIDER),
+    providerSummary: QVERIS_FINANCE_PROVIDER_SUMMARY,
+    updatedAt: new Date().toISOString(),
+    tools: Object.entries(BUILTIN_CAPABILITY_CATALOG).map(([kind, item]) => ({ kind, ...item })),
+  };
+}
+
+async function persistCapabilityCatalog(settings) {
+  const cache = await readToolCache();
+  const previous = cache.__catalog;
+  const next = capabilityCatalog(settings);
+  // Preserve the first-seen timestamp while updating the contract metadata.
+  cache.__catalog = { ...next, createdAt: previous?.createdAt || next.updatedAt };
+  await writeToolCache(cache);
+  return cache.__catalog;
+}
+
+function directCapabilityParameters(kind, input) {
+  const symbol = String(input?.symbol || "").trim().toUpperCase();
+  if (kind === "series") {
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(end.getDate() - 90);
+    return { symbol, start_date: String(input?.start_date || start.toISOString().slice(0, 10)), end_date: String(input?.end_date || end.toISOString().slice(0, 10)) };
+  }
+  return { symbol };
+}
+
+function capabilityData(result) {
+  return result?.result?.data ?? result?.data ?? result?.result ?? result;
+}
+
+export function normalizeCapabilityResult(kind, input, result) {
+  const data = capabilityData(result);
+  const meta = result?.result?._meta || result?._meta || {};
+  const source = meta.source_provider || meta.source_tool_id || DEFAULT_DATA_PROVIDER;
+  if (kind === "quote") {
+    if (!data || typeof data !== "object" || Array.isArray(data) || !Number.isFinite(Number(data.price))) throw new Error("CAP 未返回可识别的实时行情");
+    return { quotes: [{ ...data, changePercent: data.change_percent, changeAmount: data.change, previousClose: data.previous_close, turnover: data.turnover_amount, asOf: data.timestamp, source }], source, capability: "MKT.L1.RT", asOf: data.timestamp || null };
+  }
+  if (kind === "details") {
+    if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回公司资料");
+    return { companyDescription: data.description || "", company: data, source, capability: "REF.COMPANY_PROFILE", asOf: null };
+  }
+  if (kind === "series") {
+    const points = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+    return { series: points.map((point) => ({ ...point, time: point.time || point.date, value: point.value ?? point.close })).filter((point) => point.time || point.date), source, capability: "MKT.BARS.EOD", asOf: points[0]?.date || null };
+  }
+  if (kind === "fundamentals") {
+    if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回估值指标");
+    return { fundamentals: data, source, capability: "FUNDAMENTALS.DERIVED_RATIOS", asOf: data.as_of_date || null };
+  }
+  return data;
+}
+
+async function queryDirectCapability(input, settings, key, signal) {
+  const kind = String(input?.kind || "").trim();
+  const catalog = await persistCapabilityCatalog(settings);
+  const kinds = kind === "details" ? ["details", "fundamentals"] : [kind];
+  const selections = kinds.map((entryKind) => ({ kind: entryKind, selected: catalog.tools.find((tool) => tool.kind === entryKind) })).filter(({ selected }) => selected);
+  if (!selections.length) { const error = new Error("没有对应的金融能力"); error.status = 404; error.code = "CAPABILITY_NOT_FOUND"; throw error; }
+  const call = async ({ kind: callKind, selected }) => {
+    const parameters = directCapabilityParameters(callKind, input);
+    const runId = `cap_${randomUUID()}`;
+    const startedAt = Date.now();
+    const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(selected.toolId)}`;
+    try {
+      const result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, signal, 1);
+      const normalized = normalizeCapabilityResult(callKind, input, result);
+      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: Date.now() - startedAt });
+      return { selected, normalized };
+    } catch (error) {
+      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: true, durationMs: Date.now() - startedAt, detail: error.message });
+      throw error;
+    }
+  };
+  const settled = await Promise.allSettled(selections.map(call));
+  const results = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
+  if (!results.length) throw settled.find((item) => item.status === "rejected")?.reason || new Error("CAP 暂未返回数据");
+  const primary = results[0];
+  if (kind === "details") {
+    const fundamentals = results.find((item) => item.selected.kind === "fundamentals")?.normalized;
+    return { data: { ...primary.normalized, fundamentals: fundamentals?.fundamentals || {}, asOf: fundamentals?.asOf || null }, cacheHit: true, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
+  }
+  return { data: primary.normalized, cacheHit: true, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
 }
 
 // Multiple watchlist rows can start at the same time.  Keep only the first
@@ -266,6 +374,8 @@ async function rememberToolSelection(kind, settings, input, runId) {
     toolId: String(input.tool_id),
     searchId: String(input.search_id),
     runId: String(runId),
+    provider: String(settings?.dataProvider || DEFAULT_DATA_PROVIDER),
+    capability: previous.capability || null,
     parameters: input.parameters && typeof input.parameters === "object" ? input.parameters : {},
     createdAt: previous.createdAt || new Date().toISOString(),
     lastUsedAt: new Date().toISOString(),
@@ -307,9 +417,17 @@ async function runPromptAgent(message, settings, key, signal) {
   const runId = `product_${randomUUID()}`;
   const phases = { searches: new Map(), inspected: new Set() };
   const audits = [];
-  const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。涉及实时、外部或专业数据时，先尝试使用内置 foliomind_data 直接复用已固化工具；工具提示缓存未命中时，再严格按 Search → Inspect → Call 顺序使用 QVeris 工具并让系统固化本次选择。回答要标明数据时间、来源和不确定性。" }, { role: "user", content: message }];
+  const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。行情、公司资料、估值和历史序列优先调用内置 foliomind_data（它直连 qveris_finance CAP，避免重复发现工具）；只有能力不可用时，才按 Search → Inspect → Call 顺序使用 QVeris 工具并让系统固化本次选择。回答要标明数据时间、来源和不确定性，绝不编造缺失数据。" }, { role: "user", content: message }];
   for (let round = 0; round < 8; round += 1) {
-    const response = await upstreamWithRetry(endpoint(settings.modelGatewayBaseUrl, "chat/completions"), { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages, tools: toolDefinitions(), tool_choice: "auto", max_tokens: 4096 }) }, signal);
+    const modelStartedAt = Date.now();
+    let response;
+    try {
+      response = await upstreamWithRetry(endpoint(settings.modelGatewayBaseUrl, "chat/completions"), { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages, tools: toolDefinitions(), tool_choice: "auto", max_tokens: 4096 }) }, signal);
+      logInvocation({ type: "model", operation: "chat-completions", model, status: 200, durationMs: Date.now() - modelStartedAt });
+    } catch (error) {
+      logInvocation({ type: "model", operation: "chat-completions", model, status: Number(error.status) || 502, durationMs: Date.now() - modelStartedAt, detail: error.message });
+      throw error;
+    }
     const assistant = response.choices?.[0]?.message;
     if (!assistant) throw new Error("模型返回为空");
     messages.push(assistant);
@@ -320,12 +438,17 @@ async function runPromptAgent(message, settings, key, signal) {
       if (name === "foliomind_data") {
         let input; try { input = JSON.parse(call.function.arguments || "{}"); } catch { throw new Error("工具参数不是有效 JSON"); }
         try {
-          const cachedResult = await queryCachedData(input, settings, key, signal);
+          const cachedResult = await queryDirectCapability(input, settings, key, signal);
           audits.push({ operation: "cached-call", runId, toolCallId: call.id || randomUUID(), outcome: "success", detail: null });
           messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
         } catch (error) {
           audits.push({ operation: "cached-call", runId, toolCallId: call.id || randomUUID(), outcome: "error", detail: "cache-miss" });
-          messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify({ error: "当前没有可直接复用的工具", next_action: "请按 qveris_search → qveris_inspect → qveris_call 建立工具固化缓存。" }) });
+          try {
+            const cachedResult = await queryCachedData(input, settings, key, signal);
+            messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
+          } catch {
+            messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify({ error: "当前金融能力暂不可用", next_action: "请稍后重试；若持续失败，请打开开发者面板查看 CAP 调用日志。" }) });
+          }
         }
         continue;
       }
@@ -363,15 +486,16 @@ async function route(req, body) {
   if (method === "DELETE" && path === "/api/integration/credential") { await deleteKey(); await clearToolCache(); return { configured: false, keyPrefix: "" }; }
   if (method === "POST" && path === "/api/integration/models/sync") {
     const input = body.input || {}; const key = await readKey(); if (!key) throw new Error("QVeris credential is not configured");
-    const settings = { ...(await readJson(settingsFile, defaultSettings)), capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim() };
+    const settings = { ...(await readJson(settingsFile, defaultSettings)), capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || DEFAULT_DATA_PROVIDER) };
     settings.models = normalizeModels((await upstream(endpoint(settings.modelGatewayBaseUrl, "models"), { headers: { authorization: `Bearer ${key}` } })).data);
     settings.modelId = settings.models.some((item) => item.id === settings.modelId) ? settings.modelId : settings.models[0]?.id || "";
     await atomicJson(settingsFile, settings); await clearToolCache(); return settings;
   }
-  if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const settings = { ...(await readJson(settingsFile, defaultSettings)), capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), models: Array.isArray(input.models) ? input.models : (await readJson(settingsFile, defaultSettings)).models || [] }; await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
+  if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const previous = await readJson(settingsFile, defaultSettings); const settings = { ...previous, capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || previous.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || previous.dataProvider || DEFAULT_DATA_PROVIDER), models: Array.isArray(input.models) ? input.models : previous.models || [] }; await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
   if (method === "GET" && path === "/api/dev/overview") {
     const settings = await readJson(settingsFile, defaultSettings); const key = await readKey();
-    return { logs: devLogs.slice(-200), state: { runtimeState, activeRequest: Boolean(activeAbort), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(await readToolCache()) }, variables: { ...devVariables } };
+    const cache = await readToolCache();
+    return { logs: devLogs.slice(-200), state: { runtimeState, activeRequest: Boolean(activeAbort), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings) }, variables: { ...devVariables } };
   }
   if (method === "DELETE" && path === "/api/dev/logs") { devLogs.length = 0; return { cleared: true }; }
   if (method === "PATCH" && path === "/api/dev/variables") {
@@ -387,7 +511,14 @@ async function route(req, body) {
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
     if (!String(input.symbol || "").trim() || !["quote", "details", "series"].includes(String(input.kind || ""))) throw new Error("数据查询参数无效");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
-    try { const result = await queryCachedData(input, settings, key, controller.signal); return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] }; }
+    try {
+      const result = await queryDirectCapability(input, settings, key, controller.signal);
+      return { ...result, audits: [{ operation: "cap-call", outcome: "success", toolId: result.toolId, capability: result.capability }] };
+    } catch (directError) {
+      logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
+      const result = await queryCachedData(input, settings, key, controller.signal);
+      return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] };
+    }
     finally { clearTimeout(timeout); }
   }
   if (method === "GET" && path === "/api/user-state") return readJson(stateFile, defaultState);
