@@ -28,9 +28,24 @@ export function App() {
   }, [hydrateUserState, runDueMonitorChecks]);
   useEffect(() => {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured || !integrationStatus.settings?.modelId) return undefined;
-    void refreshLiveData();
-    const timer = window.setInterval(() => { void refreshLiveData(); }, LIVE_QUOTE_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    if (typeof window === "undefined" || typeof document === "undefined") return undefined;
+    const isVisible = () => document.visibilityState !== "hidden";
+    const refreshWhenVisible = () => {
+      if (isVisible()) void refreshLiveData();
+    };
+    refreshWhenVisible();
+    const timer = window.setInterval(refreshWhenVisible, LIVE_QUOTE_REFRESH_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshWhenVisible();
+    };
+    const onWindowFocus = () => refreshWhenVisible();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onWindowFocus);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onWindowFocus);
+    };
   }, [userStateLoaded, integrationRefreshKey, refreshLiveData]);
   const renderView = () => {
     if (activeView === "market") return <div className="secondary-view-shell"><LiveQuotesStrip /><MarketView /></div>;

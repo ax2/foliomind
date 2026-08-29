@@ -142,6 +142,35 @@ describe("FolioMind core flows", () => {
     expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
   });
 
+  it("pauses background quote polling and refreshes when the page returns", async () => {
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    useLabStore.setState({ userStateLoaded: true, refreshLiveData });
+    const previousVisibilityState = document.visibilityState;
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      render(<App />);
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalled());
+      expect(refreshLiveData).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledOnce());
+    } finally {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
+    }
+  });
+
   it("requires a fresh model sync after changing the gateway", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
