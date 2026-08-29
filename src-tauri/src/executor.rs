@@ -22,6 +22,8 @@ const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_MODEL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
 const MODEL_TIMEOUT: Duration = Duration::from_secs(120);
+const UPSTREAM_RETRY_ATTEMPTS: usize = 2;
+const UPSTREAM_RETRY_MAX_DELAY: Duration = Duration::from_secs(8);
 const MAX_QUERY_BYTES: usize = 4 * 1024;
 const MAX_IDENTIFIER_BYTES: usize = 256;
 const MAX_TOOL_IDS: usize = 5;
@@ -473,6 +475,41 @@ async fn wait_for_executor_stop(shutdown: &AtomicBool) {
     }
 }
 
+fn is_retryable_upstream_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 425 | 429 | 500 | 502 | 503 | 504)
+}
+
+fn retry_after(response: &reqwest::Response) -> Option<Duration> {
+    let seconds = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some(Duration::from_secs_f64(seconds.min(30.0)))
+}
+
+fn retry_delay(attempt: usize, server_delay: Option<Duration>) -> Duration {
+    let exponential =
+        Duration::from_millis(500_u64.saturating_mul(2_u64.saturating_pow(attempt.min(4) as u32)));
+    exponential
+        .max(server_delay.unwrap_or_default())
+        .min(UPSTREAM_RETRY_MAX_DELAY)
+}
+
+async fn wait_for_retry(shutdown: &AtomicBool, delay: Duration) -> Result<(), String> {
+    tokio::select! {
+        biased;
+        _ = wait_for_executor_stop(shutdown) => Err("executor stopped".into()),
+        _ = tokio::time::sleep(delay) => Ok(()),
+    }
+}
+
 fn block_on_upstream<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -593,26 +630,51 @@ async fn execute_official_api(
         .timeout(UPSTREAM_TIMEOUT)
         .build()
         .map_err(|_| "cannot initialize QVeris client")?;
-    let response = send_cancellable(
-        client.post(endpoint).bearer_auth(key).json(&body),
-        shutdown,
-        "QVeris request failed or timed out",
-    )
-    .await?;
-    ensure_executor_running(shutdown)?;
-    let status = response.status();
-    let bytes = read_response_limited(
-        response,
-        MAX_RESPONSE_BYTES,
-        shutdown,
-        "cannot read QVeris response",
-        "QVeris response exceeds size limit",
-    )
-    .await?;
-    if !status.is_success() {
-        return Err(format!("QVeris API returned HTTP {}", status.as_u16()));
+    for attempt in 0..=UPSTREAM_RETRY_ATTEMPTS {
+        ensure_executor_running(shutdown)?;
+        let response = match send_cancellable(
+            client
+                .post(endpoint.clone())
+                .bearer_auth(key.clone())
+                .json(&body),
+            shutdown,
+            "QVeris request failed or timed out",
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(error) if error != "executor stopped" && attempt < UPSTREAM_RETRY_ATTEMPTS => {
+                wait_for_retry(shutdown, retry_delay(attempt, None)).await?;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        ensure_executor_running(shutdown)?;
+        let status = response.status();
+        let server_delay = retry_after(&response);
+        if !status.is_success()
+            && is_retryable_upstream_status(status)
+            && attempt < UPSTREAM_RETRY_ATTEMPTS
+        {
+            drop(response);
+            wait_for_retry(shutdown, retry_delay(attempt, server_delay)).await?;
+            continue;
+        }
+        let bytes = read_response_limited(
+            response,
+            MAX_RESPONSE_BYTES,
+            shutdown,
+            "cannot read QVeris response",
+            "QVeris response exceeds size limit",
+        )
+        .await?;
+        if !status.is_success() {
+            return Err(format!("QVeris API returned HTTP {}", status.as_u16()));
+        }
+        return serde_json::from_slice(&bytes)
+            .map_err(|_| "QVeris API returned invalid JSON".into());
     }
-    serde_json::from_slice(&bytes).map_err(|_| "QVeris API returned invalid JSON".into())
+    unreachable!("upstream retry loop always returns")
 }
 
 fn with_policy_fields(input: &Value, fields: &[(&str, Value)]) -> Value {
@@ -1064,6 +1126,72 @@ mod tests {
         assert_eq!(body["session_id"], "product-run");
         assert_eq!(body["view"], "lean");
         assert_eq!(body["respond_with"], "full");
+    }
+    #[test]
+    fn retries_only_transient_upstream_statuses_with_a_bounded_delay() {
+        assert!(is_retryable_upstream_status(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(is_retryable_upstream_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(!is_retryable_upstream_status(
+            reqwest::StatusCode::UNAUTHORIZED
+        ));
+        assert_eq!(retry_delay(0, None), Duration::from_millis(500));
+        assert_eq!(retry_delay(1, None), Duration::from_secs(1));
+        assert_eq!(retry_delay(99, None), UPSTREAM_RETRY_MAX_DELAY);
+        assert_eq!(
+            retry_delay(0, Some(Duration::from_secs(30))),
+            UPSTREAM_RETRY_MAX_DELAY
+        );
+    }
+    #[test]
+    fn retries_a_transient_tool_response_before_returning_success() {
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let upstream_address = upstream.local_addr().unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let captured_attempts = attempts.clone();
+        let server = thread::spawn(move || {
+            for attempt in 0..2 {
+                let (mut stream, _) = upstream.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                read_request(&mut stream).unwrap();
+                captured_attempts.fetch_add(1, Ordering::AcqRel);
+                if attempt == 0 {
+                    write!(
+                        stream,
+                        "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                } else {
+                    let body = br#"{"result":{"ok":true}}"#;
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    stream.write_all(body).unwrap();
+                }
+            }
+        });
+        let store = Arc::new(InMemoryCredentialStore::new());
+        store.write_qveris_key("test-key").unwrap();
+        let store: Arc<dyn CredentialStore> = store;
+        let shutdown = AtomicBool::new(false);
+        let result = block_on_upstream(execute_official_api(
+            &store,
+            &format!("http://{upstream_address}"),
+            &request(),
+            &shutdown,
+        ))
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(result["result"]["ok"], true);
+        assert_eq!(attempts.load(Ordering::Acquire), 2);
     }
     #[test]
     fn requires_exact_bearer_capability() {
