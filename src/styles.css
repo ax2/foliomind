@@ -494,6 +494,9 @@ textarea:focus-visible {
   font-size: 10px;
   padding: 16px 0 4px;
 }
+.quote-source-fresh { color: #6f7b88 !important; }
+.quote-source-stale { color: #a66c31 !important; }
+.quote-source-unknown { color: #8b929d !important; }
 .copilot-panel {
   min-width: 0;
   height: 100vh;

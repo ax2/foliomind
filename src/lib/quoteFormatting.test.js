@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAmount, formatPercent, formatPrice, formatQuoteField, formatRefreshTime } from "./quoteFormatting.js";
+import { formatAmount, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -21,5 +21,19 @@ describe("quote formatting", () => {
     expect(formatRefreshTime("2026-08-29T10:00:00Z", now)).toContain("可能已过期");
     expect(formatRefreshTime("2026-08-29T10:01:30Z", now)).toContain("最近更新");
     expect(formatRefreshTime("", now)).toBe("尚未更新");
+  });
+
+  it("classifies provider timestamps without claiming unknown data is fresh", () => {
+    const now = Date.parse("2026-08-29T10:00:00Z");
+    expect(quoteFreshness("2026-08-29T09:55:00Z", now).state).toBe("fresh");
+    expect(quoteFreshness("2026-08-29T09:30:00Z", now).state).toBe("stale");
+    expect(quoteFreshness("", now).state).toBe("unknown");
+    expect(formatQuoteFreshness("", now)).toBe("数据时间未知");
+  });
+
+  it("accepts unix-second and unix-millisecond provider timestamps", () => {
+    const now = Date.parse("2026-08-29T10:00:00Z");
+    expect(quoteFreshness(String(Math.floor((now - 60_000) / 1000)), now).state).toBe("fresh");
+    expect(quoteFreshness(now - 60_000, now).state).toBe("fresh");
   });
 });

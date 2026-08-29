@@ -8,7 +8,7 @@
 4. 数据调用遵循 `Search → Inspect → Call`；调用结果必须保留 source、as-of、execution ID 和费用字段。
 5. 第一版不连接真实券商，不提供自动交易，不承诺收益。
 
-自选标的、盯盘规则和站内通知统一保存在 Host 管理的 `user-state.json` 中。桌面端写入 Tauri 应用配置目录并使用临时文件原子替换；浏览器本地 Host 使用同样的文件协议。未配置真实凭证时 UI 可显示明确标注的预览布局；配置完成后行情、指标、图表和盯盘结果只接受 QVeris 返回的数据，空字段保持为空。
+自选标的、盯盘规则和站内通知统一保存在 Host 管理的 `user-state.json` 中。桌面端写入 Tauri 应用配置目录并使用临时文件原子替换；浏览器本地 Host 使用同样的文件协议。未配置真实凭证时 UI 可显示明确标注的预览布局；配置完成后行情、指标、图表和盯盘结果只接受 QVeris 返回的数据，空字段保持为空。行情展示统一解析 provider 的 `asOf`：缺失或异常时间显示“数据时间未知”，超过 15 分钟显示“可能已延迟”，避免把旧行情误认为实时数据。
 
 本地 Web 调试时，`npm run web:dev` 同时启动 Vite 和独立 Dev Host，默认监听 `127.0.0.1:43123`（端口冲突时自动递增）。Dev Host 复用同一 HTTP 路由和 Search → Inspect → Call 策略，直接代理模型网关和 QVeris 工具；因此修改 Web/Host 代码后无需安装新桌面版本。Web UI 先通过允许的 localhost Origin 获取一次性会话令牌，再以 `X-FolioMind-Host` 请求头访问配置、凭据、用户状态和运行时 API。该 HTTP 入口仅允许回环请求和本地开发 Origin，不作为公网服务。
 
