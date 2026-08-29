@@ -89,6 +89,23 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLastRefreshAt: null, quoteDetailsLoaded: {}, quoteSeriesLoaded: {} });
   });
 
+  it("ignores an in-flight quote response from an old data channel", async () => {
+    let resolveQuote;
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://one.example" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.askPi.mockImplementation(() => new Promise((resolve) => { resolveQuote = resolve; }));
+    const pending = useLabStore.getState().refreshLiveData();
+    await Promise.resolve();
+    useLabStore.getState().setIntegrationStatus({ credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://two.example" } });
+    resolveQuote({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1297.4 }] }), mode: "pi-local-host", audits: [] });
+
+    await expect(pending).resolves.toBe(false);
+    expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLoading: false });
+  });
+
   it("allows a failed quote detail request to be retried manually", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
