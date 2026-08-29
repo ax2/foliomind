@@ -15,6 +15,7 @@ export const MONITOR_INTERVAL_MS = 30_000;
 export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
 const DEFAULT_LIVE_QUOTE_CONCURRENCY = 2;
 const MAX_LIVE_QUOTE_CONCURRENCY = 4;
+const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items).slice(0, 8).map((item) => ({ ...item }));
 let persistenceQueue = Promise.resolve();
 let liveRequestGeneration = 0;
@@ -22,7 +23,7 @@ let detailsRequestGeneration = 0;
 let seriesRequestGeneration = 0;
 
 function persistSnapshot(snapshot) {
-  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions }));
+  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory }));
   return persistenceQueue;
 }
 function nowIso() { return new Date().toISOString(); }
@@ -79,6 +80,24 @@ function notificationFromResult(rule, item, result, reply) {
   const body = String(result.summary || result.body || reply.text || "检查完成，请打开对话查看完整的来源与审计记录。").trim();
   const dataServiceMode = ["pi-rpc", "pi-local-host", "standalone-dev-host"].includes(reply.mode);
   return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: dataServiceMode ? "data-service" : "browser-demo" };
+}
+function monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluation = null, outcome = null) {
+  const triggered = typeof result?.triggered === "boolean" ? result.triggered : null;
+  return {
+    id: createId("monitor-check"),
+    ruleId: rule.id,
+    symbol: rule.symbol,
+    checkedAt,
+    outcome: outcome || (triggered === true ? "triggered" : triggered === false ? "not_triggered" : "unknown"),
+    triggered,
+    title: String(result?.title || `${item?.name || rule.symbol} · ${strategyFor(rule.strategyId).name}`),
+    summary: String(result?.summary || result?.body || "数据服务未返回完整条件结论。").slice(0, 4096),
+    severity: ["info", "warning", "critical"].includes(result?.severity) ? result.severity : "info",
+    source: ["pi-rpc", "pi-local-host", "standalone-dev-host"].includes(reply?.mode) ? "data-service" : "browser-demo",
+    asOf: String(result?.asOf || ""),
+    conditionResults: Array.isArray(evaluation?.results) ? evaluation.results : [],
+    audits: Array.isArray(reply?.audits) ? reply.audits.slice(0, 12) : [],
+  };
 }
 function quoteFromReply(text) {
   const value = findJsonObject(text);
@@ -198,6 +217,7 @@ function priceMonitorResult(rule, item, quote) {
     severity: triggered ? "warning" : "info",
     asOf,
     source,
+    conditionResults: evaluation.results,
   };
 }
 
@@ -241,7 +261,7 @@ async function askFinancialData(prompt, kind, symbol, range, options) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], monitorHistory: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -384,7 +404,7 @@ export const useLabStore = create((set, get) => ({
   hydrateUserState: async () => {
     try {
       const persisted = await loadUserState();
-      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, userStateLoaded: true }));
+      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
       else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
     } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
@@ -396,11 +416,12 @@ export const useLabStore = create((set, get) => ({
     const rules = Array.isArray(snapshot.monitorRules) ? snapshot.monitorRules.map(normalizeRule) : [];
     const notifications = Array.isArray(snapshot.notifications) ? snapshot.notifications : [];
     const portfolioPositions = Array.isArray(snapshot.portfolioPositions) ? snapshot.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : [];
+    const monitorHistory = Array.isArray(snapshot.monitorHistory) ? snapshot.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : [];
     liveRequestGeneration += 1;
     detailsRequestGeneration += 1;
     seriesRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
-    set({ watchlist, rules, notifications, portfolioPositions, selectedSymbol, ...quoteRefreshReset, userStateLoaded: true });
+    set({ watchlist, rules, notifications, portfolioPositions, monitorHistory, selectedSymbol, ...quoteRefreshReset, userStateLoaded: true });
     await get().persistUserState();
     return true;
   },
@@ -474,6 +495,9 @@ export const useLabStore = create((set, get) => ({
         parsed = findJsonObject(reply.text); result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
       }
       let deliveredNotification = null;
+      const checkedAt = nowIso();
+      const evaluation = parsed && typeof parsed === "object" && Array.isArray(parsed.conditionResults) ? { results: parsed.conditionResults } : null;
+      const historyEntry = monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluation);
       set((state) => {
         const hasDecision = typeof result.triggered === "boolean";
         const triggered = result.triggered === true;
@@ -486,12 +510,16 @@ export const useLabStore = create((set, get) => ({
           monitorBusy: false,
           rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: triggered ? nowIso() : candidate.lastTriggeredAt, lastSignalTriggered: hasDecision ? triggered : candidate.lastSignalTriggered } : candidate),
           notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications,
+          monitorHistory: [historyEntry, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY),
         };
       });
       if (deliveredNotification) void sendSystemNotification(deliveredNotification);
       await get().persistUserState(); return true;
     } catch (error) {
-      const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试"); set((state) => ({ monitorBusy: false, notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: nowIso(), read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
+      const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试");
+      const checkedAt = nowIso();
+      const historyEntry = monitorHistoryFromResult(rule, item, { title: `${item?.name || rule.symbol} · 暂未完成检查`, summary: message, severity: "warning" }, { mode: "pi-local-host", audits: [] }, checkedAt, null, "error");
+      set((state) => ({ monitorBusy: false, monitorHistory: [historyEntry, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY), notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: checkedAt, read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
     }
   },
   runDueMonitorChecks: async () => {

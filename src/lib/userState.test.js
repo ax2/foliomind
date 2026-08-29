@@ -38,4 +38,15 @@ describe("user state backups", () => {
     });
     expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ logic: "OR", conditions: [{ type: "price_change", value: 3 }, { type: "volume_spike", value: 2.5 }] });
   });
+
+  it("round-trips monitor audit history without prompts or credentials", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      monitorHistory: [{ id: "h1", ruleId: "r1", symbol: "600519", checkedAt: "2026-08-29T10:00:00Z", outcome: "unknown", summary: "字段不足", source: "data-service", audits: [{ operation: "call", toolId: "qveris_finance.mkt_l1_rt", prompt: "do not export" }] }],
+      apiKey: "sk-secret",
+    });
+    expect(raw).not.toContain("sk-secret");
+    expect(raw).not.toContain("do not export");
+    expect(parseUserStateBackup(raw).monitorHistory).toMatchObject([{ id: "h1", outcome: "unknown", audits: [{ operation: "call", toolId: "qveris_finance.mkt_l1_rt" }] }]);
+  });
 });
