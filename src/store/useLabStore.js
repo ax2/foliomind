@@ -380,6 +380,22 @@ export const useLabStore = create((set, get) => ({
       else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
     } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
+  replaceUserState: async (snapshot) => {
+    const current = get();
+    if (current.runtimeConfiguring || current.runtimeCancelPending || current.monitorBusy || ["running", "cancelling"].includes(current.runtimeMode)) throw new Error("当前还有任务在运行，请稍后再导入");
+    const watchlist = Array.isArray(snapshot?.watchlist) && snapshot.watchlist.length ? snapshot.watchlist : null;
+    if (!watchlist) throw new Error("备份至少需要包含一个自选标的");
+    const rules = Array.isArray(snapshot.monitorRules) ? snapshot.monitorRules.map(normalizeRule) : [];
+    const notifications = Array.isArray(snapshot.notifications) ? snapshot.notifications : [];
+    const portfolioPositions = Array.isArray(snapshot.portfolioPositions) ? snapshot.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : [];
+    liveRequestGeneration += 1;
+    detailsRequestGeneration += 1;
+    seriesRequestGeneration += 1;
+    const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
+    set({ watchlist, rules, notifications, portfolioPositions, selectedSymbol, ...quoteRefreshReset, userStateLoaded: true });
+    await get().persistUserState();
+    return true;
+  },
   persistUserState: () => persistSnapshot(get()),
   addWatchlist: async (item) => {
     const value = { symbol: String(item?.symbol ?? "").trim().toUpperCase(), name: String(item?.name ?? "").trim(), market: String(item?.market ?? "").trim() || "自定义", category: String(item?.category ?? "").trim() || "自选" };

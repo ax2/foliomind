@@ -24,6 +24,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 内置金融研究 Skill，强制真实外部数据遵循 Search → Inspect → Call；QVeris 适配器可作为默认数据通道，也可以替换为兼容的自托管服务。
 - 设置页可将数据服务 API Key 保存到系统凭据库、同步动态模型目录并选择 Pi 默认模型。
 - 设置页可检查 GitHub 最新公开版本并直达发布页；安装包仍提供 SHA-256 校验，自动更新待平台签名密钥接入后启用。
+- 设置页支持导出/导入本地 JSON 备份，迁移自选、盯盘、消息与持仓；API Key、模型配置、缓存和运行日志不会进入备份。
 - 内置兼容 OpenAI API 的模型网关配置；Pi 只访问带短期令牌的本机回环代理，不接触长期 API Key。
 - 内置 Pi Bash 工具；Windows 安装包捆绑经过 SHA-256 校验的 PortableGit/Bash，所有桌面子进程均以无控制台窗口方式启动。
 - WebView 对话在桌面环境通过 Tauri command 调用真实 Pi RPC；普通浏览器预览使用明确的演示回退。
@@ -62,6 +63,8 @@ Rust Host
 盯盘消息页的“系统通知”开关默认关闭。开启时仅在当前桌面/localhost 环境请求系统通知权限；拒绝权限不会影响站内消息保存和盯盘任务执行。
 
 研究筛选目前以“我的自选”为明确数据范围；添加更多标的或安装额外数据 Skill 后，仍需等真实行情返回才会进入筛选结果。组合风险洞察只展示可解释的已计价暴露，不输出没有数据依据的综合风险分数。
+
+设置页的“本地数据备份”适合换机或在 Web 调试与桌面端之间迁移用户数据。导入会覆盖当前自选、盯盘、消息和持仓，并清空旧行情缓存，随后重新获取真实数据；正在分析或盯盘检查时会暂时禁止导入，避免覆盖进行中的任务。
 
 未配置凭证和模型时，界面可能显示带有“预览模式”标识的静态布局样例；一旦配置完成，行情、指标、图表、组合和盯盘信号只使用数据服务已返回的真实数据，缺失字段显示为空并提示查询，不会用样例补齐。
 
@@ -114,10 +117,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.30`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.31`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。构建失败不会预先留下新的 tag 或 draft release。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.30 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.31 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。
