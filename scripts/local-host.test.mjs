@@ -17,6 +17,26 @@ test("keeps the qveris_finance CAP contract local and normalizes real envelopes"
   assert.deepEqual(series.series[0], { date: "2026-08-28", close: 1297.4, time: "2026-08-28", value: 1297.4 });
 });
 
+test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.core_event.toolId, "qveris_finance.event_calendar_corp");
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.capital_flow.capability, "FLOW.LARGE_ORDER");
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.sentiment.capability, "NEWS.FIN.TAGGED");
+  assert.equal(classifyRequest("贵州茅台未来一个月分红和股东会事件"), "core_event");
+  assert.equal(classifyRequest("查询主力资金净流入和大单"), "capital_flow");
+  assert.equal(classifyRequest("查询最近财经新闻舆情"), "sentiment");
+  const events = normalizeCapabilityResult("core_event", { symbol: "600519.SH" }, { result: { data: [{ event_date: "2026-09-01", event_type: "dividend", description: "分红" }] }, _meta: { source_provider: "provider" } });
+  assert.equal(events.eventCount, 1);
+  assert.equal(events.events[0].title, "分红");
+  const flow = normalizeCapabilityResult("capital_flow", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-27", main_net: 100 }, { date: "2026-08-28", main_net: 200 }] }, _meta: { source_provider: "provider" } });
+  assert.equal(flow.mainNetInflow, 200);
+  const sentiment = normalizeCapabilityResult("sentiment", { symbol: "600519.SH" }, { result: { data: [{ title: "利好消息", published_at: "2026-08-28T10:00:00Z", sentiment_label: "positive", sentiment_score: 0.8 }] }, _meta: { source_provider: "provider" } });
+  assert.equal(sentiment.sentiment, "positive");
+  assert.equal(sentiment.sentimentScore, 0.8);
+  const unavailable = normalizeCapabilityResult("core_event", { symbol: "600519.SH" }, { success: false, result: { data: [], status_code: 200 } });
+  assert.equal(unavailable.eventCount, null);
+  assert.equal(unavailable.dataStatus, "empty");
+});
+
 test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {
   const gate = createCacheWarmupGate();
   let ready = false;

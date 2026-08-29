@@ -8,7 +8,7 @@ import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { normalizePortfolioPosition } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
-import { conditionPrompt, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
+import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -199,6 +199,62 @@ function liveQuotesFromReply(text, symbols) {
     if (quote) result[symbol] = quote;
     return result;
   }, {});
+}
+
+function monitorDataKind(conditionType) {
+  if (conditionType === "technical") return "series";
+  if (["core_event", "capital_flow", "sentiment"].includes(conditionType)) return conditionType;
+  return "quote";
+}
+
+function monitorFieldsFromReply(text, symbol) {
+  const value = findJsonObject(text) || {};
+  const source = value?.data && typeof value.data === "object" ? value.data : value?.result && typeof value.result === "object" ? value.result : value;
+  const quote = Object.values(liveQuotesFromReply(text, [symbol]))[0] || normalizeLiveQuote(source.quote) || normalizeLiveQuote(source);
+  const events = Array.isArray(source.events) ? source.events : [];
+  const flow = Array.isArray(source.capitalFlow) ? source.capitalFlow : Array.isArray(source.capital_flow) ? source.capital_flow : [];
+  const news = Array.isArray(source.news) ? source.news : [];
+  const series = Array.isArray(source.series) ? source.series : [];
+  const fields = quote ? { ...quote } : {};
+  if (source.eventCount !== null && source.eventCount !== undefined && source.eventCount !== "" && Number.isFinite(Number(source.eventCount))) fields.eventCount = Number(source.eventCount);
+  if (source.mainNetInflow !== null && source.mainNetInflow !== undefined && source.mainNetInflow !== "" && Number.isFinite(Number(source.mainNetInflow))) fields.mainNetInflow = Number(source.mainNetInflow);
+  if (source.sentiment !== null && source.sentiment !== undefined && source.sentiment !== "") fields.sentiment = String(source.sentiment).toLowerCase();
+  if (source.sentimentScore !== null && source.sentimentScore !== undefined && source.sentimentScore !== "" && Number.isFinite(Number(source.sentimentScore))) fields.sentimentScore = Number(source.sentimentScore);
+  if (events.length) fields.events = events;
+  if (flow.length) fields.capitalFlow = flow;
+  if (news.length) fields.news = news;
+  if (series.length) fields.series = series;
+  if (!fields.asOf && source.asOf) fields.asOf = String(source.asOf);
+  if (!fields.source && source.source) fields.source = String(source.source);
+  return fields;
+}
+
+async function queryMonitorData(kind, symbol) {
+  if (!isLocalWebRuntime() || typeof queryCachedData !== "function") return null;
+  try {
+    const cached = await queryCachedData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 });
+    const text = JSON.stringify(cached?.data ?? cached ?? {});
+    return { fields: monitorFieldsFromReply(text, symbol), mode: cached?.mode || "pi-local-host", audits: cached?.audits || [{ operation: "cap-call", outcome: "success", kind }] };
+  } catch {
+    return null;
+  }
+}
+
+function conditionMonitorResult(rule, item, data) {
+  const evaluation = evaluateRuleConditions(rule, data);
+  if (!evaluation.known) throw new Error("数据服务未返回条件所需的完整字段");
+  const asOf = String(data?.asOf || "数据时间未知");
+  const source = String(data?.source || "数据服务");
+  const metric = Number.isFinite(Number(data?.price)) ? `最新价 ${Number(data.price).toFixed(2)}；` : "";
+  return {
+    triggered: evaluation.triggered,
+    title: `${item?.name || rule.symbol} · ${strategyFor(rule.strategyId).name}`,
+    summary: `${metric}${evaluation.triggered ? "条件已触发" : "条件未触发"}；条件：${ruleConditionSummary(rule)}。数据截至 ${asOf}，来源 ${source}。`,
+    severity: evaluation.triggered ? "warning" : "info",
+    asOf,
+    source,
+    conditionResults: evaluation.results,
+  };
 }
 
 function priceMonitorResult(rule, item, quote) {
@@ -469,26 +525,23 @@ export const useLabStore = create((set, get) => ({
     try {
       let reply; let result; let parsed = null;
       const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
-      if (["price_change", "volume_spike"].includes(strategy.id) && isLocalWebRuntime() && typeof queryCachedData === "function") {
-          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item?.name || rule.symbol}（${rule.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${qverisSymbol(rule.symbol)}。只做一次 Search、一次 Inspect、一次 Call，不要使用示例数据。${conditionPrompt(rule)} 严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${rule.symbol}","price":null,"changePercent":null,"changeAmount":null,"volumeRatio":null,"asOf":"数据时间","source":"数据来源"}],"triggered":null,"summary":"","errors":[]}。没有真实值的字段填 null。`;
-        reply = await askFinancialData(prompt, "quote", rule.symbol, "", { settleTimeoutMs: 60_000 });
-        const quote = Object.values(liveQuotesFromReply(reply.text, [rule.symbol]))[0];
-        if (quote && evaluateRuleConditions(rule, { ...quote, changePercent: quote.change }).known) {
-          result = priceMonitorResult(rule, item, quote);
+      if (isLocalWebRuntime() && typeof queryCachedData === "function") {
+        const kinds = [...new Set(conditionsForRule(rule).map((condition) => monitorDataKind(condition.type)))];
+        const directResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, rule.symbol)))).filter(Boolean);
+        const monitorData = directResults.reduce((merged, current) => ({ ...merged, ...current.fields, asOf: current.fields.asOf || merged.asOf, source: current.fields.source || merged.source }), {});
+        reply = { text: JSON.stringify(monitorData), mode: directResults[0]?.mode || "pi-local-host", audits: directResults.flatMap((current) => current.audits || []) };
+        const evaluation = evaluateRuleConditions(rule, monitorData);
+        if (directResults.length && evaluation.known) {
+          result = conditionsForRule(rule).every((condition) => condition.type === "price_change") && monitorData.price !== undefined
+            ? priceMonitorResult(rule, item, monitorData)
+            : conditionMonitorResult(rule, item, monitorData);
           parsed = result;
         } else {
-          const cachedResult = findJsonObject(reply.text);
-          if (!quote && cachedResult && typeof cachedResult.triggered === "boolean") {
-            parsed = cachedResult;
-            result = cachedResult;
-          } else {
-          // Cached L1 quotes do not contain event, flow, or sentiment fields;
-          // ask the managed runtime for the missing condition fields instead
-          // of treating unknown data as a negative signal.
-            reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
-            parsed = findJsonObject(reply.text);
-            result = parsed || { triggered: null, title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: "数据服务未返回完整条件字段。", severity: "info" };
-          }
+          // Direct CAP responses may be empty or omit a condition-specific
+          // field. Ask the managed runtime once for the unresolved decision.
+          reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
+          parsed = findJsonObject(reply.text);
+          result = parsed || { triggered: null, title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: "数据服务未返回完整条件字段。", severity: "info" };
         }
       } else {
         reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });

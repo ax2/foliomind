@@ -10,7 +10,7 @@ const MAX_BODY = 512 * 1024;
 const DEFAULT_CAPABILITY = "https://qveris.ai/api/v1";
 const DEFAULT_GATEWAY = "https://aigateway.qveris.ai/v1";
 export const DEFAULT_DATA_PROVIDER = "qveris_finance";
-export const CAPABILITY_CATALOG_VERSION = 1;
+export const CAPABILITY_CATALOG_VERSION = 2;
 const BRIDGE_LIMIT = 20;
 export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
 const token = `fh_${randomUUID()}`;
@@ -79,6 +79,9 @@ export function classifyRequest(message) {
   if (/实时行情|行情快照|最新价|报价|quote/i.test(text)) return "quote";
   if (/公司简介|财务指标|基本面|fundamental/i.test(text)) return "details";
   if (/历史|分时|日线|周线|月线|季度|年线|series|trend/i.test(text)) return "series";
+  if (/公告|财报|分红|除权|股东会|事件|event/i.test(text)) return "core_event";
+  if (/资金流|主力资金|大单|净流入|capital.?flow/i.test(text)) return "capital_flow";
+  if (/舆情|新闻|情绪|sentiment|news/i.test(text)) return "sentiment";
   return null;
 }
 export function adaptParameters(template, symbol, range) {
@@ -103,6 +106,9 @@ export const BUILTIN_CAPABILITY_CATALOG = Object.freeze({
   details: { toolId: "qveris_finance.ref_company_profile", capability: "REF.COMPANY_PROFILE", description: "上市公司基础概况与静态资料", parameters: { symbol: "string" }, returns: ["name", "exchange", "currency", "country", "industry", "description", "sector", "website", "employees", "market_cap", "symbol"] },
   fundamentals: { toolId: "qveris_finance.fundamentals_derived_ratios", capability: "FUNDAMENTALS.DERIVED_RATIOS", description: "估值与盈利指标快照", parameters: { symbol: "string" }, returns: ["symbol", "market_cap", "pe_ttm", "pb_ratio", "ps_ratio_ttm", "ev_to_ebitda", "peg_ratio", "dividend_yield", "as_of_date"] },
   series: { toolId: "qveris_finance.mkt_bars_eod", capability: "MKT.BARS.EOD", description: "历史日线 OHLCV 时间序列", parameters: { symbol: "string", start_date: "string", end_date: "string" }, returns: ["symbol", "date", "open", "high", "low", "close", "volume"] },
+  core_event: { toolId: "qveris_finance.event_calendar_corp", capability: "EVENT.CALENDAR.CORP", description: "上市公司分红、拆股、股东会等已排期事件", parameters: { symbol: "string", event_type: "string?", start_date: "string?", end_date: "string?" }, returns: ["date", "event_type", "description", "ratio", "symbol"], coverage: "已验证 corporate calendar；不等同于公告全文或限售解禁日历" },
+  capital_flow: { toolId: "qveris_finance.flow_large_order", capability: "FLOW.LARGE_ORDER", description: "按订单规模拆分的个股资金流", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["symbol", "date", "super_large_net", "large_net", "medium_net", "small_net", "main_net", "net_flow"], coverage: "已验证个股大单资金流；空交易日保持缺失" },
+  sentiment: { toolId: "qveris_finance.news_fin_tagged", capability: "NEWS.FIN.TAGGED", description: "带主题与情绪标签的财经新闻", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["title", "url", "published_at", "source", "summary", "sentiment_label", "sentiment_score"], coverage: "已验证按标的新闻；市场范围过滤暂不透传，避免上游参数映射错误" },
 });
 
 const QVERIS_FINANCE_PROVIDER_SUMMARY = Object.freeze({
@@ -133,12 +139,11 @@ async function persistCapabilityCatalog(settings) {
 
 function directCapabilityParameters(kind, input) {
   const symbol = String(input?.symbol || "").trim().toUpperCase();
-  if (kind === "series") {
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(end.getDate() - 90);
-    return { symbol, start_date: String(input?.start_date || start.toISOString().slice(0, 10)), end_date: String(input?.end_date || end.toISOString().slice(0, 10)) };
-  }
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - (kind === "series" ? 90 : 30));
+  const dates = { start_date: String(input?.start_date || start.toISOString().slice(0, 10)), end_date: String(input?.end_date || end.toISOString().slice(0, 10)) };
+  if (["series", "core_event", "capital_flow", "sentiment"].includes(kind)) return { symbol, ...dates, ...(kind === "core_event" && input?.event_type ? { event_type: String(input.event_type) } : {}), ...(kind === "sentiment" && input?.query ? { query: String(input.query) } : {}) };
   return { symbol };
 }
 
@@ -161,6 +166,39 @@ export function normalizeCapabilityResult(kind, input, result) {
   if (kind === "series") {
     const points = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
     return { series: points.map((point) => ({ ...point, time: point.time || point.date, value: point.value ?? point.close })).filter((point) => point.time || point.date), source, capability: "MKT.BARS.EOD", asOf: points[0]?.date || null };
+  }
+  if (kind === "core_event") {
+    const events = Array.isArray(data) ? data : Array.isArray(data?.events) ? data.events : Array.isArray(data?.data) ? data.data : [];
+    const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
+    const normalized = events.filter((event) => event && typeof event === "object").map((event) => ({
+      ...event,
+      date: String(event.date || event.event_date || event.effective_date || ""),
+      type: String(event.event_type || event.type || ""),
+      title: String(event.description || event.title || event.name || ""),
+    })).filter((event) => event.date || event.title);
+    return { events: normalized, eventCount: available ? normalized.length : null, source, capability: "EVENT.CALENDAR.CORP", asOf: normalized.map((event) => event.date).filter(Boolean).sort().at(-1) || null, dataStatus: available ? "success" : "empty" };
+  }
+  if (kind === "capital_flow") {
+    const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.rows) ? data.rows : [];
+    const normalized = rows.filter((row) => row && typeof row === "object").map((row) => ({ ...row, date: String(row.date || row.trade_date || ""), mainNetInflow: row.main_net ?? row.net_flow ?? row.mainNetInflow ?? null })).filter((row) => row.date || row.mainNetInflow != null);
+    const latest = [...normalized].reverse().find((row) => Number.isFinite(Number(row.mainNetInflow))) || null;
+    const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
+    return { capitalFlow: normalized, mainNetInflow: available ? latest?.mainNetInflow ?? null : null, source, capability: "FLOW.LARGE_ORDER", asOf: latest?.date || null, dataStatus: available && latest ? "success" : "empty" };
+  }
+  if (kind === "sentiment") {
+    const items = Array.isArray(data) ? data : Array.isArray(data?.news) ? data.news : Array.isArray(data?.data) ? data.data : [];
+    const news = items.filter((item) => item && typeof item === "object").map((item) => ({
+      ...item,
+      title: String(item.title || ""),
+      url: String(item.url || ""),
+      publishedAt: String(item.published_at || item.publishedAt || item.date || ""),
+      sourceName: String(item.source || item.source_name || ""),
+      sentiment: String(item.sentiment_label || item.sentiment || "").toLowerCase() || null,
+      sentimentScore: Number.isFinite(Number(item.sentiment_score)) ? Number(item.sentiment_score) : null,
+    })).filter((item) => item.title || item.publishedAt);
+    const latest = [...news].sort((left, right) => String(right.publishedAt).localeCompare(String(left.publishedAt)))[0] || null;
+    const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
+    return { news, sentiment: available ? latest?.sentiment ?? null : null, sentimentScore: available ? latest?.sentimentScore ?? null : null, source, capability: "NEWS.FIN.TAGGED", asOf: latest?.publishedAt || null, dataStatus: available && news.length ? "success" : "empty" };
   }
   if (kind === "fundamentals") {
     if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回估值指标");
@@ -321,7 +359,7 @@ function requireSession(req) {
 }
 function toolDefinitions() {
   return [
-    { type: "function", function: { name: "foliomind_data", description: "FolioMind 内置金融数据工具。优先直接调用上次已固化的工具；缓存不存在或失效时，再使用 qveris_search、qveris_inspect、qveris_call 建立固化工具。", parameters: { type: "object", properties: { kind: { type: "string", enum: ["quote", "details", "series"] }, symbol: { type: "string" }, range: { type: "string" } }, required: ["kind", "symbol"], additionalProperties: false } } },
+    { type: "function", function: { name: "foliomind_data", description: "FolioMind 内置金融数据工具。优先直接调用已验证的 QVeris Finance CAP；缓存不存在或失效时，再使用 qveris_search、qveris_inspect、qveris_call 建立固化工具。", parameters: { type: "object", properties: { kind: { type: "string", enum: ["quote", "details", "series", "core_event", "capital_flow", "sentiment"] }, symbol: { type: "string" }, range: { type: "string" }, start_date: { type: "string" }, end_date: { type: "string" }, event_type: { type: "string" }, query: { type: "string" } }, required: ["kind", "symbol"], additionalProperties: false } } },
     { type: "function", function: { name: "qveris_search", description: "搜索 QVeris 数据能力。外部、实时或专业数据先搜索，随后必须 Inspect。", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 20 } }, required: ["query"], additionalProperties: false } } },
     { type: "function", function: { name: "qveris_inspect", description: "检查 Search 返回的候选工具参数；Call 前必需。", parameters: { type: "object", properties: { tool_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5 }, search_id: { type: "string" } }, required: ["tool_ids", "search_id"], additionalProperties: false } } },
     { type: "function", function: { name: "qveris_call", description: "调用已 Search 且 Inspect 的 QVeris 工具。", parameters: { type: "object", properties: { tool_id: { type: "string" }, parameters: { type: "object", additionalProperties: true }, search_id: { type: "string" } }, required: ["tool_id", "parameters", "search_id"], additionalProperties: false } } },
@@ -385,7 +423,7 @@ async function rememberToolSelection(kind, settings, input, runId) {
 }
 async function queryCachedData(input, settings, key, signal) {
   const kind = String(input?.kind || "").trim();
-  if (!devVariables.toolCacheEnabled || !["quote", "details", "series"].includes(kind)) {
+  if (!devVariables.toolCacheEnabled || !["quote", "details", "series", "core_event", "capital_flow", "sentiment"].includes(kind)) {
     const error = new Error("工具缓存未启用"); error.status = 404; error.code = "TOOL_CACHE_MISS"; throw error;
   }
   const cache = await readToolCache();
@@ -417,7 +455,7 @@ async function runPromptAgent(message, settings, key, signal) {
   const runId = `product_${randomUUID()}`;
   const phases = { searches: new Map(), inspected: new Set() };
   const audits = [];
-  const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。行情、公司资料、估值和历史序列优先调用内置 foliomind_data（它直连 qveris_finance CAP，避免重复发现工具）；只有能力不可用时，才按 Search → Inspect → Call 顺序使用 QVeris 工具并让系统固化本次选择。回答要标明数据时间、来源和不确定性，绝不编造缺失数据。" }, { role: "user", content: message }];
+  const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。行情、公司资料、估值、历史序列、公司事件、资金流和标注新闻优先调用内置 foliomind_data（它直连 qveris_finance CAP，避免重复发现工具）；只有能力不可用时，才按 Search → Inspect → Call 顺序使用 QVeris 工具并让系统固化本次选择。回答要标明数据时间、来源和不确定性，绝不编造缺失数据。" }, { role: "user", content: message }];
   for (let round = 0; round < 8; round += 1) {
     const modelStartedAt = Date.now();
     let response;
@@ -509,7 +547,7 @@ async function route(req, body) {
   if (method === "POST" && path === "/api/data/query") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
-    if (!String(input.symbol || "").trim() || !["quote", "details", "series"].includes(String(input.kind || ""))) throw new Error("数据查询参数无效");
+    if (!String(input.symbol || "").trim() || !["quote", "details", "series", "core_event", "capital_flow", "sentiment"].includes(String(input.kind || ""))) throw new Error("数据查询参数无效");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
     try {
       const result = await queryDirectCapability(input, settings, key, controller.signal);

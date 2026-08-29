@@ -205,6 +205,53 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications[0].body).toContain("+4.20%");
   });
 
+  it("evaluates a cached corporate event directly without a model round trip", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-event", symbol: "600519", strategyId: "news_risk", conditions: [{ type: "core_event", operator: "gte", value: 1 }], intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({ data: { events: [{ date: "2026-09-01", title: "股东会" }], eventCount: 1, asOf: "2026-08-29", source: "真实事件源" }, mode: "qveris-cap", audits: [{ operation: "cap-call", capability: "EVENT.CALENDAR.CORP" }] });
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-event")).resolves.toBe(true);
+    expect(runtime.queryCachedData).toHaveBeenCalledWith({ kind: "core_event", symbol: "600519.SH" }, { timeoutMs: 60_000 });
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "triggered", triggered: true, conditionResults: [true], asOf: "2026-08-29" });
+  });
+
+  it("does not turn an unavailable event response into a false signal", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-event-empty", symbol: "600519", strategyId: "news_risk", conditions: [{ type: "core_event", operator: "gte", value: 1 }], intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({ data: { events: [], eventCount: null, dataStatus: "empty", asOf: null, source: "真实事件源" }, mode: "qveris-cap", audits: [] });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ triggered: null, summary: "暂时无法核实", severity: "info" }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-event-empty")).resolves.toBe(true);
+    expect(runtime.askPi).toHaveBeenCalledOnce();
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "unknown", triggered: null });
+  });
+
+  it("evaluates cached capital flow and sentiment fields as real monitor inputs", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-flow-sentiment", symbol: "600519", strategyId: "news_risk", conditions: [{ type: "capital_flow", operator: "gte", value: 100 }, { type: "sentiment", operator: "eq", value: "negative" }], logic: "OR", intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockImplementation(async ({ kind }) => kind === "capital_flow"
+      ? { data: { capitalFlow: [{ date: "2026-08-29", mainNetInflow: 120 }], mainNetInflow: 120, asOf: "2026-08-29", source: "真实资金流" }, mode: "qveris-cap", audits: [] }
+      : { data: { news: [{ title: "风险提示" }], sentiment: "negative", asOf: "2026-08-29", source: "真实舆情" }, mode: "qveris-cap", audits: [] });
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-flow-sentiment")).resolves.toBe(true);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(runtime.queryCachedData).toHaveBeenCalledTimes(2);
+    expect(useLabStore.getState().monitorHistory[0].conditionResults).toEqual([true, true]);
+  });
+
   it("notifies on a trigger edge instead of repeating the same alert every poll", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
