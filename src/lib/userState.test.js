@@ -30,4 +30,12 @@ describe("user state backups", () => {
     expect(data.watchlist[0]).toEqual({ symbol: "AAPL", name: "Apple", market: "", category: "" });
     expect(data.portfolioPositions).toEqual([]);
   });
+
+  it("round-trips condition combinations without exposing runtime secrets", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      rules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, logic: "OR", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }, { type: "volume_spike", operator: "gte", value: 2.5 }] }],
+    });
+    expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ logic: "OR", conditions: [{ type: "price_change", value: 3 }, { type: "volume_spike", value: 2.5 }] });
+  });
 });

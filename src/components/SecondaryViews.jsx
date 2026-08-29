@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowsClockwise, Bell, BellRinging, Briefcase, CheckCircle, DownloadSimple, Funnel, Info, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
-import { monitorStrategies, strategyFor } from "../data/monitorStrategies.js";
+import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
 import { portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics } from "../lib/portfolio.js";
@@ -14,6 +14,7 @@ import { parseUserStateBackup, serializeUserStateBackup } from "../lib/userState
 import { useLabStore } from "../store/useLabStore.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 import { DataState } from "./DataState.jsx";
+import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error) => friendlySettingsMessage(error);
@@ -163,6 +164,29 @@ export function ResearchView() {
   </div>;
 }
 
+function ConditionEditor({ condition, index, onChange, onRemove, canRemove }) {
+  const type = conditionTypeFor(condition.type);
+  const updateType = (event) => {
+    const next = defaultConditionFor(event.target.value);
+    onChange({ ...next, id: condition.id });
+  };
+  return <div className="condition-row">
+    <select aria-label={`条件${index + 1}类型`} value={type.id} onChange={updateType}>{CONDITION_TYPES.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select>
+    <select aria-label={`条件${index + 1}关系`} value={condition.operator} onChange={(event) => onChange({ ...condition, operator: event.target.value })}>{conditionOperatorsFor(type.id).map((operator) => <option key={operator.id} value={operator.id}>{operator.label}</option>)}</select>
+    {type.valueType === "select" ? <select aria-label={`条件${index + 1}取值`} value={condition.value} onChange={(event) => onChange({ ...condition, value: event.target.value })}>{type.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <label className="condition-value"><input aria-label={`条件${index + 1}数值`} type="number" step={type.id === "capital_flow" ? "1000000" : "0.1"} value={condition.value} onChange={(event) => onChange({ ...condition, value: event.target.value })} /><span>{type.unit}</span></label>}
+    <button className="icon-button" type="button" aria-label={`删除条件${index + 1}`} disabled={!canRemove} onClick={onRemove}><Trash size={15} /></button>
+  </div>;
+}
+
+function ConditionBuilder({ conditions, logic, onLogicChange, onConditionChange, onConditionRemove, onAddCondition, onApplyTemplate }) {
+  return <div className="condition-builder">
+    <div className="condition-builder-heading"><div><strong>触发条件</strong><small>缺失字段不会被当作触发；数据不足时自动保留待核实状态。</small></div><label>组合<select aria-label="条件组合逻辑" value={logic} onChange={(event) => onLogicChange(event.target.value)}><option value="AND">全部满足（AND）</option><option value="OR">任一满足（OR）</option></select></label></div>
+    <div className="condition-list">{conditions.map((condition, index) => <ConditionEditor key={condition.id} condition={condition} index={index} onChange={(next) => onConditionChange(index, next)} onRemove={() => onConditionRemove(index)} canRemove={conditions.length > 1} />)}</div>
+    <div className="condition-builder-actions"><button className="secondary-button" type="button" disabled={conditions.length >= 6} onClick={onAddCondition}><Plus size={15} />添加条件</button><span>{conditions.length}/6</span></div>
+    <div className="condition-templates"><small>快速模板</small>{monitorTemplates.map((template) => <button key={template.id} type="button" onClick={() => onApplyTemplate(template)} title={template.description}>{template.name}</button>)}</div>
+  </div>;
+}
+
 export function MonitorView() {
   const rules = useLabStore((state) => state.rules);
   const watchlist = useLabStore((state) => state.watchlist);
@@ -175,11 +199,28 @@ export function MonitorView() {
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ symbol: watchlist[0]?.symbol || "600519", strategyId: monitorStrategies[0].id, threshold: monitorStrategies[0].defaultThreshold, intervalSeconds: 300 });
+  const [form, setForm] = useState(() => ({ symbol: watchlist[0]?.symbol || "600519", conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300 }));
   useEffect(() => { if (!watchlist.some((item) => item.symbol === form.symbol) && watchlist[0]) setForm((value) => ({ ...value, symbol: watchlist[0].symbol })); }, [watchlist, form.symbol]);
-  const selectedStrategy = strategyFor(form.strategyId);
-  const createRule = async (event) => { event.preventDefault(); await addRule({ ...form, threshold: Number(form.threshold), intervalSeconds: Number(form.intervalSeconds) }); setDialogOpen(false); };
-  return <div className="secondary-page"><header><div><h1>个股盯盘</h1><p>Pi Agent 按策略定时检查真实市场数据，并在消息中心提醒</p></div><button className="primary-action" disabled={!realDataMode} onClick={() => setDialogOpen(true)}><Plus size={17} />新建盯盘</button></header>{!realDataMode ? <LiveDataState compact state={DATA_STATES.NO_CREDENTIAL} totalCount={watchlist.length} onSettings={() => setActiveView("settings")} /> : null}<section className="strategy-strip"><strong>内置策略</strong>{monitorStrategies.map((strategy) => <span key={strategy.id}>{strategy.name}</span>)}</section><section className="rule-list"><h2>运行中的规则</h2>{rules.map((rule) => { const strategy = strategyFor(rule.strategyId); return <article key={rule.id}><Bell size={20} /><div><strong>{strategy.name}</strong><small>{rule.symbol} · 阈值 {rule.threshold}{strategy.unit} · {rule.intervalSeconds} 秒检查</small></div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id); }} aria-label={`立即检查${rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => { void deleteRule(rule.id); }}><Trash size={15} /></button></article>; })}</section>{realDataMode ? <p className="security-note">没有已返回的真实信号。运行规则后，结果将出现在消息中心。</p> : null}{dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘策略</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">默认策略包含成交量异常监控、价格异动和公告与舆情。</p><label>标的<select value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label><label>策略<select value={form.strategyId} onChange={(event) => { const next = strategyFor(event.target.value); setForm((value) => ({ ...value, strategyId: next.id, threshold: next.defaultThreshold })); }}>{monitorStrategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name} · {strategy.description}</option>)}</select></label><label>阈值<input type="number" min="0" step="0.1" value={form.threshold} onChange={(event) => setForm((value) => ({ ...value, threshold: event.target.value }))} /><small>{selectedStrategy.unit}</small></label><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}</div>;
+  const selectedStrategy = strategyFor(conditionTypeFor(form.conditions[0]?.type).strategyId);
+  const createRule = async (event) => { event.preventDefault(); await addRule({ symbol: form.symbol, strategyId: selectedStrategy.id, conditions: normalizeConditions(form.conditions, selectedStrategy.id), logic: form.logic, threshold: Number(form.conditions[0]?.value) || selectedStrategy.defaultThreshold, intervalSeconds: Number(form.intervalSeconds) }); setDialogOpen(false); };
+  const updateCondition = (index, next) => setForm((value) => ({ ...value, conditions: value.conditions.map((condition, position) => position === index ? next : condition) }));
+  const removeCondition = (index) => setForm((value) => ({ ...value, conditions: value.conditions.filter((_, position) => position !== index) }));
+  const addCondition = () => setForm((value) => ({ ...value, conditions: [...value.conditions, defaultConditionFor("price_change")] }));
+  const applyTemplate = (template) => setForm((value) => ({ ...value, conditions: normalizeConditions(template.conditions), logic: template.logic, intervalSeconds: template.intervalSeconds }));
+  return <div className="secondary-page monitor-page">
+    <header><div><h1>个股盯盘</h1><p>用条件组合监控真实市场数据，并在触发边沿提醒</p></div><button className="primary-action" onClick={() => setDialogOpen(true)}><Plus size={17} />新建盯盘</button></header>
+    {!realDataMode ? <LiveDataState compact state={DATA_STATES.NO_CREDENTIAL} totalCount={watchlist.length} onSettings={() => setActiveView("settings")} /> : null}
+    <section className="strategy-strip"><strong>条件类型</strong>{CONDITION_TYPES.map((type) => <span key={type.id} title={type.description}>{type.name}</span>)}</section>
+    <section className="rule-list">
+      <div className="rule-list-heading"><h2>运行中的规则</h2><small>{rules.length} 条 · 每条规则独立检查，重复触发自动去重</small></div>
+      {rules.length === 0 ? <p className="rule-empty">还没有规则；创建第一条条件后，运行状态和触发记录会显示在这里。</p> : rules.map((rule) => {
+        const strategy = strategyFor(rule.strategyId);
+        return <article key={rule.id}><Bell size={20} /><div><strong>{ruleConditionSummary(rule)}</strong><small>{rule.symbol} · {rule.logic === "OR" ? "任一条件" : "全部条件"} · 每 {rule.intervalSeconds >= 60 ? `${Math.round(rule.intervalSeconds / 60)} 分钟` : `${rule.intervalSeconds} 秒`} 检查</small><small>{rule.lastTriggeredAt ? `最近触发 ${new Date(rule.lastTriggeredAt).toLocaleString("zh-CN")}` : rule.lastCheckedAt ? `最近检查 ${new Date(rule.lastCheckedAt).toLocaleString("zh-CN")}` : "尚未检查"} · {strategy.name}</small></div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id); }} aria-label={`立即检查${rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => { void deleteRule(rule.id); }}><Trash size={15} /></button></article>;
+      })}
+    </section>
+    {realDataMode ? <p className="security-note">没有已返回的真实信号。运行规则后，结果将出现在消息中心；最近触发时间会保留在本地状态中，完整触发详情将在后续版本接入。</p> : null}
+    {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card condition-modal" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘条件</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">规则创建分三步：选择标的、组合真实数据条件、设定检查频率。</p><label>标的<select value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label><ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}
+  </div>;
 }
 
 export function NotificationsView() {

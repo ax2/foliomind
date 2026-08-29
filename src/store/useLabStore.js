@@ -8,6 +8,7 @@ import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { normalizePortfolioPosition } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
+import { conditionPrompt, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -68,7 +69,10 @@ function findJsonArray(text) {
 }
 function normalizeRule(rule) {
   const strategy = strategyFor(rule.strategyId);
-  return { id: String(rule.id ?? createId("rule")), symbol: String(rule.symbol ?? "600519"), strategyId: strategy.id, threshold: Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : strategy.defaultThreshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null };
+  const conditions = normalizeConditions(rule.conditions, strategy.id);
+  const firstValue = conditions[0]?.value;
+  const threshold = Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : Number.isFinite(Number(firstValue)) ? Number(firstValue) : strategy.defaultThreshold;
+  return { id: String(rule.id ?? createId("rule")), symbol: String(rule.symbol ?? "600519"), strategyId: strategy.id, conditions, logic: String(rule.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", threshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null };
 }
 function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
@@ -129,6 +133,10 @@ function normalizeLiveQuote(value) {
     turnover: value.turnover ?? null,
     turnoverRate: value.turnoverRate ?? value.turnover_rate ?? null,
     volumeRatio: value.volumeRatio ?? value.volume_ratio ?? null,
+    technicalSignal: value.technicalSignal ?? value.technical_signal ?? null,
+    eventCount: value.eventCount ?? value.event_count ?? null,
+    mainNetInflow: value.mainNetInflow ?? value.main_net_inflow ?? value.netInflow ?? null,
+    sentiment: value.sentiment ?? value.sentimentLabel ?? null,
     pe: value.pe ?? value.peTtm ?? value.pe_ttm ?? null,
     pb: value.pb ?? null,
     marketCap: value.marketCap ?? value.market_cap ?? null,
@@ -176,9 +184,9 @@ function liveQuotesFromReply(text, symbols) {
 
 function priceMonitorResult(rule, item, quote) {
   const change = Number(quote?.change);
-  if (!Number.isFinite(change)) throw new Error("数据服务未返回可识别的涨跌幅");
-  const threshold = Math.max(0, Number(rule.threshold) || 0);
-  const triggered = Math.abs(change) >= threshold;
+  const evaluation = evaluateRuleConditions(rule, { ...quote, changePercent: quote?.change });
+  if (!evaluation.known) throw new Error("数据服务未返回条件所需的完整字段");
+  const triggered = evaluation.triggered;
   const direction = change > 0 ? "上涨" : change < 0 ? "下跌" : "持平";
   const price = Number.isFinite(Number(quote.price)) ? `最新价 ${Number(quote.price).toFixed(2)}，` : "";
   const asOf = String(quote.asOf || "数据时间未知");
@@ -186,7 +194,7 @@ function priceMonitorResult(rule, item, quote) {
   return {
     triggered,
     title: `${item?.name || rule.symbol} · ${strategyFor(rule.strategyId).name}`,
-    summary: `${price}${direction} ${change >= 0 ? "+" : ""}${change.toFixed(2)}%，阈值 ${threshold.toFixed(2)}%。数据截至 ${asOf}，来源 ${source}。`,
+    summary: `${price}${Number.isFinite(change) ? `${direction} ${change >= 0 ? "+" : ""}${change.toFixed(2)}%` : "条件检查完成"}；条件：${ruleConditionSummary(rule)}。数据截至 ${asOf}，来源 ${source}。`,
     severity: triggered ? "warning" : "info",
     asOf,
     source,
@@ -439,35 +447,44 @@ export const useLabStore = create((set, get) => ({
     const strategy = strategyFor(rule.strategyId);
     try {
       let reply; let result; let parsed = null;
-      if (strategy.id === "price_change" && isLocalWebRuntime() && typeof queryCachedData === "function") {
-        const prompt = `使用内置 qveris-finance-research Skill 查询 ${item?.name || rule.symbol}（${rule.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${qverisSymbol(rule.symbol)}。只做一次 Search、一次 Inspect、一次 Call，不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${rule.symbol}","price":null,"changePercent":null,"changeAmount":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
+      const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
+      if (["price_change", "volume_spike"].includes(strategy.id) && isLocalWebRuntime() && typeof queryCachedData === "function") {
+          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item?.name || rule.symbol}（${rule.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${qverisSymbol(rule.symbol)}。只做一次 Search、一次 Inspect、一次 Call，不要使用示例数据。${conditionPrompt(rule)} 严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${rule.symbol}","price":null,"changePercent":null,"changeAmount":null,"volumeRatio":null,"asOf":"数据时间","source":"数据来源"}],"triggered":null,"summary":"","errors":[]}。没有真实值的字段填 null。`;
         reply = await askFinancialData(prompt, "quote", rule.symbol, "", { settleTimeoutMs: 60_000 });
         const quote = Object.values(liveQuotesFromReply(reply.text, [rule.symbol]))[0];
-        if (quote) {
+        if (quote && evaluateRuleConditions(rule, { ...quote, changePercent: quote.change }).known) {
           result = priceMonitorResult(rule, item, quote);
           parsed = result;
         } else {
-          // A cache miss falls back to Pi. Keep compatibility with an older
-          // model that may still return the monitor-shaped JSON envelope.
-          parsed = findJsonObject(reply.text);
-          if (!parsed || typeof parsed.triggered !== "boolean") throw new Error("数据服务未返回可识别的盯盘结果");
-          result = parsed;
+          const cachedResult = findJsonObject(reply.text);
+          if (!quote && cachedResult && typeof cachedResult.triggered === "boolean") {
+            parsed = cachedResult;
+            result = cachedResult;
+          } else {
+          // Cached L1 quotes do not contain event, flow, or sentiment fields;
+          // ask the managed runtime for the missing condition fields instead
+          // of treating unknown data as a negative signal.
+            reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
+            parsed = findJsonObject(reply.text);
+            result = parsed || { triggered: null, title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: "数据服务未返回完整条件字段。", severity: "info" };
+          }
         }
       } else {
-        reply = await askPi(`执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。阈值：${rule.threshold}${strategy.unit}。${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true或false,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`, { settleTimeoutMs: 120_000 });
+        reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
         parsed = findJsonObject(reply.text); result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
       }
       let deliveredNotification = null;
       set((state) => {
+        const hasDecision = typeof result.triggered === "boolean";
         const triggered = result.triggered === true;
         // Alerts are edge-triggered: keep one notification while a condition
         // remains true, then allow a new notification after it resets.
-        const shouldNotify = (triggered && rule.lastSignalTriggered !== true) || reply.mode === "browser-demo" || !parsed;
+        const shouldNotify = hasDecision && ((triggered && rule.lastSignalTriggered !== true) || reply.mode === "browser-demo" || !parsed);
         const notification = shouldNotify ? notificationFromResult(rule, item, result, reply) : null;
         deliveredNotification = notification;
         return {
           monitorBusy: false,
-          rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: triggered ? nowIso() : candidate.lastTriggeredAt, lastSignalTriggered: triggered } : candidate),
+          rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: triggered ? nowIso() : candidate.lastTriggeredAt, lastSignalTriggered: hasDecision ? triggered : candidate.lastSignalTriggered } : candidate),
           notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications,
         };
       });
