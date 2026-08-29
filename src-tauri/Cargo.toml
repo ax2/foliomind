@@ -1,6 +1,6 @@
 [package]
 name = "foliomind"
-version = "0.1.28"
+version = "0.1.29"
 description = "FolioMind financial agent desktop host"
 authors = ["ax2"]
 edition = "2021"
@@ -24,3 +24,6 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tauri-plugin-notification = "=2.3.3"
