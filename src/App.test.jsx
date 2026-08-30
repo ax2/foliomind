@@ -124,6 +124,7 @@ describe("FolioMind core flows", () => {
   it("records a trade plan and lets the user mark it executed", async () => {
     window.localStorage.clear();
     render(<App />);
+    await waitFor(() => expect(useLabStore.getState().userStateLoaded).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "组合" }));
     fireEvent.click(screen.getByRole("button", { name: "添加第一笔持仓" }));
     fireEvent.change(screen.getByLabelText("持仓数量"), { target: { value: "10" } });
