@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, createCacheWarmupGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, retryDelayMs, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, retryDelayMs, shouldInvalidateToolCache, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -15,6 +15,8 @@ test("keeps the qveris_finance CAP contract local and normalizes real envelopes"
   assert.equal(result.quotes[0].source, "ths_ifind");
   const series = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-28", close: 1297.4 }] } });
   assert.deepEqual(series.series[0], { date: "2026-08-28", close: 1297.4, time: "2026-08-28", value: 1297.4 });
+  const ascendingSeries = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-26", close: 1290 }, { date: "2026-08-28", close: 1297.4 }] } });
+  assert.equal(ascendingSeries.asOf, "2026-08-28");
 });
 
 test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {
@@ -87,6 +89,31 @@ test("uses bounded exponential backoff for transient upstream responses", () => 
   assert.equal(retryDelayMs(1), 1_000);
   assert.equal(retryDelayMs(99), 8_000);
   assert.equal(retryDelayMs(0, 2_000), 2_000);
+});
+
+test("evicts cached tools only for explicit invalidation responses", () => {
+  assert.equal(shouldInvalidateToolCache(Object.assign(new Error("not found"), { status: 404 })), true);
+  assert.equal(shouldInvalidateToolCache(Object.assign(new Error("gone"), { status: 410 })), true);
+  assert.equal(shouldInvalidateToolCache(Object.assign(new Error("temporary"), { status: 429 })), false);
+  assert.equal(shouldInvalidateToolCache(Object.assign(new Error("temporary"), { status: 503 })), false);
+  assert.equal(shouldInvalidateToolCache({ status: 400, upstreamCode: "tool_not_found" }), true);
+  assert.equal(shouldInvalidateToolCache({ status: 400, upstreamCode: "invalid_parameters" }), false);
+});
+
+test("serializes runtime prompts and releases only the owning request", () => {
+  const gate = createRuntimeGate();
+  const first = new AbortController();
+  const second = new AbortController();
+  assert.equal(gate.acquire(first), true);
+  assert.equal(gate.acquire(second), false);
+  assert.equal(gate.current(), first);
+  gate.release(second);
+  assert.equal(gate.current(), first);
+  gate.release(first);
+  assert.equal(gate.current(), null);
+  assert.equal(gate.acquire(second), true);
+  gate.abort(new Error("cancelled"));
+  assert.equal(second.signal.aborted, true);
 });
 
 test("retries a transient network failure and does not retry an already-aborted request", async () => {

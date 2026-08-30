@@ -58,6 +58,10 @@ function sanitizePositions(items) {
     market: text(item?.market, 64),
     quantity: finiteNumber(item?.quantity),
     averageCost: finiteNumber(item?.averageCost),
+    takeProfitPrice: finiteNumber(item?.takeProfitPrice ?? item?.take_profit_price),
+    stopLossPrice: finiteNumber(item?.stopLossPrice ?? item?.stop_loss_price),
+    takeProfitTriggered: item?.takeProfitTriggered === true,
+    stopLossTriggered: item?.stopLossTriggered === true,
   })).filter((item) => item.id && item.symbol && item.name && item.quantity !== null && item.averageCost !== null && item.quantity > 0 && item.averageCost >= 0);
 }
 

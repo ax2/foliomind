@@ -6,6 +6,8 @@ export function normalizePortfolioPosition(value) {
   const quantity = Number(value.quantity);
   const averageCost = Number(value.averageCost ?? value.average_cost);
   if (!symbol || !name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(averageCost) || averageCost <= 0) return null;
+  const takeProfitPrice = finitePositive(value.takeProfitPrice ?? value.take_profit_price);
+  const stopLossPrice = finitePositive(value.stopLossPrice ?? value.stop_loss_price);
   return {
     id: String(value.id ?? "").trim(),
     symbol,
@@ -13,11 +15,48 @@ export function normalizePortfolioPosition(value) {
     market,
     quantity,
     averageCost,
+    takeProfitPrice,
+    stopLossPrice,
+    takeProfitTriggered: takeProfitPrice == null ? false : value.takeProfitTriggered === true,
+    stopLossTriggered: stopLossPrice == null ? false : value.stopLossTriggered === true,
   };
 }
 
 function finite(value) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function finitePositive(value) {
+  const number = finite(value);
+  return number != null && number > 0 ? number : null;
+}
+
+/**
+ * Evaluate optional take-profit/stop-loss plans against one real quote.
+ * Missing quotes never produce an alert and never clear a previous edge state.
+ */
+export function portfolioAlertChecks(position, quote) {
+  const currentPrice = finite(quote?.price);
+  const checks = [
+    { type: "take-profit", label: "止盈", field: "takeProfitPrice", stateField: "takeProfitTriggered", reached: (price, target) => price >= target, severity: "warning" },
+    { type: "stop-loss", label: "止损", field: "stopLossPrice", stateField: "stopLossTriggered", reached: (price, target) => price <= target, severity: "critical" },
+  ];
+  const updates = {};
+  const alerts = [];
+  for (const check of checks) {
+    const target = finitePositive(position?.[check.field]);
+    if (target == null) {
+      updates[check.stateField] = false;
+      continue;
+    }
+    if (currentPrice == null) continue;
+    const reached = check.reached(currentPrice, target);
+    updates[check.stateField] = reached;
+    if (reached && position?.[check.stateField] !== true) {
+      alerts.push({ type: check.type, label: check.label, target, currentPrice, severity: check.severity, asOf: String(quote?.asOf || ""), source: String(quote?.source || "数据服务") });
+    }
+  }
+  return { updates, alerts };
 }
 
 export function portfolioMetrics(positions, liveQuotes) {
@@ -58,6 +97,10 @@ export function portfolioReportRows(positions, liveQuotes) {
     market: row.market,
     quantity: row.quantity,
     averageCost: row.averageCost,
+    takeProfitPrice: row.takeProfitPrice,
+    stopLossPrice: row.stopLossPrice,
+    takeProfitTriggered: row.takeProfitTriggered,
+    stopLossTriggered: row.stopLossTriggered,
     currentPrice: row.currentPrice,
     marketValue: row.marketValue,
     unrealizedPnl: row.pnl,
@@ -75,6 +118,10 @@ export function portfolioReportCsv(positions, liveQuotes) {
     ["market", "市场"],
     ["quantity", "数量"],
     ["averageCost", "平均成本"],
+    ["takeProfitPrice", "止盈价"],
+    ["stopLossPrice", "止损价"],
+    ["takeProfitTriggered", "止盈已触发"],
+    ["stopLossTriggered", "止损已触发"],
     ["currentPrice", "现价"],
     ["marketValue", "市值"],
     ["unrealizedPnl", "未实现盈亏"],

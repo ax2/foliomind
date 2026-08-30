@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioMetrics, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
+import { normalizePortfolioPosition, portfolioAlertChecks, portfolioMetrics, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
-    expect(normalizePortfolioPosition({ id: "p1", symbol: " aapl ", name: "Apple", quantity: "2", averageCost: "100" })).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100 });
+    expect(normalizePortfolioPosition({ id: "p1", symbol: " aapl ", name: "Apple", quantity: "2", averageCost: "100", takeProfitPrice: "125", stopLossPrice: "80" })).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100, takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: false, stopLossTriggered: false });
     expect(normalizePortfolioPosition({ symbol: "AAPL", quantity: 0, averageCost: 100 })).toBeNull();
+  });
+
+  it("fires edge-triggered take-profit and stop-loss alerts only for real prices", () => {
+    const position = { symbol: "AAPL", takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: false, stopLossTriggered: false };
+    const takeProfit = portfolioAlertChecks(position, { price: 125, asOf: "2026-08-30T10:00:00Z", source: "CAP" });
+    expect(takeProfit.alerts).toMatchObject([{ type: "take-profit", target: 125, currentPrice: 125 }]);
+    expect(takeProfit.updates).toMatchObject({ takeProfitTriggered: true, stopLossTriggered: false });
+    expect(portfolioAlertChecks({ ...position, takeProfitTriggered: true }, { price: 126 }).alerts).toHaveLength(0);
+    expect(portfolioAlertChecks({ ...position, takeProfitTriggered: true }, { price: 120 }).updates.takeProfitTriggered).toBe(false);
+    expect(portfolioAlertChecks(position, { price: 79, source: "CAP" }).alerts).toMatchObject([{ type: "stop-loss", severity: "critical" }]);
+    expect(portfolioAlertChecks(position, {}).alerts).toHaveLength(0);
   });
 
   it("computes P/L only for positions with real quotes", () => {
@@ -32,10 +43,11 @@ describe("portfolio metrics", () => {
   });
 
   it("exports a truthful report with blanks for unpriced positions", () => {
-    const positions = [{ id: "p1", symbol: "AAPL", name: "Apple, Inc.", market: "US", quantity: 2, averageCost: 100 }, { id: "p2", symbol: "MSFT", name: "Microsoft", market: "US", quantity: 1, averageCost: 200 }];
+    const positions = [{ id: "p1", symbol: "AAPL", name: "Apple, Inc.", market: "US", quantity: 2, averageCost: 100, takeProfitPrice: 125 }, { id: "p2", symbol: "MSFT", name: "Microsoft", market: "US", quantity: 1, averageCost: 200 }];
     expect(portfolioReportRows(positions, { AAPL: { price: 125, asOf: "2026-08-29", source: "CAP" } })[1]).toMatchObject({ currentPrice: null, marketValue: null, quoteSource: "" });
     const csv = portfolioReportCsv(positions, { AAPL: { price: 125, asOf: "2026-08-29", source: "CAP" } });
     expect(csv).toContain('"Apple, Inc."');
-    expect(csv).toContain("Microsoft,US,1,200,,,,,,,");
+    expect(csv).toContain("MSFT,Microsoft,US,1,200,,,,,,,,,,,");
+    expect(csv).toContain("Apple, Inc.");
   });
 });

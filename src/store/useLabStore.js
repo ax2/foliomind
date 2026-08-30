@@ -6,7 +6,7 @@ import { getDeveloperVariable, isLocalWebRuntime, queryCachedData } from "../lib
 import { loadIntegrationStatus } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
-import { normalizePortfolioPosition } from "../lib/portfolio.js";
+import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 
@@ -80,6 +80,46 @@ function notificationFromResult(rule, item, result, reply) {
   const body = String(result.summary || result.body || reply.text || "检查完成，请打开对话查看完整的来源与审计记录。").trim();
   const dataServiceMode = ["pi-rpc", "pi-local-host", "standalone-dev-host"].includes(reply.mode);
   return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: dataServiceMode ? "data-service" : "browser-demo" };
+}
+
+function portfolioAlertNotification(position, alert) {
+  const price = Number(alert.currentPrice).toFixed(2);
+  const target = Number(alert.target).toFixed(2);
+  const asOf = alert.asOf || "数据时间未返回";
+  return {
+    id: createId("portfolio-alert"),
+    kind: "portfolio-alert",
+    title: `${position.name} · ${alert.label}价已到达`,
+    body: `${alert.label}价 ${target}，当前真实价格 ${price}；数据截至 ${asOf}，来源 ${alert.source}。请结合自己的交易计划判断，不构成投资建议。`,
+    severity: alert.severity,
+    createdAt: nowIso(),
+    read: false,
+    source: "data-service",
+  };
+}
+
+function mergeLiveQuotesWithPortfolio(state, quotes) {
+  let portfolioPositions = state.portfolioPositions;
+  let notifications = state.notifications;
+  let portfolioChanged = false;
+  const delivered = [];
+  for (const position of state.portfolioPositions) {
+    const quote = quotes[position.symbol];
+    if (!quote) continue;
+    const checks = portfolioAlertChecks(position, quote);
+    const nextPosition = { ...position, ...checks.updates };
+    if (nextPosition.takeProfitTriggered !== position.takeProfitTriggered || nextPosition.stopLossTriggered !== position.stopLossTriggered) {
+      if (!portfolioChanged) portfolioPositions = [...state.portfolioPositions];
+      portfolioPositions[state.portfolioPositions.indexOf(position)] = nextPosition;
+      portfolioChanged = true;
+    }
+    if (checks.alerts.length) {
+      const nextNotifications = checks.alerts.map((alert) => portfolioAlertNotification(position, alert));
+      notifications = [...nextNotifications, ...notifications].slice(0, 500);
+      delivered.push(...nextNotifications);
+    }
+  }
+  return { liveQuotes: { ...state.liveQuotes, ...quotes }, portfolioPositions, notifications, portfolioChanged, delivered };
 }
 function monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluation = null, outcome = null) {
   const triggered = typeof result?.triggered === "boolean" ? result.triggered : null;
@@ -349,7 +389,7 @@ export const useLabStore = create((set, get) => ({
       detailsRequestGeneration += 1;
       seriesRequestGeneration += 1;
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}) };
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })) } : {}) };
   }),
   refreshLiveData: async () => {
     const state = get();
@@ -372,11 +412,33 @@ export const useLabStore = create((set, get) => ({
           if (!Object.keys(quotes).length && reply.cacheHit) {
             const rediscovered = await askPi(prompt, { settleTimeoutMs: 60_000 });
             const recovered = liveQuotesFromReply(rediscovered.text, [item.symbol]);
-            if (Object.keys(recovered).length) { received += 1; set((current) => ({ liveQuotes: { ...current.liveQuotes, ...recovered }, liveDataLastRefreshAt: nowIso() })); return true; }
+            if (Object.keys(recovered).length) {
+              received += 1;
+              let delivered = [];
+              let portfolioChanged = false;
+              set((current) => {
+                const merged = mergeLiveQuotesWithPortfolio(current, recovered);
+                delivered = merged.delivered;
+                portfolioChanged = merged.portfolioChanged;
+                return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), liveDataLastRefreshAt: nowIso() };
+              });
+              for (const notification of delivered) void sendSystemNotification(notification);
+              if (portfolioChanged) await get().persistUserState();
+              return true;
+            }
           }
           if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
           received += 1;
-          set((current) => ({ liveQuotes: { ...current.liveQuotes, ...quotes }, liveDataLastRefreshAt: nowIso() }));
+          let delivered = [];
+          let portfolioChanged = false;
+          set((current) => {
+            const merged = mergeLiveQuotesWithPortfolio(current, quotes);
+            delivered = merged.delivered;
+            portfolioChanged = merged.portfolioChanged;
+            return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), liveDataLastRefreshAt: nowIso() };
+          });
+          for (const notification of delivered) void sendSystemNotification(notification);
+          if (portfolioChanged) await get().persistUserState();
           return true;
         } catch (error) {
           if (requestGeneration !== liveRequestGeneration) return false;
