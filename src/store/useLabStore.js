@@ -19,6 +19,7 @@ const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items).slice(0, 8).map((item) => ({ ...item }));
 let persistenceQueue = Promise.resolve();
 let liveRequestGeneration = 0;
+const selectedQuoteGenerations = new Map();
 let detailsRequestGeneration = 0;
 let seriesRequestGeneration = 0;
 let eventsRequestGeneration = 0;
@@ -396,10 +397,29 @@ async function askFinancialData(prompt, kind, symbol, range, options) {
   return askPi(prompt, options);
 }
 
+function liveQuotePrompt(item) {
+  const marketSymbol = qverisSymbol(item.symbol);
+  return `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
+}
+
+async function fetchLiveQuote(item, options = {}) {
+  const prompt = liveQuotePrompt(item);
+  const reply = await askFinancialData(prompt, "quote", item.symbol, "", { settleTimeoutMs: options.settleTimeoutMs || 60_000 });
+  let quotes = liveQuotesFromReply(reply.text, [item.symbol]);
+  // A stale cached selection may return an empty envelope. Rediscover once so
+  // the fast path remains self-healing without making every request slow.
+  if (!Object.keys(quotes).length && reply.cacheHit) {
+    const rediscovered = await askPi(prompt, { settleTimeoutMs: options.settleTimeoutMs || 60_000 });
+    quotes = liveQuotesFromReply(rediscovered.text, [item.symbol]);
+  }
+  if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
+  return { quotes, reply };
+}
+
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
-  messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -412,7 +432,7 @@ function dataChannelChanged(previous, next) {
 }
 
 const quoteRefreshReset = {
-  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "", liveDataLoading: false,
+  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "", liveDataLoading: false, selectedQuoteLoading: {},
   quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {},
   quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {},
 };
@@ -428,6 +448,7 @@ export const useLabStore = create((set, get) => ({
     const changed = dataChannelChanged(state.integrationStatus, integrationStatus);
     if (changed) {
       liveRequestGeneration += 1;
+      selectedQuoteGenerations.clear();
       detailsRequestGeneration += 1;
       seriesRequestGeneration += 1;
       eventsRequestGeneration += 1;
@@ -447,30 +468,8 @@ export const useLabStore = create((set, get) => ({
       await mapWithConcurrency(state.watchlist, concurrency, async (item) => {
         try {
           if (requestGeneration !== liveRequestGeneration) return false;
-          const marketSymbol = qverisSymbol(item.symbol);
-          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
-          const reply = await askFinancialData(prompt, "quote", item.symbol, "", { settleTimeoutMs: 60_000 });
+          const { quotes } = await fetchLiveQuote(item);
           if (requestGeneration !== liveRequestGeneration) return false;
-          const quotes = liveQuotesFromReply(reply.text, [item.symbol]);
-          if (!Object.keys(quotes).length && reply.cacheHit) {
-            const rediscovered = await askPi(prompt, { settleTimeoutMs: 60_000 });
-            const recovered = liveQuotesFromReply(rediscovered.text, [item.symbol]);
-            if (Object.keys(recovered).length) {
-              received += 1;
-              let delivered = [];
-              let portfolioChanged = false;
-              set((current) => {
-                const merged = mergeLiveQuotesWithPortfolio(current, recovered);
-                delivered = merged.delivered;
-                portfolioChanged = merged.portfolioChanged;
-                return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), liveDataLastRefreshAt: nowIso() };
-              });
-              for (const notification of delivered) void sendSystemNotification(notification);
-              if (portfolioChanged) await get().persistUserState();
-              return true;
-            }
-          }
-          if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
           received += 1;
           let delivered = [];
           let portfolioChanged = false;
@@ -498,6 +497,34 @@ export const useLabStore = create((set, get) => ({
       return true;
     } catch (error) {
       set({ liveDataLoading: false, liveDataError: friendlyDataMessage(error) });
+      return false;
+    }
+  },
+  refreshSelectedQuote: async (symbol) => {
+    const state = get();
+    const item = state.watchlist.find((candidate) => candidate.symbol === symbol);
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    if (!configured || !item || state.selectedQuoteLoading?.[symbol] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
+    const requestGeneration = (selectedQuoteGenerations.get(symbol) || 0) + 1;
+    selectedQuoteGenerations.set(symbol, requestGeneration);
+    set((current) => ({ selectedQuoteLoading: { ...current.selectedQuoteLoading, [symbol]: true }, liveDataError: current.liveDataLoading ? current.liveDataError : "" }));
+    try {
+      const { quotes } = await fetchLiveQuote(item);
+      if (requestGeneration !== selectedQuoteGenerations.get(symbol)) return false;
+      let delivered = [];
+      let portfolioChanged = false;
+      set((current) => {
+        const merged = mergeLiveQuotesWithPortfolio(current, quotes);
+        delivered = merged.delivered;
+        portfolioChanged = merged.portfolioChanged;
+        return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), selectedQuoteLoading: { ...current.selectedQuoteLoading, [symbol]: false }, liveDataError: current.liveDataLoading ? current.liveDataError : "", liveDataLastRefreshAt: nowIso() };
+      });
+      for (const notification of delivered) void sendSystemNotification(notification);
+      if (portfolioChanged) await get().persistUserState();
+      return true;
+    } catch (error) {
+      if (requestGeneration !== selectedQuoteGenerations.get(symbol)) return false;
+      set((current) => ({ selectedQuoteLoading: { ...current.selectedQuoteLoading, [symbol]: false }, liveDataError: current.liveDataLoading ? current.liveDataError : friendlyDataMessage(error) }));
       return false;
     }
   },
