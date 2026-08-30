@@ -4,9 +4,9 @@ const load = (file) => readFile(new URL(file, root), "utf8");
 const checks = [];
 const check = (name, pass, detail) => checks.push({ name, pass, detail });
 
-const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, workflow, prd, readme] = await Promise.all([
+const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, workflow, prd, readme, watchlist] = await Promise.all([
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
-  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"),
+  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"),
 ]);
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -15,6 +15,7 @@ check("状态脱敏", userState.includes("normalizeUserState") && userState.incl
 check("发布资产", workflow.includes("SHA256SUMS") && workflow.includes("gh release upload"), "Release workflow 需校验并上传安装包");
 check("安装升级路径", tauriConfig.bundle?.windows?.nsis?.installMode === "currentUser" && Boolean(tauriConfig.bundle?.windows?.wix?.upgradeCode) && readme.includes("不要求用户先手动卸载"), "Windows 同一产品必须覆盖升级并保留用户配置");
 check("阶段设计", prd.includes("Stage 1E") && prd.includes("异动雷达"), "新功能必须先有可验收的 PRD 阶段设计");
+check("自选迁移边界", watchlist.includes("parseWatchlistImport") && watchlist.includes("watchlistCsv"), "批量自选导入需先解析校验，导出不得包含实时数据或凭证");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

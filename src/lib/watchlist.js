@@ -57,3 +57,108 @@ export function sortWatchlistItems(items, quotes = {}, sortKey = "custom", direc
   }).map(({ item }) => item);
 }
 
+function csvCell(value) {
+  const text = value == null ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+/** Export only the user-owned watchlist contract; live quotes and credentials never enter the file. */
+export function watchlistCsv(items) {
+  const columns = [
+    ["symbol", "代码"],
+    ["name", "名称"],
+    ["market", "市场"],
+    ["category", "分类"],
+    ["group", "分组"],
+  ];
+  const lines = [columns.map(([, label]) => csvCell(label)).join(",")];
+  for (const item of Array.isArray(items) ? items : []) {
+    const normalized = normalizeWatchlistItem(item);
+    if (normalized.symbol && normalized.name) lines.push(columns.map(([key]) => csvCell(normalized[key])).join(","));
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+function parseDelimitedLine(line) {
+  const fields = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && line[index + 1] === '"' && quoted) { field += '"'; index += 1; continue; }
+    if (char === '"') { quoted = !quoted; continue; }
+    if (char === "," && !quoted) { fields.push(field.trim()); field = ""; continue; }
+    field += char;
+  }
+  fields.push(field.trim());
+  return fields;
+}
+
+function importedSymbol(value) {
+  let token = String(value ?? "").trim().replace(/^\$/, "");
+  if (!token) return null;
+  let exchange = "";
+  if (token.includes(":")) [exchange, token] = token.split(/:(.*)/s, 2);
+  const suffix = token.match(/^(.+)\.(SH|SS|SZ|BJ|HK|US)$/i);
+  if (suffix) { token = suffix[1]; exchange = exchange || suffix[2]; }
+  token = token.trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(token)) return null;
+  const exchangeText = String(exchange).toUpperCase();
+  const market = /^(SSE|SH|XSHG|SZSE|SZ|XSHE|BSE|BJ|沪|深|北)/.test(exchangeText)
+    ? "A股"
+    : /^(HKEX|HK|港)/.test(exchangeText)
+      ? "港股"
+      : /^(NASDAQ|NYSE|AMEX|US)/.test(exchangeText)
+        ? "美股"
+        : "自定义";
+  return { symbol: token, market };
+}
+
+function headerKey(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/[ _-]/g, "");
+}
+
+/**
+ * Parse TradingView-style TXT lists and FolioMind CSV exports. Parsing is
+ * deterministic and bounded so a malformed upload cannot partially mutate state.
+ */
+export function parseWatchlistImport(raw, { maxItems = 200 } = {}) {
+  const source = String(raw ?? "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  if (source.length > 2_000_000) throw new Error("自选文件过大，请拆分后再导入（最大 2 MB）");
+  const lines = source.split("\n");
+  const firstIndex = lines.findIndex((line) => line.trim());
+  const first = firstIndex >= 0 ? lines[firstIndex].trim() : "";
+  const firstFields = parseDelimitedLine(first);
+  const headerNames = firstFields.map(headerKey);
+  const hasHeader = headerNames.some((key) => ["symbol", "ticker", "代码", "证券代码"].includes(key));
+  const indexes = hasHeader ? {
+    symbol: Math.max(0, headerNames.findIndex((key) => ["symbol", "ticker", "代码", "证券代码"].includes(key))),
+    name: headerNames.findIndex((key) => ["name", "名称"].includes(key)),
+    market: headerNames.findIndex((key) => ["market", "市场"].includes(key)),
+    category: headerNames.findIndex((key) => ["category", "分类"].includes(key)),
+    group: headerNames.findIndex((key) => ["group", "分组"].includes(key)),
+  } : null;
+  const items = [];
+  const errors = [];
+  const seen = new Set();
+  let skipped = 0;
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const line = lines[lineNumber].trim();
+    if (!line || line.startsWith("#") || (hasHeader && lineNumber === firstIndex)) continue;
+    const fields = parseDelimitedLine(line);
+    const symbolValue = indexes ? fields[indexes.symbol] : fields[0];
+    const parsed = importedSymbol(symbolValue);
+    if (!parsed) { errors.push({ line: lineNumber + 1, reason: "代码格式无法识别" }); continue; }
+    if (seen.has(parsed.symbol)) { skipped += 1; continue; }
+    if (items.length >= maxItems) { errors.push({ line: lineNumber + 1, reason: `最多导入 ${maxItems} 个标的` }); continue; }
+    seen.add(parsed.symbol);
+    items.push(normalizeWatchlistItem({
+      symbol: parsed.symbol,
+      name: indexes?.name >= 0 ? fields[indexes.name] || parsed.symbol : parsed.symbol,
+      market: indexes?.market >= 0 ? fields[indexes.market] || parsed.market : parsed.market,
+      category: indexes?.category >= 0 ? fields[indexes.category] : "自选",
+      group: indexes?.group >= 0 ? fields[indexes.group] : "",
+    }));
+  }
+  return { items: items.filter((item) => item.symbol && item.name), skipped, errors };
+}
