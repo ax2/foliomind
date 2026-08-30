@@ -39,6 +39,17 @@ test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () 
   assert.equal(unavailable.dataStatus, "empty");
 });
 
+test("rejects explicit CAP failure envelopes instead of exposing partial fields", () => {
+  assert.throws(
+    () => normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { success: false, result: { data: { price: 1 }, status_code: 200 } }),
+    /金融数据渠道暂未返回可用结果/,
+  );
+  assert.throws(
+    () => normalizeCapabilityResult("details", { symbol: "600519.SH" }, { result: { status_code: 503, data: { name: "贵州茅台" } } }),
+    /金融数据渠道暂未返回可用结果/,
+  );
+});
+
 test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {
   const gate = createCacheWarmupGate();
   let ready = false;

@@ -42,6 +42,22 @@ const devVariables = {
   logLevel: "info",
 };
 
+// CAP responses are real upstream data, so a short in-memory TTL avoids
+// duplicate requests caused by a page refresh, monitor check, and quote detail
+// panel opening at the same time without turning the UI into a fake-data cache.
+const DIRECT_DATA_CACHE_TTL_MS = Object.freeze({
+  quote: 15_000,
+  details: 300_000,
+  fundamentals: 300_000,
+  series: 60_000,
+  core_event: 300_000,
+  capital_flow: 60_000,
+  sentiment: 60_000,
+});
+const directDataCache = new Map();
+const directDataInFlight = new Map();
+let directDataCacheGeneration = 0;
+
 /** Keep one prompt request associated with one AbortController at a time. */
 export function createRuntimeGate() {
   let active = null;
@@ -80,7 +96,7 @@ function safeSettings(settings) {
 }
 async function readToolCache() { return await readJson(toolCacheFile, {}); }
 async function writeToolCache(value) { await atomicJson(toolCacheFile, value); }
-async function clearToolCache() { try { await unlink(toolCacheFile); } catch { /* idempotent */ } }
+async function clearToolCache() { directDataCacheGeneration += 1; directDataCache.clear(); directDataInFlight.clear(); try { await unlink(toolCacheFile); } catch { /* idempotent */ } }
 function cacheKey(kind, settings) {
   return [kind, settings?.dataChannel || "qveris-cap", settings?.dataProvider || DEFAULT_DATA_PROVIDER, settings?.capabilityBaseUrl || DEFAULT_CAPABILITY, settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY, settings?.modelId || ""].join("|");
 }
@@ -151,6 +167,8 @@ async function persistCapabilityCatalog(settings) {
   const cache = await readToolCache();
   const previous = cache.__catalog;
   const next = capabilityCatalog(settings);
+  const comparable = (value) => JSON.stringify({ ...value, updatedAt: undefined, createdAt: undefined });
+  if (previous && comparable(previous) === comparable(next)) return previous;
   // Preserve the first-seen timestamp while updating the contract metadata.
   cache.__catalog = { ...next, createdAt: previous?.createdAt || next.updatedAt };
   await writeToolCache(cache);
@@ -165,6 +183,17 @@ function directCapabilityParameters(kind, input) {
   const dates = { start_date: String(input?.start_date || start.toISOString().slice(0, 10)), end_date: String(input?.end_date || end.toISOString().slice(0, 10)) };
   if (["series", "core_event", "capital_flow", "sentiment"].includes(kind)) return { symbol, ...dates, ...(kind === "core_event" && input?.event_type ? { event_type: String(input.event_type) } : {}), ...(kind === "sentiment" && input?.query ? { query: String(input.query) } : {}) };
   return { symbol };
+}
+
+function directDataCacheKey(kind, settings, parameters) {
+  return JSON.stringify({
+    kind,
+    channel: settings?.dataChannel || "qveris-cap",
+    provider: settings?.dataProvider || DEFAULT_DATA_PROVIDER,
+    capabilityBaseUrl: settings?.capabilityBaseUrl || DEFAULT_CAPABILITY,
+    tool: BUILTIN_CAPABILITY_CATALOG[kind]?.toolId || kind,
+    parameters,
+  });
 }
 
 function capabilityData(result) {
@@ -183,6 +212,11 @@ function latestDataTimestamp(points) {
 
 export function normalizeCapabilityResult(kind, input, result) {
   const data = capabilityData(result);
+  const statusCode = Number(result?.result?.status_code ?? result?.status_code ?? 200);
+  const hasPayload = Array.isArray(data) ? data.length > 0 : Boolean(data && typeof data === "object" ? Object.keys(data).length : data);
+  if (hasPayload && (result?.success === false || (Number.isFinite(statusCode) && statusCode >= 400))) {
+    throw new Error("金融数据渠道暂未返回可用结果");
+  }
   const meta = result?.result?._meta || result?._meta || {};
   const source = meta.source_provider || meta.source_tool_id || DEFAULT_DATA_PROVIDER;
   if (kind === "quote") {
@@ -245,17 +279,42 @@ async function queryDirectCapability(input, settings, key, signal) {
   if (!selections.length) { const error = new Error("没有对应的金融能力"); error.status = 404; error.code = "CAPABILITY_NOT_FOUND"; throw error; }
   const call = async ({ kind: callKind, selected }) => {
     const parameters = directCapabilityParameters(callKind, input);
+    const cacheKeyValue = directDataCacheKey(callKind, settings, parameters);
+    const ttl = DIRECT_DATA_CACHE_TTL_MS[callKind] || 0;
+    const cacheGeneration = directDataCacheGeneration;
+    const cached = directDataCache.get(cacheKeyValue);
+    if (cached && ttl > 0 && Date.now() - cached.createdAt < ttl) {
+      logInvocation({ type: "cap", operation: "cap-cache-hit", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: 0 });
+      return { selected, normalized: structuredClone(cached.normalized), memoryCacheHit: true };
+    }
+    const inFlight = directDataInFlight.get(cacheKeyValue);
+    if (inFlight) {
+      try {
+        const normalized = await inFlight;
+        logInvocation({ type: "cap", operation: "cap-inflight-hit", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: 0 });
+        return { selected, normalized: structuredClone(normalized), memoryCacheHit: true };
+      } catch (error) {
+        throw error;
+      }
+    }
     const runId = `cap_${randomUUID()}`;
     const startedAt = Date.now();
     const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(selected.toolId)}`;
-    try {
+    const request = (async () => {
       const result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, signal, 1);
-      const normalized = normalizeCapabilityResult(callKind, input, result);
-      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: Date.now() - startedAt });
-      return { selected, normalized };
+      return normalizeCapabilityResult(callKind, input, result);
+    })();
+    directDataInFlight.set(cacheKeyValue, request);
+    try {
+      const normalized = await request;
+      if (ttl > 0 && cacheGeneration === directDataCacheGeneration) directDataCache.set(cacheKeyValue, { createdAt: Date.now(), normalized: structuredClone(normalized) });
+      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: false, durationMs: Date.now() - startedAt });
+      return { selected, normalized, memoryCacheHit: false };
     } catch (error) {
-      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: true, durationMs: Date.now() - startedAt, detail: error.message });
+      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: false, durationMs: Date.now() - startedAt, detail: error.message });
       throw error;
+    } finally {
+      if (directDataInFlight.get(cacheKeyValue) === request) directDataInFlight.delete(cacheKeyValue);
     }
   };
   const settled = await Promise.allSettled(selections.map(call));
@@ -264,9 +323,9 @@ async function queryDirectCapability(input, settings, key, signal) {
   const primary = results[0];
   if (kind === "details") {
     const fundamentals = results.find((item) => item.selected.kind === "fundamentals")?.normalized;
-    return { data: { ...primary.normalized, fundamentals: fundamentals?.fundamentals || {}, asOf: fundamentals?.asOf || null }, cacheHit: true, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
+    return { data: { ...primary.normalized, fundamentals: fundamentals?.fundamentals || {}, asOf: fundamentals?.asOf || null }, cacheHit: true, dataCacheHit: results.every((item) => item.memoryCacheHit), mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
   }
-  return { data: primary.normalized, cacheHit: true, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
+  return { data: primary.normalized, cacheHit: true, dataCacheHit: primary.memoryCacheHit, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
 }
 
 // Multiple watchlist rows can start at the same time.  Keep only the first
