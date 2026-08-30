@@ -6,7 +6,7 @@ describe("user state backups", () => {
     const raw = serializeUserStateBackup({
       watchlist: [{ symbol: " aapl ", name: "Apple", market: "NASDAQ", category: "科技", secret: "drop" }],
       rules: [{ id: "r1", symbol: "AAPL", strategyId: "price_change", threshold: "5", intervalSeconds: "300", enabled: true }],
-      notifications: [{ id: "n1", kind: "monitor", symbol: "aapl", name: "Apple", ruleId: "r1", title: "提醒", body: "已触发", severity: "warning", createdAt: "2026-08-29T00:00:00Z", read: false }],
+      notifications: [{ id: "n1", kind: "monitor", symbol: "aapl", name: "Apple", ruleId: "r1", eventKey: "AAPL|2026-09-01|财报", reminderPhase: "upcoming", title: "提醒", body: "已触发", severity: "warning", createdAt: "2026-08-29T00:00:00Z", read: false }],
       portfolioPositions: [{ id: "p1", symbol: "aapl", name: "Apple", quantity: "2", averageCost: "100", takeProfitPrice: "125", stopLossPrice: "80", takeProfitTriggered: true }],
       apiKey: "sk-secret",
       settings: { modelGatewayBaseUrl: "https://secret.example" },
@@ -16,7 +16,7 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw)).toMatchObject({
       watchlist: [{ symbol: "AAPL", name: "Apple" }],
       monitorRules: [{ threshold: 5, intervalSeconds: 300 }],
-      notifications: [{ symbol: "AAPL", name: "Apple", ruleId: "r1" }],
+      notifications: [{ symbol: "AAPL", name: "Apple", ruleId: "r1", eventKey: "AAPL|2026-09-01|财报", reminderPhase: "upcoming" }],
       portfolioPositions: [{ symbol: "AAPL", quantity: 2, averageCost: 100, takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: true, planThesis: "", planActions: [] }],
     });
   });

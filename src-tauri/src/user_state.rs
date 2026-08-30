@@ -9,15 +9,79 @@ const MAX_WATCHLIST: usize = 200;
 const MAX_RULES: usize = 200;
 const MAX_NOTIFICATIONS: usize = 500;
 const MAX_PORTFOLIO_POSITIONS: usize = 200;
+const MAX_MONITOR_HISTORY: usize = 500;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchItem {
     pub symbol: String,
     pub name: String,
     pub market: String,
     pub category: String,
+    pub group: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WatchItemDocument {
+    symbol: String,
+    name: String,
+    market: String,
+    category: String,
+    #[serde(default)]
+    group: Option<String>,
+}
+
+fn watchlist_group_for_market(market: &str) -> &'static str {
+    let value = market.to_uppercase();
+    if value.contains("NASDAQ")
+        || value.contains("NYSE")
+        || value.contains("AMEX")
+        || value.contains("美股")
+        || value == "US"
+    {
+        return "美股";
+    }
+    if value.contains("HKEX") || value.contains("港股") || value.contains("香港") || value == "HK"
+    {
+        return "港股";
+    }
+    if value.contains('沪')
+        || value.contains('深')
+        || value.contains("A股")
+        || value.contains("SH")
+        || value.contains("SS")
+        || value.contains("SZ")
+        || value.contains("BJ")
+    {
+        return "A股";
+    }
+    "自选"
+}
+
+impl<'de> Deserialize<'de> for WatchItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let document = WatchItemDocument::deserialize(deserializer)?;
+        let group = document
+            .group
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| watchlist_group_for_market(&document.market).into());
+        Ok(Self {
+            symbol: document.symbol,
+            name: document.name,
+            market: document.market,
+            category: document.category,
+            group,
+        })
+    }
+}
+
+fn default_logic() -> String {
+    "AND".into()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -31,6 +95,10 @@ pub struct MonitorRule {
     pub enabled: bool,
     pub last_checked_at: Option<String>,
     pub last_triggered_at: Option<String>,
+    #[serde(default)]
+    pub conditions: Vec<serde_json::Value>,
+    #[serde(default = "default_logic")]
+    pub logic: String,
     #[serde(default)]
     pub last_signal_triggered: Option<bool>,
 }
@@ -46,6 +114,26 @@ pub struct Notification {
     pub created_at: String,
     pub read: bool,
     pub source: Option<String>,
+    #[serde(default)]
+    pub symbol: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub rule_id: String,
+    #[serde(default)]
+    pub event_key: String,
+    #[serde(default)]
+    pub reminder_phase: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanAction {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub action_type: String,
+    pub at: String,
+    pub note: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -57,6 +145,60 @@ pub struct PortfolioPosition {
     pub market: String,
     pub quantity: f64,
     pub average_cost: f64,
+    #[serde(default)]
+    pub take_profit_price: Option<f64>,
+    #[serde(default)]
+    pub stop_loss_price: Option<f64>,
+    #[serde(default)]
+    pub take_profit_triggered: bool,
+    #[serde(default)]
+    pub stop_loss_triggered: bool,
+    #[serde(default)]
+    pub plan_thesis: String,
+    #[serde(default)]
+    pub plan_horizon: Option<String>,
+    #[serde(default)]
+    pub plan_status: Option<String>,
+    #[serde(default)]
+    pub plan_created_at: Option<String>,
+    #[serde(default)]
+    pub plan_updated_at: Option<String>,
+    #[serde(default)]
+    pub plan_actions: Vec<PlanAction>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    #[serde(default)]
+    pub operation: String,
+    #[serde(default)]
+    pub outcome: String,
+    #[serde(default)]
+    pub tool_id: String,
+    #[serde(default)]
+    pub capability: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorHistoryEntry {
+    pub id: String,
+    pub rule_id: String,
+    pub symbol: String,
+    pub checked_at: String,
+    pub outcome: String,
+    #[serde(default)]
+    pub triggered: Option<bool>,
+    pub title: String,
+    pub summary: String,
+    pub severity: String,
+    pub source: String,
+    pub as_of: String,
+    #[serde(default)]
+    pub condition_results: Vec<Option<bool>>,
+    #[serde(default)]
+    pub audits: Vec<AuditEntry>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -67,6 +209,8 @@ pub struct UserState {
     pub notifications: Vec<Notification>,
     #[serde(default)]
     pub portfolio_positions: Vec<PortfolioPosition>,
+    #[serde(default)]
+    pub monitor_history: Vec<MonitorHistoryEntry>,
 }
 
 impl Default for UserState {
@@ -78,12 +222,14 @@ impl Default for UserState {
                     name: "贵州茅台".into(),
                     market: "沪深".into(),
                     category: "白酒".into(),
+                    group: "A股".into(),
                 },
                 WatchItem {
                     symbol: "300750".into(),
                     name: "宁德时代".into(),
                     market: "深市".into(),
                     category: "新能源".into(),
+                    group: "A股".into(),
                 },
             ],
             monitor_rules: vec![
@@ -96,6 +242,8 @@ impl Default for UserState {
                     enabled: true,
                     last_checked_at: None,
                     last_triggered_at: None,
+                    conditions: Vec::new(),
+                    logic: default_logic(),
                     last_signal_triggered: None,
                 },
                 MonitorRule {
@@ -107,11 +255,14 @@ impl Default for UserState {
                     enabled: true,
                     last_checked_at: None,
                     last_triggered_at: None,
+                    conditions: Vec::new(),
+                    logic: default_logic(),
                     last_signal_triggered: None,
                 },
             ],
             notifications: Vec::new(),
             portfolio_positions: Vec::new(),
+            monitor_history: Vec::new(),
         }
     }
 }
@@ -135,11 +286,35 @@ fn validate_text(value: &str, label: &str, max: usize) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_optional_text(value: &Option<String>, label: &str, max: usize) -> Result<(), String> {
+    if let Some(value) = value {
+        validate_text_allow_empty(value, label, max)?;
+    }
+    Ok(())
+}
+
+fn validate_text_allow_empty(value: &str, label: &str, max: usize) -> Result<(), String> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    validate_text(value, label, max)
+}
+
+fn validate_optional_price(value: Option<f64>, label: &str) -> Result<(), String> {
+    if let Some(value) = value {
+        if !value.is_finite() || value <= 0.0 || value > 1_000_000_000.0 {
+            return Err(format!("{label} is invalid"));
+        }
+    }
+    Ok(())
+}
+
 pub fn validate(state: &UserState) -> Result<(), String> {
     if state.watchlist.len() > MAX_WATCHLIST
         || state.monitor_rules.len() > MAX_RULES
         || state.notifications.len() > MAX_NOTIFICATIONS
         || state.portfolio_positions.len() > MAX_PORTFOLIO_POSITIONS
+        || state.monitor_history.len() > MAX_MONITOR_HISTORY
     {
         return Err("user state exceeds size limit".into());
     }
@@ -148,11 +323,15 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         validate_text(&item.name, "watchlist name", 128)?;
         validate_text(&item.market, "watchlist market", 64)?;
         validate_text(&item.category, "watchlist category", 64)?;
+        validate_text(&item.group, "watchlist group", 64)?;
     }
     for rule in &state.monitor_rules {
         validate_text(&rule.id, "monitor rule id", 64)?;
         validate_text(&rule.symbol, "monitor rule symbol", 64)?;
         validate_text(&rule.strategy_id, "monitor strategy", 64)?;
+        if rule.conditions.len() > 6 || !matches!(rule.logic.as_str(), "AND" | "OR") {
+            return Err("monitor rule conditions are invalid".into());
+        }
         if !rule.threshold.is_finite()
             || rule.threshold < 0.0
             || rule.threshold > 1_000_000.0
@@ -168,6 +347,25 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         validate_text(&notification.body, "notification body", 4096)?;
         validate_text(&notification.severity, "notification severity", 32)?;
         validate_text(&notification.created_at, "notification timestamp", 64)?;
+        if !notification.symbol.is_empty() {
+            validate_text(&notification.symbol, "notification symbol", 64)?;
+        }
+        if !notification.name.is_empty() {
+            validate_text(&notification.name, "notification name", 128)?;
+        }
+        if !notification.rule_id.is_empty() {
+            validate_text(&notification.rule_id, "notification rule id", 128)?;
+        }
+        if !notification.event_key.is_empty() {
+            validate_text(&notification.event_key, "notification event key", 512)?;
+        }
+        if !notification.reminder_phase.is_empty() {
+            validate_text(
+                &notification.reminder_phase,
+                "notification reminder phase",
+                32,
+            )?;
+        }
     }
     for position in &state.portfolio_positions {
         validate_text(&position.id, "portfolio position id", 64)?;
@@ -182,6 +380,54 @@ pub fn validate(state: &UserState) -> Result<(), String> {
             || position.average_cost > 1_000_000_000.0
         {
             return Err("portfolio position value is invalid".into());
+        }
+        validate_optional_price(position.take_profit_price, "take profit price")?;
+        validate_optional_price(position.stop_loss_price, "stop loss price")?;
+        validate_text_allow_empty(&position.plan_thesis, "portfolio plan thesis", 2_000)?;
+        if let Some(horizon) = &position.plan_horizon {
+            if !matches!(horizon.as_str(), "short" | "swing" | "medium" | "long") {
+                return Err("portfolio plan horizon is invalid".into());
+            }
+        }
+        if let Some(status) = &position.plan_status {
+            if !matches!(status.as_str(), "none" | "active" | "executed" | "archived") {
+                return Err("portfolio plan status is invalid".into());
+            }
+        }
+        validate_optional_text(&position.plan_created_at, "portfolio plan created at", 64)?;
+        validate_optional_text(&position.plan_updated_at, "portfolio plan updated at", 64)?;
+        if position.plan_actions.len() > 20 {
+            return Err("portfolio plan actions exceed size limit".into());
+        }
+        for action in &position.plan_actions {
+            validate_text(&action.id, "portfolio plan action id", 128)?;
+            validate_text(&action.action_type, "portfolio plan action type", 32)?;
+            validate_text(&action.at, "portfolio plan action timestamp", 64)?;
+            validate_text(&action.note, "portfolio plan action note", 512)?;
+        }
+    }
+    if state.monitor_history.len() > MAX_MONITOR_HISTORY {
+        return Err("monitor history exceeds size limit".into());
+    }
+    for entry in &state.monitor_history {
+        validate_text(&entry.id, "monitor history id", 128)?;
+        validate_text(&entry.rule_id, "monitor history rule id", 128)?;
+        validate_text(&entry.symbol, "monitor history symbol", 64)?;
+        validate_text(&entry.checked_at, "monitor history timestamp", 64)?;
+        validate_text(&entry.outcome, "monitor history outcome", 32)?;
+        validate_text(&entry.title, "monitor history title", 256)?;
+        validate_text(&entry.summary, "monitor history summary", 4096)?;
+        validate_text(&entry.severity, "monitor history severity", 32)?;
+        validate_text(&entry.source, "monitor history source", 64)?;
+        validate_text_allow_empty(&entry.as_of, "monitor history as of", 128)?;
+        if entry.condition_results.len() > 6 || entry.audits.len() > 12 {
+            return Err("monitor history details exceed size limit".into());
+        }
+        for audit in &entry.audits {
+            validate_text_allow_empty(&audit.operation, "monitor history audit operation", 64)?;
+            validate_text_allow_empty(&audit.outcome, "monitor history audit outcome", 64)?;
+            validate_text_allow_empty(&audit.tool_id, "monitor history audit tool", 160)?;
+            validate_text_allow_empty(&audit.capability, "monitor history audit capability", 128)?;
         }
     }
     Ok(())
@@ -254,5 +500,75 @@ mod tests {
         let mut state = UserState::default();
         state.monitor_rules[0].threshold = f64::NAN;
         assert!(validate(&state).is_err());
+    }
+
+    #[test]
+    fn rich_state_round_trips_without_dropping_new_fields() {
+        let value = serde_json::json!({
+            "watchlist": [{"symbol": "600519", "name": "贵州茅台", "market": "沪深", "category": "白酒", "group": "核心持仓"}],
+            "monitorRules": [{
+                "id": "r1", "symbol": "600519", "strategyId": "price_change", "threshold": 3.0,
+                "intervalSeconds": 300, "enabled": true, "lastCheckedAt": null, "lastTriggeredAt": null,
+                "conditions": [{"type": "price_change", "operator": "abs_gte", "value": 3}], "logic": "OR",
+                "lastSignalTriggered": true
+            }],
+            "notifications": [{
+                "id": "n1", "kind": "event-reminder", "symbol": "600519", "name": "贵州茅台", "ruleId": "",
+                "eventKey": "600519|2026-09-01|分红|登记日", "reminderPhase": "upcoming", "title": "事件提醒",
+                "body": "还有 7 天", "severity": "info", "createdAt": "2026-08-25T00:00:00Z", "read": false, "source": "data-service"
+            }],
+            "portfolioPositions": [{
+                "id": "p1", "symbol": "600519", "name": "贵州茅台", "market": "沪深", "quantity": 10,
+                "averageCost": 1200, "takeProfitPrice": 1400, "stopLossPrice": 1100,
+                "takeProfitTriggered": false, "stopLossTriggered": true, "planThesis": "验证消费复苏",
+                "planHorizon": "medium", "planStatus": "active", "planCreatedAt": "2026-08-01T00:00:00Z",
+                "planUpdatedAt": "2026-08-20T00:00:00Z", "planActions": [{"id": "a1", "type": "adjusted", "at": "2026-08-20T00:00:00Z", "note": "调整止损"}]
+            }],
+            "monitorHistory": [{
+                "id": "h1", "ruleId": "r1", "symbol": "600519", "checkedAt": "2026-08-29T10:00:00Z",
+                "outcome": "unknown", "triggered": null, "title": "待核实", "summary": "字段不足", "severity": "info",
+                "source": "data-service", "asOf": "2026-08-29", "conditionResults": [null],
+                "audits": [{"operation": "cap-call", "outcome": "success", "toolId": "qveris_finance.mkt_l1_rt", "capability": "MKT.L1.RT"}]
+            }]
+        });
+        let state: UserState =
+            serde_json::from_value(value).expect("rich state should deserialize");
+        assert!(validate(&state).is_ok());
+        assert_eq!(state.watchlist[0].group, "核心持仓");
+        assert_eq!(state.monitor_rules[0].conditions.len(), 1);
+        assert_eq!(state.monitor_rules[0].logic, "OR");
+        assert_eq!(
+            state.notifications[0].event_key,
+            "600519|2026-09-01|分红|登记日"
+        );
+        assert_eq!(state.portfolio_positions[0].take_profit_price, Some(1400.0));
+        assert_eq!(
+            state.portfolio_positions[0].plan_actions[0].action_type,
+            "adjusted"
+        );
+        assert_eq!(
+            state.monitor_history[0].audits[0].tool_id,
+            "qveris_finance.mkt_l1_rt"
+        );
+        let encoded = serde_json::to_value(&state).expect("rich state should serialize");
+        state = serde_json::from_value(encoded).expect("rich state should round trip");
+        assert_eq!(state.monitor_history.len(), 1);
+    }
+
+    #[test]
+    fn legacy_state_gets_safe_defaults_for_new_fields() {
+        let legacy = serde_json::json!({
+            "watchlist": [{"symbol": "600519", "name": "贵州茅台", "market": "沪深", "category": "白酒"}],
+            "monitorRules": [{"id": "r1", "symbol": "600519", "strategyId": "price_change", "threshold": 3.0,
+                "intervalSeconds": 300, "enabled": true, "lastCheckedAt": null, "lastTriggeredAt": null}],
+            "notifications": [], "portfolioPositions": []
+        });
+        let state: UserState =
+            serde_json::from_value(legacy).expect("legacy state should deserialize");
+        assert!(validate(&state).is_ok());
+        assert_eq!(state.watchlist[0].group, "A股");
+        assert!(state.monitor_rules[0].conditions.is_empty());
+        assert_eq!(state.monitor_rules[0].logic, "AND");
+        assert!(state.monitor_history.is_empty());
     }
 }
