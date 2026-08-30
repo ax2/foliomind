@@ -134,6 +134,16 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
   });
 
+  it("records portfolio plan actions and keeps the plan edge auditable", async () => {
+    const saved = await useLabStore.getState().savePortfolioPosition({ symbol: "AAPL", name: "Apple", market: "US", quantity: 2, averageCost: 100, takeProfitPrice: 125, planThesis: "盈利增长", planHorizon: "swing" });
+    expect(saved).toMatchObject({ planStatus: "active", planHorizon: "swing", planActions: [{ type: "created" }] });
+    const executed = await useLabStore.getState().updatePortfolioPlanStatus(saved.id, "executed");
+    expect(executed).toMatchObject({ planStatus: "executed", planActions: [{ type: "executed" }, { type: "created" }] });
+    const reopened = await useLabStore.getState().updatePortfolioPlanStatus(saved.id, "active");
+    expect(reopened.planStatus).toBe("active");
+    expect(reopened.planActions.slice(0, 2).map((action) => action.type)).toEqual(["reopened", "executed"]);
+  });
+
   it("replaces portable user data and clears real-data caches", async () => {
     useLabStore.setState({
       ...initialLabState,

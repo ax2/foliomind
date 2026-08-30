@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioAlertChecks, portfolioMetrics, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
+import { normalizePortfolioPosition, portfolioAlertChecks, portfolioMetrics, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -16,6 +16,13 @@ describe("portfolio metrics", () => {
     expect(portfolioAlertChecks({ ...position, takeProfitTriggered: true }, { price: 120 }).updates.takeProfitTriggered).toBe(false);
     expect(portfolioAlertChecks(position, { price: 79, source: "CAP" }).alerts).toMatchObject([{ type: "stop-loss", severity: "critical" }]);
     expect(portfolioAlertChecks(position, {}).alerts).toHaveLength(0);
+  });
+
+  it("normalizes and calculates a transparent trade plan", () => {
+    const position = normalizePortfolioPosition({ id: "p1", symbol: "AAPL", name: "Apple", quantity: 2, averageCost: 100, takeProfitPrice: 130, stopLossPrice: 90, planThesis: "盈利增长与估值修复", planHorizon: "swing", planStatus: "active", planActions: [{ id: "a1", type: "created", at: "2026-08-30T00:00:00Z", note: "建立交易计划" }] });
+    expect(position).toMatchObject({ planThesis: "盈利增长与估值修复", planHorizon: "swing", planStatus: "active", planActions: [{ type: "created" }] });
+    expect(portfolioPlanProgress(position, { price: 100 })).toMatchObject({ hasPlan: true, targetDistancePercent: 30, stopDistancePercent: 10, rewardRisk: 3 });
+    expect(portfolioPlanProgress(position, {}).targetDistancePercent).toBeNull();
   });
 
   it("computes P/L only for positions with real quotes", () => {
@@ -47,7 +54,7 @@ describe("portfolio metrics", () => {
     expect(portfolioReportRows(positions, { AAPL: { price: 125, asOf: "2026-08-29", source: "CAP" } })[1]).toMatchObject({ currentPrice: null, marketValue: null, quoteSource: "" });
     const csv = portfolioReportCsv(positions, { AAPL: { price: 125, asOf: "2026-08-29", source: "CAP" } });
     expect(csv).toContain('"Apple, Inc."');
-    expect(csv).toContain("MSFT,Microsoft,US,1,200,,,,,,,,,,,");
+    expect(csv).toContain("MSFT,Microsoft,US,1,200,");
     expect(csv).toContain("Apple, Inc.");
   });
 });

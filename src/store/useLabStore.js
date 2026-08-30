@@ -99,6 +99,32 @@ function portfolioAlertNotification(position, alert) {
   };
 }
 
+function hasPortfolioPlan(position) {
+  return Boolean(position?.planThesis || position?.planHorizon || position?.takeProfitPrice != null || position?.stopLossPrice != null);
+}
+
+function appendPortfolioPlanAction(position, type, note = "") {
+  const at = nowIso();
+  const status = type === "executed" ? "executed" : type === "archived" ? "archived" : "active";
+  const defaultNote = type === "executed" ? "用户确认已执行计划" : type === "reopened" ? "重新开启计划跟踪" : type === "created" ? "建立交易计划" : type === "adjusted" ? "调整交易计划参数" : "更新交易计划";
+  return {
+    ...position,
+    planStatus: status,
+    planCreatedAt: position.planCreatedAt || at,
+    planUpdatedAt: at,
+    planActions: [{ id: createId("plan-action"), type, at, note: String(note || defaultNote).slice(0, 512) }, ...(position.planActions || [])].slice(0, 20),
+  };
+}
+
+function portfolioPlanChanged(previous, next) {
+  return Boolean(previous) && (
+    previous.planThesis !== next.planThesis
+    || previous.planHorizon !== next.planHorizon
+    || previous.takeProfitPrice !== next.takeProfitPrice
+    || previous.stopLossPrice !== next.stopLossPrice
+  );
+}
+
 function mergeLiveQuotesWithPortfolio(state, quotes) {
   let portfolioPositions = state.portfolioPositions;
   let notifications = state.notifications;
@@ -623,11 +649,35 @@ export const useLabStore = create((set, get) => ({
     if (!normalized) throw new Error("请输入有效的持仓数量和成本");
     normalized.id = normalized.id || createId("position");
     const current = get().portfolioPositions;
-    const exists = current.some((position) => position.id === normalized.id);
-    const portfolioPositions = exists ? current.map((position) => position.id === normalized.id ? normalized : position) : [...current, normalized];
+    const previous = current.find((position) => position.id === normalized.id) || null;
+    const exists = Boolean(previous);
+    let next = normalized;
+    if (hasPortfolioPlan(normalized)) {
+      next = { ...next, planCreatedAt: previous?.planCreatedAt || normalized.planCreatedAt || nowIso(), planActions: previous?.planActions || normalized.planActions };
+      if (!previous) next = appendPortfolioPlanAction(next, "created", "建立交易计划");
+      else if (portfolioPlanChanged(previous, normalized)) {
+        next = { ...next, takeProfitTriggered: false, stopLossTriggered: false };
+        next = appendPortfolioPlanAction(next, "adjusted", "调整交易计划参数");
+      } else next = { ...next, planStatus: previous.planStatus || "active", planUpdatedAt: previous.planUpdatedAt || null };
+    } else if (previous && hasPortfolioPlan(previous)) {
+      next = appendPortfolioPlanAction({ ...next, planActions: previous.planActions, planCreatedAt: previous.planCreatedAt }, "archived", "清除计划参数");
+      next = { ...next, planThesis: "", planHorizon: null, takeProfitPrice: null, stopLossPrice: null, takeProfitTriggered: false, stopLossTriggered: false };
+    }
+    const portfolioPositions = exists ? current.map((position) => position.id === next.id ? next : position) : [...current, next];
     set({ portfolioPositions });
     await get().persistUserState();
-    return normalized;
+    return next;
+  },
+  updatePortfolioPlanStatus: async (id, status, note = "") => {
+    if (!["active", "executed", "archived"].includes(status)) throw new Error("交易计划状态无效");
+    const current = get().portfolioPositions;
+    const previous = current.find((position) => position.id === id);
+    if (!previous || !hasPortfolioPlan(previous)) return false;
+    const action = status === "executed" ? "executed" : status === "archived" ? "archived" : "reopened";
+    const next = appendPortfolioPlanAction(previous, action, note);
+    set({ portfolioPositions: current.map((position) => position.id === id ? next : position) });
+    await get().persistUserState();
+    return next;
   },
   removePortfolioPosition: async (id) => {
     const portfolioPositions = get().portfolioPositions.filter((position) => position.id !== id);
