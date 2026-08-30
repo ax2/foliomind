@@ -28,7 +28,7 @@ describe("user state backups", () => {
 
   it("bounds and sanitizes imported values", () => {
     const data = userStateBackupData({ watchlist: [{ symbol: " aapl ", name: " Apple " }], portfolioPositions: [{ id: "p", symbol: "aapl", name: "Apple", quantity: 0, averageCost: 10 }] });
-    expect(data.watchlist[0]).toEqual({ symbol: "AAPL", name: "Apple", market: "", category: "" });
+    expect(data.watchlist[0]).toEqual({ symbol: "AAPL", name: "Apple", market: "", category: "", group: "自选" });
     expect(data.portfolioPositions).toEqual([]);
   });
 
@@ -38,6 +38,12 @@ describe("user state backups", () => {
       rules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, logic: "OR", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }, { type: "volume_spike", operator: "gte", value: 2.5 }] }],
     });
     expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ logic: "OR", conditions: [{ type: "price_change", value: 3 }, { type: "volume_spike", value: 2.5 }] });
+  });
+
+  it("round-trips watchlist groups while migrating legacy items", () => {
+    const raw = serializeUserStateBackup({ watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", group: "核心持仓" }] });
+    expect(parseUserStateBackup(raw).watchlist[0]).toMatchObject({ symbol: "600519", group: "核心持仓" });
+    expect(parseUserStateBackup(serializeUserStateBackup({ watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] })).watchlist[0].group).toBe("美股");
   });
 
   it("round-trips monitor audit history without prompts or credentials", () => {

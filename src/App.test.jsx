@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { EventsView, NotificationsView } from "./components/SecondaryViews.jsx";
+import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
@@ -57,6 +58,17 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("heading", { name: /宁德时代/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "5日" }));
     expect(screen.getByRole("button", { name: "5日" })).toHaveClass("active");
+  });
+
+  it("organizes the watchlist by group and keeps empty real quotes honest", () => {
+    render(<WatchlistSidebar />);
+    expect(screen.getByRole("region", { name: "A 股自选" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "美股自选" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "自选分组" }), { target: { value: "美股" } });
+    expect(screen.getByText("Apple Inc.")).toBeInTheDocument();
+    expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "自选排序" }), { target: { value: "change" } });
+    expect(screen.getByRole("button", { name: "切换为降序" })).toBeInTheDocument();
   });
 
   it("opens the real-data research screener with an honest empty state", () => {

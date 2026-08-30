@@ -1,6 +1,7 @@
 import { isDesktopRuntime } from "./piRuntime.js";
 import { isLocalWebRuntime, localHostRequest } from "./localHost.js";
 import { normalizeConditions } from "./monitorConditions.js";
+import { normalizeWatchlistItem } from "./watchlist.js";
 
 const STORAGE_KEY = "foliomind.user-state.v1";
 export const USER_STATE_BACKUP_VERSION = 1;
@@ -15,11 +16,12 @@ const PLAN_HORIZONS = new Set(["short", "swing", "medium", "long"]);
 const PLAN_STATUSES = new Set(["none", "active", "executed", "archived"]);
 
 function sanitizeWatchlist(items) {
-  return (Array.isArray(items) ? items : []).slice(0, 200).map((item) => ({
-    symbol: text(item?.symbol, 64).toUpperCase(),
+  return (Array.isArray(items) ? items : []).slice(0, 200).map((item) => normalizeWatchlistItem({
+    symbol: text(item?.symbol, 64),
     name: text(item?.name, 128),
     market: text(item?.market, 64),
     category: text(item?.category, 64),
+    group: text(item?.group ?? item?.groupId, 64),
   })).filter((item) => item.symbol && item.name);
 }
 

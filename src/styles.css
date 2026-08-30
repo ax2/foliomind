@@ -203,6 +203,49 @@ textarea:focus-visible {
   padding-top: 7px;
   scrollbar-width: thin;
 }
+.watchlist-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 7px 10px 4px;
+  border-bottom: 1px solid #eceef2;
+}
+.watchlist-controls label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.watchlist-controls label span {
+  color: #8b94a1;
+  font-size: 9px;
+}
+.watchlist-controls select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #dfe3e9;
+  border-radius: 6px;
+  padding: 5px 4px;
+  background: #fff;
+  color: #596272;
+  font-size: 10px;
+}
+.watchlist-sort-direction {
+  align-self: end;
+  min-height: 27px;
+  border: 1px solid #dfe3e9;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: #fff;
+  color: #667180;
+  cursor: pointer;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.watchlist-sort-direction:hover,
+.watchlist-controls select:focus-visible {
+  border-color: #9fc5f5;
+  color: var(--blue);
+}
 .watch-groups section + section {
   margin-top: 11px;
 }
@@ -217,6 +260,28 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 600;
 }
+.watch-groups h3 small {
+  min-width: 17px;
+  border-radius: 9px;
+  padding: 2px 5px;
+  background: #e9edf3;
+  color: #87909d;
+  font-size: 9px;
+  font-weight: 500;
+  text-align: center;
+}
+.watchlist-filter-empty {
+  display: grid;
+  gap: 4px;
+  margin: 16px 10px;
+  border: 1px dashed #d9dee7;
+  border-radius: 8px;
+  padding: 12px;
+  color: #697586;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.watchlist-filter-empty strong { color: #4b5563; font-size: 11px; }
 .watch-row {
   border: 0;
   background: transparent;
