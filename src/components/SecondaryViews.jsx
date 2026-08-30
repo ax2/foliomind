@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowsClockwise, Bell, BellRinging, Briefcase, CheckCircle, DownloadSimple, Funnel, Info, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CheckCircle, DownloadSimple, Funnel, Info, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
@@ -222,6 +222,57 @@ export function MonitorView() {
     </section>
     {realDataMode ? <p className="security-note">检查结果会保留在本地审计时间线；缺失字段显示为“待核实”，不会当作未触发。历史记录最多保留 500 条。</p> : null}
     {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card condition-modal" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘条件</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">规则创建分三步：选择标的、组合真实数据条件、设定检查频率。</p><label>标的<select value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label><ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}
+  </div>;
+}
+
+function eventDateLabel(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value || "日期待定") : date.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+function eventDateValue(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? time : null;
+}
+
+export function EventsView() {
+  const watchlist = useLabStore((state) => state.watchlist);
+  const events = useLabStore((state) => state.events);
+  const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const eventDataLoading = useLabStore((state) => state.eventDataLoading);
+  const eventDataError = useLabStore((state) => state.eventDataError);
+  const eventDataLoaded = useLabStore((state) => state.eventDataLoaded);
+  const eventDataLastRefreshAt = useLabStore((state) => state.eventDataLastRefreshAt);
+  const eventDataReceivedCount = useLabStore((state) => state.eventDataReceivedCount);
+  const eventDataTotalCount = useLabStore((state) => state.eventDataTotalCount);
+  const refreshEvents = useLabStore((state) => state.refreshEvents);
+  const retryEvents = useLabStore((state) => state.retryEvents);
+  const setActiveView = useLabStore((state) => state.setActiveView);
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState("upcoming");
+  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  useEffect(() => {
+    if (!eventDataLoaded && !eventDataLoading) void refreshEvents();
+  }, [eventDataLoaded, eventDataLoading, refreshEvents]);
+  const dataState = resolveLiveDataState({ configured: realDataMode, loading: eventDataLoading, error: eventDataError, receivedCount: eventDataReceivedCount, totalCount: eventDataTotalCount || watchlist.length });
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const now = Date.now();
+  const filtered = events.filter((event) => {
+    const eventTime = eventDateValue(event.date);
+    const matchesScope = scope === "all" || (scope === "upcoming" && (eventTime == null || eventTime >= now - 86_400_000)) || (scope === "past" && eventTime != null && eventTime < now - 86_400_000);
+    const haystack = `${event.name} ${event.symbol} ${event.type} ${event.title} ${event.detail}`.toLocaleLowerCase("zh-CN");
+    return matchesScope && (!normalizedQuery || haystack.includes(normalizedQuery));
+  });
+  const retry = () => { void retryEvents(); };
+  const openSettings = () => setActiveView("settings");
+  return <div className="secondary-page events-page"><header><div><h1>事件日历</h1><p>只展示自选标的已返回的真实公司事件，不用样例填充。</p></div><button className="secondary-button" disabled={eventDataLoading} onClick={realDataMode ? () => { void refreshEvents(); } : openSettings}><ArrowsClockwise size={16} />{realDataMode ? eventDataLoading ? "更新中…" : "刷新真实事件" : "配置数据"}</button></header>
+    {dataState === DATA_STATES.NO_CREDENTIAL || dataState === DATA_STATES.LOADING || dataState === DATA_STATES.ERROR ? <LiveDataState state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
+    {dataState === DATA_STATES.PARTIAL ? <LiveDataState compact state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
+    <div className="events-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标的、事件类型或关键词…" aria-label="搜索事件" /></label><div className="filter-group" aria-label="事件范围"><button className={scope === "upcoming" ? "active" : ""} onClick={() => setScope("upcoming")}>未来事件</button><button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>全部</button><button className={scope === "past" ? "active" : ""} onClick={() => setScope("past")}>已发生</button></div></div>
+    {dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length === 0 ? <DataState state="empty" title="未来 90 天暂无已排期事件" description="当前数据渠道没有返回自选标的的公司事件；有新数据时可再次刷新。" actionLabel="立即重试" onAction={retry} /> : null}
+    {dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length > 0 && filtered.length === 0 ? <DataState state="empty" title="没有符合筛选条件的事件" description="调整范围或搜索关键词；原始真实事件不会被修改。" /> : null}
+    {filtered.length > 0 ? <section className="event-calendar-list" aria-label="真实公司事件列表">{filtered.map((event) => <article className="event-calendar-card" key={event.id}><div className="event-calendar-date"><strong>{eventDateLabel(event.date)}</strong><small>{event.symbol}</small></div><div className="event-calendar-dot" aria-hidden="true" /><div className="event-calendar-copy"><div className="event-calendar-heading"><span>{event.type || "公司事件"}</span><strong>{event.name}</strong></div><h2>{event.title || "未命名事件"}</h2>{event.detail && event.detail !== event.title ? <p>{event.detail}</p> : null}<small className="event-calendar-meta">{event.source || "数据服务"}{event.url ? <> · <a href={event.url} target="_blank" rel="noreferrer">查看来源</a></> : null} · 能力 EVENT.CALENDAR.CORP</small></div></article>)}</section> : null}
+    <p className="security-note">数据范围：自选标的 · 公司事件 CAP · {eventDataLastRefreshAt ? `最近刷新 ${new Date(eventDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : "尚未刷新"}；没有事件时保持空状态。</p>
   </div>;
 }
 

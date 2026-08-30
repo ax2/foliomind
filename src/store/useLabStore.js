@@ -21,6 +21,7 @@ let persistenceQueue = Promise.resolve();
 let liveRequestGeneration = 0;
 let detailsRequestGeneration = 0;
 let seriesRequestGeneration = 0;
+let eventsRequestGeneration = 0;
 
 function persistSnapshot(snapshot) {
   persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory }));
@@ -227,6 +228,21 @@ function seriesFromReply(text) {
   return series.filter((point) => point && typeof point === "object");
 }
 
+function eventsFromReply(text) {
+  const value = findJsonObject(text) || {};
+  const source = value?.data && typeof value.data === "object" ? value.data : value?.result && typeof value.result === "object" ? value.result : value;
+  const items = Array.isArray(source.events) ? source.events : Array.isArray(source.data) ? source.data : Array.isArray(source) ? source : [];
+  const fallbackSource = String(source.source || value.source || "数据服务");
+  return items.filter((event) => event && typeof event === "object").map((event) => ({
+    date: String(event.date || event.event_date || event.effective_date || ""),
+    type: String(event.type || event.event_type || "其他"),
+    title: String(event.title || event.description || event.name || ""),
+    detail: String(event.detail || event.description || event.title || ""),
+    source: String(event.source || event.sourceName || fallbackSource),
+    url: String(event.url || ""),
+  })).filter((event) => event.date || event.title);
+}
+
 function liveQuotesFromReply(text, symbols) {
   const value = findJsonObject(text);
   const items = Array.isArray(value?.quotes) ? value.quotes : Array.isArray(value?.data?.quotes) ? value.data.quotes : Array.isArray(value?.result?.quotes) ? value.result.quotes : Array.isArray(value) ? value : [value?.quote, value?.data, value?.result, value].filter(Boolean);
@@ -357,7 +373,7 @@ async function askFinancialData(prompt, kind, symbol, range, options) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], monitorHistory: [], userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -388,8 +404,9 @@ export const useLabStore = create((set, get) => ({
       liveRequestGeneration += 1;
       detailsRequestGeneration += 1;
       seriesRequestGeneration += 1;
+      eventsRequestGeneration += 1;
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })) } : {}) };
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
   refreshLiveData: async () => {
     const state = get();
@@ -515,6 +532,55 @@ export const useLabStore = create((set, get) => ({
     set((current) => ({ quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: false } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
     return get().refreshQuoteSeries(symbol, range);
   },
+  refreshEvents: async () => {
+    const state = get();
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    if (!configured || !state.watchlist.length || state.eventDataLoading || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
+    const requestGeneration = ++eventsRequestGeneration;
+    const total = state.watchlist.length;
+    set({ eventDataLoading: true, eventDataError: "", eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: total });
+    const errors = [];
+    const rows = [];
+    let received = 0;
+    try {
+      await mapWithConcurrency(state.watchlist, resolveLiveQuoteConcurrency(), async (item) => {
+        try {
+          if (requestGeneration !== eventsRequestGeneration) return false;
+          const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）未来 90 天内已排期的公司事件，包括分红、拆股、股东会和财报相关日期。只返回真实数据，不要公告全文，不要编造。严格只返回一个 JSON 对象，不要 Markdown：{"events":[{"date":"YYYY-MM-DD或ISO时间","type":"事件类型","title":"事件标题","detail":"事件说明","source":"数据来源","url":"可选链接"}]}。没有真实事件返回空数组。`;
+          const reply = await askFinancialData(prompt, "core_event", item.symbol, "", { settleTimeoutMs: 60_000 });
+          if (requestGeneration !== eventsRequestGeneration) return false;
+          const itemEvents = eventsFromReply(reply.text).map((event, index) => ({ ...event, id: `${item.symbol}-${event.date || "undated"}-${index}`, symbol: item.symbol, name: item.name, market: item.market, capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" }));
+          rows.push(...itemEvents);
+          received += 1;
+          set({ eventDataReceivedCount: received });
+          return true;
+        } catch (error) {
+          if (requestGeneration !== eventsRequestGeneration) return false;
+          errors.push(`${item.name}：${friendlyDataMessage(error)}`);
+          return false;
+        }
+      });
+      if (requestGeneration !== eventsRequestGeneration) return false;
+      const unique = [...new Map(rows.map((event) => [`${event.symbol}|${event.date}|${event.type}|${event.title}`, event])).values()];
+      unique.sort((left, right) => {
+        const leftTime = Date.parse(left.date);
+        const rightTime = Date.parse(right.date);
+        if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+        return String(left.date).localeCompare(String(right.date));
+      });
+      set({ events: unique, eventDataLoading: false, eventDataLoaded: true, eventDataReceivedCount: received, eventDataTotalCount: total, eventDataError: errors.length ? "部分标的事件暂未更新，系统会稍后自动重试" : "", eventDataLastRefreshAt: nowIso() });
+      return received > 0;
+    } catch (error) {
+      if (requestGeneration !== eventsRequestGeneration) return false;
+      set({ events: [], eventDataLoading: false, eventDataLoaded: true, eventDataReceivedCount: received, eventDataTotalCount: total, eventDataError: friendlyDataMessage(error), eventDataLastRefreshAt: nowIso() });
+      return false;
+    }
+  },
+  retryEvents: async () => {
+    if (get().eventDataLoading) return false;
+    set({ eventDataError: "", eventDataLoaded: false });
+    return get().refreshEvents();
+  },
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
   setChartRange: (chartRange) => set({ chartRange }),
@@ -538,8 +604,9 @@ export const useLabStore = create((set, get) => ({
     liveRequestGeneration += 1;
     detailsRequestGeneration += 1;
     seriesRequestGeneration += 1;
+    eventsRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
-    set({ watchlist, rules, notifications, portfolioPositions, monitorHistory, selectedSymbol, ...quoteRefreshReset, userStateLoaded: true });
+    set({ watchlist, rules, notifications, portfolioPositions, monitorHistory, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
     await get().persistUserState();
     return true;
   },

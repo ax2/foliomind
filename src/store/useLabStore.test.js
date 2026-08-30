@@ -239,6 +239,32 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "triggered", triggered: true, conditionResults: [true], asOf: "2026-08-29" });
   });
 
+  it("loads real company events for the watchlist with truthful empty results", async () => {
+    const watchlist = [
+      { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },
+      { symbol: "AAPL", name: "Apple Inc.", market: "NASDAQ", category: "科技" },
+    ];
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist,
+    });
+    runtime.queryCachedData.mockImplementation(async ({ kind, symbol }) => {
+      expect(kind).toBe("core_event");
+      if (symbol === "600519.SH") {
+        return { data: { events: [{ date: "2026-09-01", event_type: "分红", description: "分红登记日" }], source: "真实事件源" }, mode: "qveris-cap", audits: [] };
+      }
+      return { data: { events: [], source: "真实事件源" }, mode: "qveris-cap", audits: [] };
+    });
+
+    await expect(useLabStore.getState().refreshEvents()).resolves.toBe(true);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(runtime.queryCachedData).toHaveBeenCalledTimes(2);
+    expect(useLabStore.getState()).toMatchObject({ eventDataLoaded: true, eventDataReceivedCount: 2, eventDataTotalCount: 2, eventDataError: "" });
+    expect(useLabStore.getState().events).toHaveLength(1);
+    expect(useLabStore.getState().events[0]).toMatchObject({ symbol: "600519", type: "分红", title: "分红登记日", source: "真实事件源", capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" });
+  });
+
   it("does not turn an unavailable event response into a false signal", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
