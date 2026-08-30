@@ -9,6 +9,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 
 - 自选股分组、分组筛选与按名称/最新价/涨跌幅排序；缺失行情始终保持为空；支持 FolioMind CSV/TradingView 风格 TXT 的批量导入导出。
 - 投资组合持仓、成本、市值、未实现盈亏与行情覆盖率。
+- 组合盘后复盘快照：保存真实行情覆盖、组合盈亏、风险信号和未来 7 天已返回事件，可展开回顾并随本地备份迁移。
 - 持仓可选配置止盈/止损价；真实行情到价后按边沿去重生成站内/系统提醒，不执行自动交易。
 - 持仓可建立交易计划档案（买入逻辑、计划周期、目标/止损价），支持执行/重新跟踪、操作留痕和真实价格距离提示。
 - 个股盯盘规则、事件时间线和开关状态。
@@ -123,10 +124,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.52`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode 与 current-user 安装模式，同一产品更新时直接覆盖升级，不要求用户先手动卸载或重复确认；配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.53`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode 与 current-user 安装模式，同一产品更新时直接覆盖升级，不要求用户先手动卸载或重复确认；配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.52 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.53 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

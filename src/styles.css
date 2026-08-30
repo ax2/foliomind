@@ -1633,6 +1633,27 @@ textarea:focus-visible {
 .plan-metrics article { display: grid; gap: 5px; border: 1px solid #edf0f4; border-radius: 8px; padding: 10px 12px; background: #fbfcfe; }
 .plan-metrics span, .plan-metrics small { color: var(--muted); font-size: 10px; }
 .plan-metrics strong { color: #263346; font-size: 19px; font-variant-numeric: tabular-nums; }
+.portfolio-review-overview { margin-top: 24px; border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: #fff; }
+.portfolio-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.portfolio-review-heading h2 { margin: 0; color: #273449; font-size: 15px; }
+.portfolio-review-heading small, .portfolio-review-heading > span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.portfolio-review-notice { margin: 12px 0 0; border-radius: 7px; padding: 9px 11px; background: #eef6ff; color: #42688e; font-size: 10px; }
+.portfolio-review-list { display: grid; gap: 10px; margin-top: 14px; }
+.portfolio-review-card { overflow: hidden; border: 1px solid #e5e9ef; border-radius: 9px; background: #fbfcfe; }
+.portfolio-review-card summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 12px 14px; cursor: pointer; list-style-position: inside; }
+.portfolio-review-card summary > div { display: grid; gap: 4px; min-width: 0; }
+.portfolio-review-card summary > div:last-child { justify-items: end; font-variant-numeric: tabular-nums; }
+.portfolio-review-card summary strong { color: #273449; font-size: 12px; }
+.portfolio-review-card summary small { overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
+.portfolio-review-body { display: grid; gap: 13px; border-top: 1px solid #e5e9ef; padding: 14px; }
+.portfolio-review-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.portfolio-review-metrics article { display: grid; gap: 4px; border-radius: 7px; padding: 10px; background: #fff; }
+.portfolio-review-metrics span, .portfolio-review-metrics small { color: var(--muted); font-size: 10px; }
+.portfolio-review-metrics strong { color: #273449; font-size: 13px; }
+.portfolio-review-section { display: grid; gap: 5px; }
+.portfolio-review-section > strong { color: #37465b; font-size: 11px; }
+.portfolio-review-section p, .portfolio-review-empty, .portfolio-review-sources { margin: 0; color: #5f6977; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.portfolio-review-sources { border-top: 1px solid #edf0f4; padding-top: 10px; color: var(--muted); }
 .portfolio-plan-status { color: #6c7786 !important; font-weight: 600; }
 .portfolio-plan-status.active { color: #3573bf !important; }
 .portfolio-plan-status.executed { color: #25815e !important; }
@@ -1809,6 +1830,10 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
   .portfolio-summary { grid-template-columns: 1fr; }
+  .portfolio-review-heading { flex-direction: column; gap: 4px; }
+  .portfolio-review-card summary { grid-template-columns: minmax(0, 1fr); }
+  .portfolio-review-card summary > div:last-child { justify-items: start; }
+  .portfolio-review-metrics { grid-template-columns: 1fr; }
   .condition-builder-heading { flex-direction: column; }
   .condition-builder-heading label, .condition-builder-heading select { width: 100%; }
   .condition-row { grid-template-columns: 1fr 1fr 28px; }

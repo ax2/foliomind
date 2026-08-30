@@ -199,6 +199,21 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByText(/已执行/).length).toBeGreaterThan(0);
   });
 
+  it("creates and expands a source-backed portfolio close review", async () => {
+    render(<App />);
+    await waitFor(() => expect(useLabStore.getState().userStateLoaded).toBe(true));
+    act(() => useLabStore.setState({
+      portfolioPositions: [{ id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100, planActions: [] }],
+      liveQuotes: { AAPL: { price: 120, asOf: "2026-08-30T08:00:00Z", source: "provider" } },
+      events: [],
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "组合" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成复盘" }));
+    expect(await screen.findByText(/仅使用 1\/1 个持仓的真实行情/)).toBeInTheDocument();
+    fireEvent.click(document.querySelector(".portfolio-review-card summary"));
+    expect(screen.getByText("来源：provider · 本复盘仅整理已返回的真实数据，不构成投资建议或交易指令。")).toBeInTheDocument();
+  });
+
   it("does not show sample monitor signals without a real data connection", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));

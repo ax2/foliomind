@@ -10,6 +10,7 @@ import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfol
 import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { normalizeWatchlistItem } from "../lib/watchlist.js";
+import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -26,7 +27,7 @@ let seriesRequestGeneration = 0;
 let eventsRequestGeneration = 0;
 
 function persistSnapshot(snapshot) {
-  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory }));
+  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews }));
   return persistenceQueue;
 }
 function nowIso() { return new Date().toISOString(); }
@@ -422,7 +423,7 @@ async function fetchLiveQuote(item, options = {}) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -644,7 +645,7 @@ export const useLabStore = create((set, get) => ({
   hydrateUserState: async () => {
     try {
       const persisted = await loadUserState();
-      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
+      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, portfolioReviews: Array.isArray(persisted.portfolioReviews) ? persisted.portfolioReviews.slice(0, 90) : state.portfolioReviews, monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
       else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
     } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
@@ -656,13 +657,14 @@ export const useLabStore = create((set, get) => ({
     const rules = Array.isArray(snapshot.monitorRules) ? snapshot.monitorRules.map(normalizeRule) : [];
     const notifications = Array.isArray(snapshot.notifications) ? snapshot.notifications : [];
     const portfolioPositions = Array.isArray(snapshot.portfolioPositions) ? snapshot.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : [];
+    const portfolioReviews = Array.isArray(snapshot.portfolioReviews) ? snapshot.portfolioReviews.slice(0, 90) : [];
     const monitorHistory = Array.isArray(snapshot.monitorHistory) ? snapshot.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : [];
     liveRequestGeneration += 1;
     detailsRequestGeneration += 1;
     seriesRequestGeneration += 1;
     eventsRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
-    set({ watchlist, rules, notifications, portfolioPositions, monitorHistory, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
+    set({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, monitorHistory, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
     await get().persistUserState();
     return true;
   },
@@ -731,6 +733,20 @@ export const useLabStore = create((set, get) => ({
     const portfolioPositions = get().portfolioPositions.filter((position) => position.id !== id);
     if (portfolioPositions.length === get().portfolioPositions.length) return false;
     set({ portfolioPositions });
+    await get().persistUserState();
+    return true;
+  },
+  createPortfolioReview: async () => {
+    const state = get();
+    const review = createPortfolioReviewSnapshot({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, events: state.events, createdAt: nowIso(), id: createId("portfolio-review") });
+    set({ portfolioReviews: [review, ...state.portfolioReviews].slice(0, 90) });
+    await get().persistUserState();
+    return review;
+  },
+  removePortfolioReview: async (id) => {
+    const portfolioReviews = get().portfolioReviews.filter((review) => review.id !== id);
+    if (portfolioReviews.length === get().portfolioReviews.length) return false;
+    set({ portfolioReviews });
     await get().persistUserState();
     return true;
   },

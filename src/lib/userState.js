@@ -26,7 +26,7 @@ export function parseUserStateBackup(raw) {
     throw new Error("备份文件版本不受支持");
   }
   const data = userStateBackupData(value.data);
-  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length) {
+  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length && !data.portfolioReviews.length) {
     throw new Error("备份文件中没有可恢复的数据");
   }
   return data;
