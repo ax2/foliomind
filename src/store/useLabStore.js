@@ -81,7 +81,7 @@ function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
   const body = String(result.summary || result.body || reply.text || "检查完成，请打开对话查看完整的来源与审计记录。").trim();
   const dataServiceMode = ["pi-rpc", "pi-local-host", "standalone-dev-host"].includes(reply.mode);
-  return { id: createId("notification"), kind: "monitor", title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: dataServiceMode ? "data-service" : "browser-demo" };
+  return { id: createId("notification"), kind: "monitor", symbol: String(item?.symbol || rule.symbol || ""), name: String(item?.name || ""), ruleId: String(rule.id || ""), title: String(result.title || `${item?.name || rule.symbol} · ${strategy.name}`), body: body.slice(0, 4096), severity: ["info", "warning", "critical"].includes(result.severity) ? result.severity : "info", createdAt: nowIso(), read: false, source: dataServiceMode ? "data-service" : "browser-demo" };
 }
 
 function portfolioAlertNotification(position, alert) {
@@ -91,6 +91,8 @@ function portfolioAlertNotification(position, alert) {
   return {
     id: createId("portfolio-alert"),
     kind: "portfolio-alert",
+    symbol: String(position.symbol || ""),
+    name: String(position.name || ""),
     title: `${position.name} · ${alert.label}价已到达`,
     body: `${alert.label}价 ${target}，当前真实价格 ${price}；数据截至 ${asOf}，来源 ${alert.source}。请结合自己的交易计划判断，不构成投资建议。`,
     severity: alert.severity,
@@ -778,7 +780,7 @@ export const useLabStore = create((set, get) => ({
       const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试");
       const checkedAt = nowIso();
       const historyEntry = monitorHistoryFromResult(rule, item, { title: `${item?.name || rule.symbol} · 暂未完成检查`, summary: message, severity: "warning" }, { mode: "pi-local-host", audits: [] }, checkedAt, null, "error");
-      set((state) => ({ monitorBusy: false, monitorHistory: [historyEntry, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY), notifications: [{ id: createId("notification"), kind: "monitor", title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: checkedAt, read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
+      set((state) => ({ monitorBusy: false, monitorHistory: [historyEntry, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY), notifications: [{ id: createId("notification"), kind: "monitor", symbol: String(item?.symbol || rule.symbol || ""), name: String(item?.name || ""), ruleId: String(rule.id || ""), title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: checkedAt, read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
     }
   },
   runDueMonitorChecks: async () => {

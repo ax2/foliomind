@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
-import { EventsView } from "./components/SecondaryViews.jsx";
+import { EventsView, NotificationsView } from "./components/SecondaryViews.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
@@ -82,6 +82,25 @@ describe("FolioMind core flows", () => {
     expect(refreshEvents).not.toHaveBeenCalled();
     act(() => useLabStore.setState({ liveDataLoading: false }));
     await waitFor(() => expect(refreshEvents).toHaveBeenCalledOnce());
+  });
+
+  it("filters notifications and links a message back to its symbol", () => {
+    useLabStore.setState({
+      activeView: "notifications",
+      notifications: [
+        { id: "n-monitor", kind: "monitor", symbol: "300750", name: "宁德时代", title: "宁德时代 · 突破提醒", body: "真实数据触发条件", severity: "warning", createdAt: "2026-08-30T08:00:00Z", read: false, source: "data-service" },
+        { id: "n-portfolio", kind: "portfolio-alert", symbol: "600519", name: "贵州茅台", title: "贵州茅台 · 止盈价已到达", body: "当前真实价格", severity: "critical", createdAt: "2026-08-30T07:00:00Z", read: true, source: "data-service" },
+      ],
+    });
+    render(<NotificationsView />);
+    expect(screen.getByLabelText("1 条未读消息")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "未读" }));
+    expect(screen.getByText("宁德时代 · 突破提醒")).toBeInTheDocument();
+    expect(screen.queryByText("贵州茅台 · 止盈价已到达")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看标的" }));
+    expect(useLabStore.getState().selectedSymbol).toBe("300750");
+    expect(useLabStore.getState().activeView).toBe("watchlist");
+    expect(useLabStore.getState().notifications[0].read).toBe(true);
   });
 
   it("opens Skills and toggles install state", () => {
