@@ -1,6 +1,6 @@
 {
   "name": "foliomind",
-  "version": "0.1.50",
+  "version": "0.1.51",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "desktop:dev": "npm run fetch:pi && npm run fetch:bash && tauri dev",
     "desktop:build": "npm run fetch:pi && npm run fetch:bash && tauri build",
     "audit:security": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
+    "review:architecture": "node scripts/architecture-review.mjs",
     "test": "vitest run && node --test packages/qveris-bridge/index.test.mjs scripts/local-host.test.mjs",
     "test:watch": "vitest",
     "test:sites": "node --test tests/sites-worker.test.mjs"
