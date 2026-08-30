@@ -58,6 +58,8 @@ Runtime 启动前由 Host 在同一把状态锁内完成 `Stopped/Crashed → St
 
 ## 进程与信任边界
 
+真实 CAP 结果在 Web Host 内仅做进程内短时复用：行情 15 秒、序列/资金流/新闻 60 秒、公司资料/事件 5 分钟。缓存键包含数据类型、完整参数、provider 和渠道地址，凭证或设置变化时清空；不写入用户状态或工具选择文件，也不跨渠道复用。明确失败的 CAP envelope（`success=false` 或 `status_code >= 400`）在归一化阶段即被拒绝，前端只能看到空态或友好重试。能力目录元数据仅在实际变化时写盘，开发面板记录 `cap-cache-hit` 与上游调用耗时，便于定位慢请求而不泄露原始响应。
+
 ```text
 WebView (untrusted presentation)
   └─ Tauri command allowlist
