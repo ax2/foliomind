@@ -9,6 +9,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 
 - 自选股分组、标的切换、分时行情与关键指标。
 - 投资组合持仓、成本、市值、未实现盈亏与行情覆盖率。
+- 持仓可选配置止盈/止损价；真实行情到价后按边沿去重生成站内/系统提醒，不执行自动交易。
 - 个股盯盘规则、事件时间线和开关状态。
 - 盯盘告警按触发边沿去重：条件持续成立时不重复刷屏，恢复后再次触发才生成新消息。
 - 盯盘消息支持可选的系统通知；用户主动授权后，桌面端和 localhost 调试页可在站内消息之外收到提醒。
@@ -78,7 +79,7 @@ npm run web:dev
 
 浏览器打开终端打印的 Web 地址（默认 `http://127.0.0.1:5173`；端口被占用时会自动递增并打印新的地址）后，设置页会显示“本地开发 Host”。Dev Host 与桌面端共享同一套 Host HTTP 协议，并直接代理模型、Search → Inspect → Call 和对话，因此修改前端或 Host 逻辑后刷新页面即可验证，不需要重新安装桌面包。API Key 保存在用户配置目录下权限为 `0600` 的文件中，浏览器只持有当前标签页的短期会话令牌。
 
-本地 Web Host 会把 `qveris_finance` CAP 的 tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到用户配置目录的 `tool-selection-cache.json`。行情、基本面和历史序列优先直连 CAP；能力不可用时再回退到一次 Search → Inspect → Call。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待。价格异动盯盘也复用 CAP 行情工具，避免每次检查重新调用模型编排；自选行情默认以 2 路受限并发请求。行情轮询会感知浏览器可见性。localhost 页面和桌面端右下角的“开发者面板”均可查看运行时、API Key 前缀、模型/CAP 调用日志、耗时和能力目录；密钥与原始提示词不会记录。
+本地 Web Host 会把 `qveris_finance` CAP 的 tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到用户配置目录的 `tool-selection-cache.json`。行情、基本面和历史序列优先直连 CAP；能力不可用时再回退到一次 Search → Inspect → Call。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待。固化工具只有收到明确的工具失效/不存在响应才会清除，瞬时限流、服务端错误和网络抖动会保留缓存。运行时同一时间只接受一轮对话请求，重复提交返回可识别的忙碌状态，不会互相覆盖取消控制器。价格异动盯盘也复用 CAP 行情工具，避免每次检查重新调用模型编排；自选行情默认以 2 路受限并发请求。行情轮询会感知浏览器可见性。localhost 页面和桌面端右下角的“开发者面板”均可查看运行时、API Key 前缀、模型/CAP 调用日志、耗时和能力目录；密钥与原始提示词不会记录。
 
 如需验证真实 Tauri 窗口，再使用 `npm run desktop:dev`；这不是 Web 调试的前置条件。
 
@@ -117,10 +118,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.36`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode 与 current-user 安装模式，更新时覆盖应用文件而不是要求用户手动卸载；配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.37`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode 与 current-user 安装模式，更新时覆盖应用文件而不是要求用户手动卸载；配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.36 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.37 -f prerelease=false
 ```
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。

@@ -32,7 +32,6 @@ const defaultState = {
 };
 
 let runtimeState = "stopped";
-let activeAbort = null;
 const devLogs = [];
 const devVariables = {
   toolCacheEnabled: true,
@@ -40,6 +39,25 @@ const devVariables = {
   maxConcurrentDataRequests: DEFAULT_MAX_CONCURRENT_DATA_REQUESTS,
   logLevel: "info",
 };
+
+/** Keep one prompt request associated with one AbortController at a time. */
+export function createRuntimeGate() {
+  let active = null;
+  return {
+    acquire(controller) {
+      if (active) return false;
+      active = controller;
+      return true;
+    },
+    current() { return active; },
+    release(controller) {
+      if (active === controller) active = null;
+    },
+    abort(reason) { active?.abort(reason); },
+  };
+}
+
+const runtimeGate = createRuntimeGate();
 
 function redact(value) {
   return String(value || "")
@@ -151,6 +169,16 @@ function capabilityData(result) {
   return result?.result?.data ?? result?.data ?? result?.result ?? result;
 }
 
+function latestDataTimestamp(points) {
+  const values = points.map((point) => String(point?.date || point?.time || point?.timestamp || "")).filter(Boolean);
+  return values.sort((left, right) => {
+    const leftTime = Date.parse(left);
+    const rightTime = Date.parse(right);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+    return left.localeCompare(right);
+  }).at(-1) || null;
+}
+
 export function normalizeCapabilityResult(kind, input, result) {
   const data = capabilityData(result);
   const meta = result?.result?._meta || result?._meta || {};
@@ -165,7 +193,7 @@ export function normalizeCapabilityResult(kind, input, result) {
   }
   if (kind === "series") {
     const points = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-    return { series: points.map((point) => ({ ...point, time: point.time || point.date, value: point.value ?? point.close })).filter((point) => point.time || point.date), source, capability: "MKT.BARS.EOD", asOf: points[0]?.date || null };
+    return { series: points.map((point) => ({ ...point, time: point.time || point.date, value: point.value ?? point.close })).filter((point) => point.time || point.date), source, capability: "MKT.BARS.EOD", asOf: latestDataTimestamp(points) };
   }
   if (kind === "core_event") {
     const events = Array.isArray(data) ? data : Array.isArray(data?.events) ? data.events : Array.isArray(data?.data) ? data.data : [];
@@ -307,11 +335,26 @@ async function upstream(url, options = {}, signal) {
   if (!response.ok) {
     const error = new Error(`上游请求失败（HTTP ${response.status}）`);
     error.status = response.status;
+    const upstreamError = body?.error && typeof body.error === "object" ? body.error : body;
+    const upstreamCode = upstreamError?.code || upstreamError?.error_code || body?.code;
+    if (upstreamCode) error.upstreamCode = String(upstreamCode);
     const retryAfter = response.headers.get("retry-after");
     if (retryAfter && /^\d+(?:\.\d+)?$/.test(retryAfter.trim())) error.retryAfterMs = Math.min(30_000, Number(retryAfter) * 1_000);
     throw error;
   }
   return body;
+}
+
+/**
+ * A cached tool should only be evicted when the provider explicitly says the
+ * selection is no longer valid.  Transient 429/5xx/network failures must not
+ * force every subsequent request through Search → Inspect again.
+ */
+export function shouldInvalidateToolCache(error) {
+  const status = Number(error?.status);
+  if ([404, 410].includes(status)) return true;
+  const code = String(error?.code || error?.upstreamCode || "").toLowerCase();
+  return /(tool|capability)[ _-]?(not[ _-]?found|invalid|expired|removed|unavailable)/.test(code);
 }
 export function isRetryableUpstreamStatus(status) {
   return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
@@ -438,8 +481,14 @@ async function queryCachedData(input, settings, key, signal) {
   try {
     result = await qverisOperation("call", { search_id: entry.searchId, tool_id: entry.toolId, parameters: adaptParameters(entry.parameters, input.symbol, input.range) }, settings, key, runId, phases, signal);
   } catch (error) {
-    delete cache[cacheKey(kind, settings)];
-    await writeToolCache(cache);
+    if (signal?.aborted) throw error;
+    if (shouldInvalidateToolCache(error)) {
+      delete cache[cacheKey(kind, settings)];
+      await writeToolCache(cache);
+      logInvocation({ type: "cache", operation: "evict", kind, toolId: entry.toolId, status: Number(error.status) || 502, detail: error.message });
+    } else {
+      logInvocation({ type: "cache", operation: "retain", kind, toolId: entry.toolId, status: Number(error.status) || 502, detail: error.message });
+    }
     throw error;
   }
   entry.lastUsedAt = new Date().toISOString();
@@ -481,6 +530,7 @@ async function runPromptAgent(message, settings, key, signal) {
           messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
         } catch (error) {
           audits.push({ operation: "cached-call", runId, toolCallId: call.id || randomUUID(), outcome: "error", detail: "cache-miss" });
+          if (signal?.aborted) throw error;
           try {
             const cachedResult = await queryCachedData(input, settings, key, signal);
             messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
@@ -533,7 +583,7 @@ async function route(req, body) {
   if (method === "GET" && path === "/api/dev/overview") {
     const settings = await readJson(settingsFile, defaultSettings); const key = await readKey();
     const cache = await readToolCache();
-    return { logs: devLogs.slice(-200), state: { runtimeState, activeRequest: Boolean(activeAbort), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings) }, variables: { ...devVariables } };
+    return { logs: devLogs.slice(-200), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings) }, variables: { ...devVariables } };
   }
   if (method === "DELETE" && path === "/api/dev/logs") { devLogs.length = 0; return { cleared: true }; }
   if (method === "PATCH" && path === "/api/dev/variables") {
@@ -553,6 +603,7 @@ async function route(req, body) {
       const result = await queryDirectCapability(input, settings, key, controller.signal);
       return { ...result, audits: [{ operation: "cap-call", outcome: "success", toolId: result.toolId, capability: result.capability }] };
     } catch (directError) {
+      if (controller.signal.aborted) throw directError;
       logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
       const result = await queryCachedData(input, settings, key, controller.signal);
       return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] };
@@ -563,21 +614,34 @@ async function route(req, body) {
   if (method === "POST" && path === "/api/user-state") { await atomicJson(stateFile, body.state || defaultState); return body.state || defaultState; }
   if (method === "GET" && path === "/api/runtime/status") return { state: runtimeState, pid: process.pid, detail: null };
   if (method === "POST" && path === "/api/runtime/start") { runtimeState = "running"; return { state: runtimeState, pid: process.pid, detail: null }; }
-  if (method === "POST" && path === "/api/runtime/stop") { runtimeState = "stopped"; activeAbort?.abort(); activeAbort = null; return { state: runtimeState, pid: null, detail: null }; }
-  if (method === "POST" && path === "/api/runtime/abort") { activeAbort?.abort(new Error("aborted")); return { success: true }; }
+  if (method === "POST" && path === "/api/runtime/stop") { runtimeState = "stopped"; runtimeGate.abort(); return { state: runtimeState, pid: null, detail: null }; }
+  if (method === "POST" && path === "/api/runtime/abort") { runtimeGate.abort(new Error("aborted")); return { success: true }; }
   if (method === "POST" && path === "/api/runtime/prompt") {
     if (typeof body.message !== "string" || !body.message.trim()) throw new Error("分析问题不能为空");
-    const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
-    const settings = await readJson(settingsFile, defaultSettings); runtimeState = "running"; activeAbort = new AbortController();
-    const timeoutMs = Math.max(5_000, Math.min(180_000, Number(body.timeoutMs) || devVariables.requestTimeoutMs));
-    const timeout = setTimeout(() => activeAbort?.abort(new Error("timeout")), timeoutMs);
-    try { return { ...(await promptAgent(body.message.trim(), settings, key, activeAbort.signal)), mode: "standalone-dev-host" }; }
+    const controller = new AbortController();
+    if (!runtimeGate.acquire(controller)) {
+      const error = new Error("当前已有一轮分析正在运行，请等待完成或先取消");
+      error.status = 409;
+      error.code = "RUNTIME_BUSY";
+      throw error;
+    }
+    runtimeState = "running";
+    let timeout;
+    try {
+      const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
+      const settings = await readJson(settingsFile, defaultSettings);
+      const timeoutMs = Math.max(5_000, Math.min(180_000, Number(body.timeoutMs) || devVariables.requestTimeoutMs));
+      timeout = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+      return { ...(await promptAgent(body.message.trim(), settings, key, controller.signal)), mode: "standalone-dev-host" };
+    }
     finally {
-      clearTimeout(timeout);
-      activeAbort = null;
-      // A completed (or failed) request must release the runtime lock so the
-      // next browser prompt can start without requiring a host restart.
-      runtimeState = "stopped";
+      if (timeout) clearTimeout(timeout);
+      if (runtimeGate.current() === controller) {
+        runtimeGate.release(controller);
+        // A completed (or failed) request must release the runtime lock so the
+        // next browser prompt can start without requiring a host restart.
+        runtimeState = "stopped";
+      }
     }
   }
   const error = new Error("route not found"); error.status = 404; throw error;

@@ -58,6 +58,25 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveDataError).toBe("");
   });
 
+  it("creates edge-triggered portfolio price alerts from real quotes", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+      portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000, takeProfitPrice: 1200, stopLossPrice: 800, takeProfitTriggered: false, stopLossTriggered: false }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(useLabStore.getState().portfolioPositions[0].takeProfitTriggered).toBe(true);
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+    expect(useLabStore.getState().notifications[0]).toMatchObject({ kind: "portfolio-alert", severity: "warning", source: "data-service" });
+    expect(useLabStore.getState().notifications[0].body).toContain("不构成投资建议");
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+  });
+
   it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },
