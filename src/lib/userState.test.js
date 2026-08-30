@@ -16,7 +16,7 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw)).toMatchObject({
       watchlist: [{ symbol: "AAPL", name: "Apple" }],
       monitorRules: [{ threshold: 5, intervalSeconds: 300 }],
-      portfolioPositions: [{ symbol: "AAPL", quantity: 2, averageCost: 100, takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: true }],
+      portfolioPositions: [{ symbol: "AAPL", quantity: 2, averageCost: 100, takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: true, planThesis: "", planActions: [] }],
     });
   });
 

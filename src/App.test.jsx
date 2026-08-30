@@ -121,6 +121,26 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByText("等待真实行情").length).toBeGreaterThan(0);
   });
 
+  it("records a trade plan and lets the user mark it executed", async () => {
+    window.localStorage.clear();
+    render(<App />);
+    await waitFor(() => expect(useLabStore.getState().userStateLoaded).toBe(true));
+    act(() => useLabStore.setState({ portfolioPositions: [] }));
+    fireEvent.click(screen.getByRole("button", { name: "组合" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加第一笔持仓" }));
+    fireEvent.change(screen.getByLabelText("持仓数量"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("平均成本"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("止盈价"), { target: { value: "125" } });
+    fireEvent.change(screen.getByLabelText("止损价"), { target: { value: "90" } });
+    fireEvent.change(screen.getByLabelText("买入逻辑"), { target: { value: "盈利增长" } });
+    fireEvent.change(screen.getByLabelText("计划周期"), { target: { value: "swing" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存持仓" }));
+    await waitFor(() => expect(useLabStore.getState().portfolioPositions[0]).toMatchObject({ planThesis: "盈利增长", planStatus: "active" }));
+    fireEvent.click(screen.getByRole("button", { name: /标记.*计划已执行/ }));
+    await waitFor(() => expect(useLabStore.getState().portfolioPositions[0]).toMatchObject({ planStatus: "executed" }));
+    expect(screen.getAllByText(/已执行/).length).toBeGreaterThan(0);
+  });
+
   it("does not show sample monitor signals without a real data connection", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));

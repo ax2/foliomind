@@ -11,6 +11,8 @@ const finiteNumber = (value) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 };
+const PLAN_HORIZONS = new Set(["short", "swing", "medium", "long"]);
+const PLAN_STATUSES = new Set(["none", "active", "executed", "archived"]);
 
 function sanitizeWatchlist(items) {
   return (Array.isArray(items) ? items : []).slice(0, 200).map((item) => ({
@@ -62,6 +64,17 @@ function sanitizePositions(items) {
     stopLossPrice: finiteNumber(item?.stopLossPrice ?? item?.stop_loss_price),
     takeProfitTriggered: item?.takeProfitTriggered === true,
     stopLossTriggered: item?.stopLossTriggered === true,
+    planThesis: text(item?.planThesis ?? item?.plan_thesis, 2_000),
+    planHorizon: PLAN_HORIZONS.has(String(item?.planHorizon ?? item?.plan_horizon ?? "")) ? String(item?.planHorizon ?? item?.plan_horizon) : null,
+    planStatus: PLAN_STATUSES.has(String(item?.planStatus ?? item?.plan_status ?? "")) ? String(item?.planStatus ?? item?.plan_status) : null,
+    planCreatedAt: item?.planCreatedAt ? text(item.planCreatedAt, 64) : null,
+    planUpdatedAt: item?.planUpdatedAt ? text(item.planUpdatedAt, 64) : null,
+    planActions: (Array.isArray(item?.planActions ?? item?.plan_actions) ? (item.planActions ?? item.plan_actions) : []).slice(0, 20).map((action) => ({
+      id: text(action?.id, 128),
+      type: text(action?.type, 32),
+      at: text(action?.at, 64),
+      note: text(action?.note, 512),
+    })).filter((action) => action.id && action.type && action.at),
   })).filter((item) => item.id && item.symbol && item.name && item.quantity !== null && item.averageCost !== null && item.quantity > 0 && item.averageCost >= 0);
 }
 
