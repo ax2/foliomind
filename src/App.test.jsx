@@ -78,7 +78,7 @@ describe("FolioMind core flows", () => {
     const file = new File(["代码,名称,市场,分类,分组\n000001,平安银行,A股,银行,核心"], "watchlist.csv", { type: "text/csv" });
     fireEvent.change(screen.getByLabelText("导入自选文件"), { target: { files: [file] } });
     await waitFor(() => expect(useLabStore.getState().watchlist.some((item) => item.symbol === "000001")).toBe(true));
-    expect(screen.getByRole("status")).toHaveTextContent(/已导入 1 个标的/);
+    expect(await screen.findByRole("status")).toHaveTextContent(/已导入 1 个标的/);
   });
 
   it("opens the real-data research screener with an honest empty state", () => {
