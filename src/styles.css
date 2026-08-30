@@ -1901,12 +1901,12 @@ textarea:focus-visible {
   }
 }
 
-.developer-panel { position: fixed; right: 18px; bottom: 14px; z-index: 40; width: min(780px, calc(100vw - 28px)); color: #202631; pointer-events: none; transform: translateY(var(--dev-drag-offset, 0px)); }
+.developer-panel { position: fixed; right: 18px; bottom: 14px; z-index: 40; width: min(1080px, calc(100vw - 28px)); color: #202631; pointer-events: none; transform: translateY(var(--dev-drag-offset, 0px)); }
 .developer-handle { pointer-events: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: max-content; min-width: 148px; margin-left: auto; border: 1px solid #cbd8ed; border-radius: 10px 10px 0 0; padding: 9px 12px; background: #f8fbff; box-shadow: 0 8px 28px rgb(35 66 110 / 16%); color: #24568e; cursor: grab; font-size: 12px; }
 .developer-handle:active { cursor: grabbing; }
 .developer-handle span { display: inline-flex; align-items: center; gap: 6px; }
 .developer-handle svg.rotated { transform: rotate(180deg); }
-.developer-panel-content { pointer-events: auto; max-height: min(82vh, 760px); overflow: auto; border: 1px solid #cbd8ed; border-radius: 10px 0 10px 10px; padding: 16px; background: rgb(250 252 255 / 98%); box-shadow: 0 16px 42px rgb(35 66 110 / 22%); opacity: 0; transform: translateY(16px); visibility: hidden; transition: opacity .18s ease, transform .18s ease, visibility .18s ease; }
+.developer-panel-content { pointer-events: auto; max-height: min(88vh, 900px); overflow: auto; border: 1px solid #cbd8ed; border-radius: 10px 0 10px 10px; padding: 20px; background: rgb(250 252 255 / 98%); box-shadow: 0 16px 42px rgb(35 66 110 / 22%); opacity: 0; transform: translateY(16px); visibility: hidden; transition: opacity .18s ease, transform .18s ease, visibility .18s ease; font-size: 13px; }
 .developer-panel.open .developer-panel-content { opacity: 1; transform: translateY(0); visibility: visible; }
 .developer-panel-content header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .developer-panel-content header strong, .developer-panel-content header small { display: block; }
@@ -1948,6 +1948,9 @@ textarea:focus-visible {
 .developer-capability-card h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 9px; color: #4e6077; font-size: 12px; }
 .developer-capability-card h4 span { border-radius: 8px; padding: 2px 6px; background: #edf4ff; color: #3f73b3; font-size: 10px; }
 .developer-capability-card h4 small { color: #8a96a6; font-size: 10px; font-weight: 400; }
+.developer-capability-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; border-radius: 7px; padding: 8px 10px; background: #f5f8fc; color: #718197; font-size: 11px; }
+.developer-capability-toolbar label { display: flex; align-items: center; gap: 7px; color: #52667e; white-space: nowrap; }
+.developer-capability-toolbar input { width: 130px; border: 1px solid #cfd9e7; border-radius: 5px; padding: 5px 7px; background: #fff; color: #2b3b50; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .developer-capability-list { display: grid; gap: 6px; }
 .developer-capability { border: 1px solid #edf0f4; border-radius: 6px; padding: 7px 9px; }
 .developer-capability summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; }
@@ -1965,4 +1968,4 @@ textarea:focus-visible {
 .developer-capability-success { color: #2b8c5d; }
 .developer-capability-error { color: #b14d45; }
 .developer-log-list p { margin: 12px 0 5px; color: #94a0af; font-size: 10px; text-align: center; }
-@media (max-width: 600px) { .developer-panel { right: 10px; bottom: 9px; width: calc(100vw - 84px); } .developer-grid { grid-template-columns: 1fr; } .developer-panel-content { max-height: 76vh; } }
+@media (max-width: 600px) { .developer-panel { right: 10px; bottom: 9px; width: calc(100vw - 20px); } .developer-grid { grid-template-columns: 1fr; } .developer-panel-content { max-height: 82vh; padding: 14px; } .developer-capability-toolbar { align-items: flex-start; flex-direction: column; } }
