@@ -248,6 +248,7 @@ function eventDateValue(value) {
 
 export function EventsView() {
   const watchlist = useLabStore((state) => state.watchlist);
+  const portfolioPositions = useLabStore((state) => state.portfolioPositions);
   const events = useLabStore((state) => state.events);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const eventDataLoading = useLabStore((state) => state.eventDataLoading);
@@ -262,6 +263,7 @@ export function EventsView() {
   const setActiveView = useLabStore((state) => state.setActiveView);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("upcoming");
+  const [relationScope, setRelationScope] = useState("watchlist");
   const [viewMode, setViewMode] = useState("list");
   const [monthCursor, setMonthCursor] = useState(() => monthCursorFromKey(monthKey()));
   const [selectedDate, setSelectedDate] = useState(() => eventDateKey(new Date().toISOString()));
@@ -271,12 +273,16 @@ export function EventsView() {
   }, [eventDataLoaded, eventDataLoading, liveDataLoading, refreshEvents]);
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: eventDataLoading, error: eventDataError, receivedCount: eventDataReceivedCount, totalCount: eventDataTotalCount || watchlist.length });
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const holdingSymbols = new Set(portfolioPositions.map((position) => String(position.symbol || "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "")));
+  const portfolioScopeEmpty = relationScope === "portfolio" && portfolioPositions.length === 0;
   const now = Date.now();
   const filtered = events.filter((event) => {
     const eventTime = eventDateValue(event.date);
     const matchesScope = scope === "all" || (scope === "upcoming" && (eventTime == null || eventTime >= now - 86_400_000)) || (scope === "past" && eventTime != null && eventTime < now - 86_400_000);
+    const eventSymbol = String(event.symbol || "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "");
+    const matchesRelation = relationScope !== "portfolio" || holdingSymbols.has(eventSymbol);
     const haystack = `${event.name} ${event.symbol} ${event.type} ${event.title} ${event.detail}`.toLocaleLowerCase("zh-CN");
-    return matchesScope && (!normalizedQuery || haystack.includes(normalizedQuery));
+    return matchesScope && matchesRelation && (!normalizedQuery || haystack.includes(normalizedQuery));
   });
   const groupedEvents = eventsByDate(filtered);
   const monthDays = buildMonthGrid(monthCursor);
@@ -312,9 +318,10 @@ export function EventsView() {
   return <div className="secondary-page events-page"><header><div><h1>事件日历</h1><p>只展示自选标的已返回的真实公司事件，不用样例填充。</p></div><button className="secondary-button" disabled={eventDataLoading} onClick={realDataMode ? () => { void refreshEvents(); } : openSettings}><ArrowsClockwise size={16} />{realDataMode ? eventDataLoading ? "更新中…" : "刷新真实事件" : "配置数据"}</button></header>
     {dataState === DATA_STATES.NO_CREDENTIAL || dataState === DATA_STATES.LOADING || dataState === DATA_STATES.ERROR ? <LiveDataState state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     {dataState === DATA_STATES.PARTIAL ? <LiveDataState compact state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
-    <div className="events-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标的、事件类型或关键词…" aria-label="搜索事件" /></label><div className="filter-group" aria-label="事件范围"><button className={scope === "upcoming" ? "active" : ""} onClick={() => setScope("upcoming")}>未来事件</button><button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>全部</button><button className={scope === "past" ? "active" : ""} onClick={() => setScope("past")}>已发生</button></div><div className="filter-group event-view-switch" aria-label="日历视图"><button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={15} />列表</button><button className={viewMode === "month" ? "active" : ""} onClick={switchToMonth}><CalendarDots size={15} />月视图</button></div></div>
-    {dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length === 0 ? <DataState state="empty" title="未来 90 天暂无已排期事件" description="当前数据渠道没有返回自选标的的公司事件；有新数据时可再次刷新。" actionLabel="立即重试" onAction={retry} /> : null}
-    {dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length > 0 && filtered.length === 0 ? <DataState state="empty" title="没有符合筛选条件的事件" description="调整范围或搜索关键词；原始真实事件不会被修改。" /> : null}
+    <div className="events-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标的、事件类型或关键词…" aria-label="搜索事件" /></label><div className="filter-group" aria-label="事件范围"><button className={scope === "upcoming" ? "active" : ""} onClick={() => setScope("upcoming")}>未来事件</button><button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>全部</button><button className={scope === "past" ? "active" : ""} onClick={() => setScope("past")}>已发生</button></div><div className="filter-group" aria-label="事件关联范围"><button className={relationScope === "watchlist" ? "active" : ""} onClick={() => setRelationScope("watchlist")}>全部自选</button><button className={relationScope === "portfolio" ? "active" : ""} onClick={() => setRelationScope("portfolio")}>只看持仓</button></div><div className="filter-group event-view-switch" aria-label="日历视图"><button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={15} />列表</button><button className={viewMode === "month" ? "active" : ""} onClick={switchToMonth}><CalendarDots size={15} />月视图</button></div></div>
+    {portfolioScopeEmpty && dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR ? <DataState state="empty" title="还没有持仓标的" description="添加持仓后，可以只查看与持仓相关的真实公司事件。" actionLabel="去组合" onAction={() => setActiveView("portfolio")} /> : null}
+    {!portfolioScopeEmpty && dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length === 0 ? <DataState state="empty" title="未来 90 天暂无已排期事件" description="当前数据渠道没有返回自选标的的公司事件；有新数据时可再次刷新。" actionLabel="立即重试" onAction={retry} /> : null}
+    {!portfolioScopeEmpty && dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length > 0 && filtered.length === 0 ? <DataState state="empty" title="没有符合筛选条件的事件" description="调整范围、关联范围或搜索关键词；原始真实事件不会被修改。" /> : null}
     {filtered.length > 0 && viewMode === "list" ? <section className="event-calendar-list" aria-label="真实公司事件列表">{filtered.map(renderEventCard)}</section> : null}
     {filtered.length > 0 && viewMode === "month" ? <section className="event-month-view" aria-label="真实公司事件月视图">
       <div className="event-month-heading"><div><strong>{monthLabel(monthCursor)}</strong><small>{filtered.length} 个符合当前筛选的真实事件</small></div><div className="event-month-actions"><button type="button" className="icon-button" onClick={() => moveMonth(-1)} aria-label="上一个月"><CaretLeft size={16} /></button><button type="button" className="secondary-button" onClick={goToday}>今天</button><button type="button" className="icon-button" onClick={() => moveMonth(1)} aria-label="下一个月"><CaretRight size={16} /></button></div></div>
