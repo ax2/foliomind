@@ -302,13 +302,17 @@ describe("FolioMind core flows", () => {
       eventDataTotalCount: 2,
       portfolioPositions: [{ id: "position-1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 10, averageCost: 100 }],
       events: [
-        { id: "event-1", date: dateKey, symbol: "600519", name: "贵州茅台", type: "财报", title: "持仓事件", detail: "真实事件", source: "真实事件源" },
-        { id: "event-2", date: dateKey, symbol: "300750", name: "宁德时代", type: "财报", title: "非持仓事件", detail: "真实事件", source: "真实事件源" },
+        { id: "event-1", date: dateKey, symbol: "600519", name: "贵州茅台", category: "白酒", type: "财报", title: "持仓事件", detail: "真实事件", source: "真实事件源" },
+        { id: "event-2", date: dateKey, symbol: "300750", name: "宁德时代", category: "新能源", type: "财报", title: "非持仓事件", detail: "真实事件", source: "真实事件源" },
       ],
     });
     render(<EventsView />);
     expect(await screen.findByText("持仓事件")).toBeInTheDocument();
     expect(screen.getByText("非持仓事件")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "事件行业" }), { target: { value: "白酒" } });
+    expect(screen.getByText("持仓事件")).toBeInTheDocument();
+    expect(screen.queryByText("非持仓事件")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "事件行业" }), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "只看持仓" }));
     expect(screen.getByText("持仓事件")).toBeInTheDocument();
     expect(screen.queryByText("非持仓事件")).not.toBeInTheDocument();

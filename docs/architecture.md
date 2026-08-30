@@ -16,7 +16,7 @@
 
 金融查询默认使用 QVeris CAP 的 `qveris_finance` provider。Web Host 将稳定的 capability/tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到本地 `tool-selection-cache.json`，行情、公司资料、估值、历史日线、公司事件、资金流和标注新闻直接调用 CAP；CAP 不可用时再回退到 Search → Inspect → Call。对外仍提供稳定的 `foliomind_data(kind, symbol, range)` schema，`kind` 包括 `quote`、`details`、`series`、`core_event`、`capital_flow`、`sentiment`，未来可替换为其它渠道而不影响页面。条件检查对这些能力使用三值逻辑：CAP 明确失败或无可用字段时返回 `unknown`，不把空数组当成未触发。QVeris 和模型网关的瞬时 408/425/429/5xx 失败以及可恢复的网络错误会经过有界指数退避重试，并尊重上游 `Retry-After`；已取消的请求不会重试，取消信号会打断退避等待。桌面端 Rust 桥接器对 Search/Inspect/Call 采用相同的重试分类、退避上限和停止取消语义。自选行情刷新使用受限并发（默认 2，localhost 开发面板可调至 1–4），避免多个标的串行等待。localhost 与桌面端均显示本机开发者面板，分别展示 Host 或 Pi/QVeris 事件日志；密钥和原始提示词不会写入日志。凭据、模型或渠道变更会使相关缓存失效。
 
-事件日历在已返回的真实公司事件之上提供客户端关联范围筛选：默认展示自选标的，用户选择“只看持仓”时按规范化证券代码（A 股交易所后缀 `.SH/.SS/.SZ` 可省略）与 `user-state.json` 中的持仓匹配。该筛选不改变 CAP 请求范围、不持久化事件结果，也不会把没有持仓的空结果误报为“暂无事件”；列表和月视图共享同一筛选结果。
+事件日历在已返回的真实公司事件之上提供客户端关联范围筛选：默认展示自选标的，用户选择“只看持仓”时按规范化证券代码（A 股交易所后缀 `.SH/.SS/.SZ` 可省略）与 `user-state.json` 中的持仓匹配；也可以按自选项已有的 `category` 做行业筛选。该筛选不改变 CAP 请求范围、不持久化事件结果，也不会把没有持仓的空结果误报为“暂无事件”；列表和月视图共享同一筛选结果。
 
 当多个本地 Web 请求同时遇到同一类工具缓存未命中时，Host 使用按数据类型和渠道隔离的 warm-up gate 合并 Discover 流程：首个请求负责 Search → Inspect → Call 并固化参数模板，等待者在完成后继续使用 `foliomind_data` 直接调用；若首个请求失败，等待者会接管预热，避免死锁或永久等待。
 
