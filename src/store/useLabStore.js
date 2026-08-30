@@ -9,6 +9,7 @@ import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
+import { normalizeWatchlistItem } from "../lib/watchlist.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -16,7 +17,7 @@ export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
 const DEFAULT_LIVE_QUOTE_CONCURRENCY = 2;
 const MAX_LIVE_QUOTE_CONCURRENCY = 4;
 const MAX_MONITOR_HISTORY = 500;
-const defaultWatchlist = watchGroups.flatMap((group) => group.items).slice(0, 8).map((item) => ({ ...item }));
+const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) => normalizeWatchlistItem({ ...item, group: group.label }))).slice(0, 8);
 let persistenceQueue = Promise.resolve();
 let liveRequestGeneration = 0;
 const selectedQuoteGenerations = new Map();
@@ -643,14 +644,14 @@ export const useLabStore = create((set, get) => ({
   hydrateUserState: async () => {
     try {
       const persisted = await loadUserState();
-      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
+      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
       else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
     } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
   replaceUserState: async (snapshot) => {
     const current = get();
     if (current.runtimeConfiguring || current.runtimeCancelPending || current.monitorBusy || ["running", "cancelling"].includes(current.runtimeMode)) throw new Error("当前还有任务在运行，请稍后再导入");
-    const watchlist = Array.isArray(snapshot?.watchlist) && snapshot.watchlist.length ? snapshot.watchlist : null;
+    const watchlist = Array.isArray(snapshot?.watchlist) && snapshot.watchlist.length ? snapshot.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : null;
     if (!watchlist) throw new Error("备份至少需要包含一个自选标的");
     const rules = Array.isArray(snapshot.monitorRules) ? snapshot.monitorRules.map(normalizeRule) : [];
     const notifications = Array.isArray(snapshot.notifications) ? snapshot.notifications : [];
@@ -667,7 +668,7 @@ export const useLabStore = create((set, get) => ({
   },
   persistUserState: () => persistSnapshot(get()),
   addWatchlist: async (item) => {
-    const value = { symbol: String(item?.symbol ?? "").trim().toUpperCase(), name: String(item?.name ?? "").trim(), market: String(item?.market ?? "").trim() || "自定义", category: String(item?.category ?? "").trim() || "自选" };
+    const value = normalizeWatchlistItem({ ...item, market: String(item?.market ?? "").trim() || "自定义", category: String(item?.category ?? "").trim() || "自选" });
     if (!value.symbol || !value.name) throw new Error("请输入股票代码和名称");
     if (value.symbol.length > 64 || value.name.length > 128) throw new Error("股票代码或名称过长");
     if (get().watchlist.some((entry) => entry.symbol === value.symbol)) throw new Error("该标的已经在自选中");
