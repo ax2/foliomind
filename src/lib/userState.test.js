@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseUserStateBackup, serializeUserStateBackup, userStateBackupData } from "./userState.js";
+import { normalizeUserState, parseUserStateBackup, serializeUserStateBackup, userStateBackupData } from "./userState.js";
 
 describe("user state backups", () => {
   it("exports portable data while excluding runtime configuration", () => {
@@ -55,5 +55,20 @@ describe("user state backups", () => {
     expect(raw).not.toContain("sk-secret");
     expect(raw).not.toContain("do not export");
     expect(parseUserStateBackup(raw).monitorHistory).toMatchObject([{ id: "h1", outcome: "unknown", audits: [{ operation: "call", toolId: "qveris_finance.mkt_l1_rt" }] }]);
+  });
+
+  it("uses one bounded contract for malformed state from every transport", () => {
+    const normalized = normalizeUserState({
+      watchlist: [{ symbol: " 600519 ", name: " 贵州茅台 ", market: "沪深" }, { symbol: "", name: "bad" }],
+      monitorRules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: "3", intervalSeconds: "300", conditions: [{ type: "unknown" }] }],
+      notifications: [{ id: "n1", title: "安全提醒", body: "x".repeat(10_000), event_key: "event-1" }, { title: "缺少 id" }],
+      monitorHistory: [{ id: "h1", ruleId: "r1", symbol: "600519", checkedAt: "2026-08-30T00:00:00Z", outcome: "invalid", audits: [{ prompt: "secret" }] }],
+      apiKey: "sk_should_never_escape",
+    });
+    expect(normalized.watchlist).toEqual([{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "", group: "A股" }]);
+    expect(normalized.monitorRules[0]).toMatchObject({ threshold: 3, intervalSeconds: 300, logic: "AND" });
+    expect(normalized.notifications).toEqual([{ id: "n1", kind: "", symbol: "", name: "", ruleId: "", title: "安全提醒", body: "x".repeat(4096), severity: "info", createdAt: "", read: false, source: "", eventKey: "event-1", reminderPhase: "" }]);
+    expect(normalized.monitorHistory[0]).toMatchObject({ outcome: "unknown", audits: [] });
+    expect(JSON.stringify(normalized)).not.toContain("sk_should_never_escape");
   });
 });

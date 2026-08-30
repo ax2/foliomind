@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { normalizeUserState } from "../src/lib/userStateSchema.js";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.FOLIOMIND_HOST_PORT || 43123);
@@ -29,6 +30,7 @@ const defaultState = {
   monitorRules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }, { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }],
   notifications: [],
   portfolioPositions: [],
+  monitorHistory: [],
 };
 
 let runtimeState = "stopped";
@@ -610,8 +612,13 @@ async function route(req, body) {
     }
     finally { clearTimeout(timeout); }
   }
-  if (method === "GET" && path === "/api/user-state") return readJson(stateFile, defaultState);
-  if (method === "POST" && path === "/api/user-state") { await atomicJson(stateFile, body.state || defaultState); return body.state || defaultState; }
+  if (method === "GET" && path === "/api/user-state") return normalizeUserState(await readJson(stateFile, defaultState));
+  if (method === "POST" && path === "/api/user-state") {
+    const state = normalizeUserState(body.state || defaultState);
+    if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
+    await atomicJson(stateFile, state);
+    return state;
+  }
   if (method === "GET" && path === "/api/runtime/status") return { state: runtimeState, pid: process.pid, detail: null };
   if (method === "POST" && path === "/api/runtime/start") { runtimeState = "running"; return { state: runtimeState, pid: process.pid, detail: null }; }
   if (method === "POST" && path === "/api/runtime/stop") { runtimeState = "stopped"; runtimeGate.abort(); return { state: runtimeState, pid: null, detail: null }; }
