@@ -351,7 +351,7 @@ fn handle_connection(
     match result {
         Ok(result) => {
             audit(AuditEvent {
-                operation,
+                operation: operation.clone(),
                 run_id: environment.run_id,
                 tool_call_id,
                 outcome: "success".into(),
@@ -367,7 +367,7 @@ fn handle_connection(
         Err(error) => {
             let safe = redact(&error);
             audit(AuditEvent {
-                operation,
+                operation: operation.clone(),
                 run_id: environment.run_id,
                 tool_call_id,
                 outcome: "error".into(),
