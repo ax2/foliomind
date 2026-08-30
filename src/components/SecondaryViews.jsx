@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CheckCircle, DownloadSimple, Funnel, Info, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarDots, CaretLeft, CaretRight, CheckCircle, DownloadSimple, Funnel, Info, List, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
@@ -12,6 +12,7 @@ import packageJson from "../../package.json";
 import { checkLatestRelease, compareVersions, RELEASES_PAGE_URL } from "../lib/updateCheck.js";
 import { parseUserStateBackup, serializeUserStateBackup } from "../lib/userState.js";
 import { useLabStore } from "../store/useLabStore.js";
+import { buildMonthGrid, eventDateKey, eventsByDate, monthCursorFromKey, monthKey, monthLabel, shiftMonth } from "../lib/eventCalendar.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 import { DataState } from "./DataState.jsx";
 import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
@@ -250,6 +251,9 @@ export function EventsView() {
   const setActiveView = useLabStore((state) => state.setActiveView);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("upcoming");
+  const [viewMode, setViewMode] = useState("list");
+  const [monthCursor, setMonthCursor] = useState(() => monthCursorFromKey(monthKey()));
+  const [selectedDate, setSelectedDate] = useState(() => eventDateKey(new Date().toISOString()));
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   useEffect(() => {
     if (!eventDataLoaded && !eventDataLoading) void refreshEvents();
@@ -263,15 +267,50 @@ export function EventsView() {
     const haystack = `${event.name} ${event.symbol} ${event.type} ${event.title} ${event.detail}`.toLocaleLowerCase("zh-CN");
     return matchesScope && (!normalizedQuery || haystack.includes(normalizedQuery));
   });
+  const groupedEvents = eventsByDate(filtered);
+  const monthDays = buildMonthGrid(monthCursor);
+  const selectedEvents = groupedEvents.get(selectedDate) || [];
+  const moveMonth = (offset) => {
+    const next = shiftMonth(monthCursor, offset);
+    setMonthCursor(next);
+    const firstEvent = buildMonthGrid(next).find((cell) => cell.inMonth && groupedEvents.has(cell.key));
+    setSelectedDate(firstEvent?.key || eventDateKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`));
+  };
+  const goToday = () => {
+    const today = new Date();
+    setMonthCursor(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedDate(eventDateKey(today.toISOString()));
+  };
   const retry = () => { void retryEvents(); };
   const openSettings = () => setActiveView("settings");
+  const switchToMonth = () => {
+    const firstEvent = monthDays.find((cell) => cell.inMonth && groupedEvents.has(cell.key));
+    if (firstEvent) {
+      setSelectedDate(firstEvent.key);
+      setViewMode("month");
+      return;
+    }
+    const firstDated = filtered.map((event) => eventDateKey(event.date)).filter(Boolean).sort()[0];
+    if (firstDated) {
+      setMonthCursor(monthCursorFromKey(firstDated.slice(0, 7)));
+      setSelectedDate(firstDated);
+    }
+    setViewMode("month");
+  };
+  const renderEventCard = (event) => <article className="event-calendar-card" key={event.id}><div className="event-calendar-date"><strong>{eventDateLabel(event.date)}</strong><small>{event.symbol}</small></div><div className="event-calendar-dot" aria-hidden="true" /><div className="event-calendar-copy"><div className="event-calendar-heading"><span>{event.type || "公司事件"}</span><strong>{event.name}</strong></div><h2>{event.title || "未命名事件"}</h2>{event.detail && event.detail !== event.title ? <p>{event.detail}</p> : null}<small className="event-calendar-meta">{event.source || "数据服务"}{event.url ? <> · <a href={event.url} target="_blank" rel="noreferrer">查看来源</a></> : null} · 能力 EVENT.CALENDAR.CORP</small></div></article>;
   return <div className="secondary-page events-page"><header><div><h1>事件日历</h1><p>只展示自选标的已返回的真实公司事件，不用样例填充。</p></div><button className="secondary-button" disabled={eventDataLoading} onClick={realDataMode ? () => { void refreshEvents(); } : openSettings}><ArrowsClockwise size={16} />{realDataMode ? eventDataLoading ? "更新中…" : "刷新真实事件" : "配置数据"}</button></header>
     {dataState === DATA_STATES.NO_CREDENTIAL || dataState === DATA_STATES.LOADING || dataState === DATA_STATES.ERROR ? <LiveDataState state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     {dataState === DATA_STATES.PARTIAL ? <LiveDataState compact state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
-    <div className="events-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标的、事件类型或关键词…" aria-label="搜索事件" /></label><div className="filter-group" aria-label="事件范围"><button className={scope === "upcoming" ? "active" : ""} onClick={() => setScope("upcoming")}>未来事件</button><button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>全部</button><button className={scope === "past" ? "active" : ""} onClick={() => setScope("past")}>已发生</button></div></div>
+    <div className="events-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标的、事件类型或关键词…" aria-label="搜索事件" /></label><div className="filter-group" aria-label="事件范围"><button className={scope === "upcoming" ? "active" : ""} onClick={() => setScope("upcoming")}>未来事件</button><button className={scope === "all" ? "active" : ""} onClick={() => setScope("all")}>全部</button><button className={scope === "past" ? "active" : ""} onClick={() => setScope("past")}>已发生</button></div><div className="filter-group event-view-switch" aria-label="日历视图"><button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}><List size={15} />列表</button><button className={viewMode === "month" ? "active" : ""} onClick={switchToMonth}><CalendarDots size={15} />月视图</button></div></div>
     {dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length === 0 ? <DataState state="empty" title="未来 90 天暂无已排期事件" description="当前数据渠道没有返回自选标的的公司事件；有新数据时可再次刷新。" actionLabel="立即重试" onAction={retry} /> : null}
     {dataState !== DATA_STATES.NO_CREDENTIAL && dataState !== DATA_STATES.LOADING && dataState !== DATA_STATES.ERROR && eventDataLoaded && events.length > 0 && filtered.length === 0 ? <DataState state="empty" title="没有符合筛选条件的事件" description="调整范围或搜索关键词；原始真实事件不会被修改。" /> : null}
-    {filtered.length > 0 ? <section className="event-calendar-list" aria-label="真实公司事件列表">{filtered.map((event) => <article className="event-calendar-card" key={event.id}><div className="event-calendar-date"><strong>{eventDateLabel(event.date)}</strong><small>{event.symbol}</small></div><div className="event-calendar-dot" aria-hidden="true" /><div className="event-calendar-copy"><div className="event-calendar-heading"><span>{event.type || "公司事件"}</span><strong>{event.name}</strong></div><h2>{event.title || "未命名事件"}</h2>{event.detail && event.detail !== event.title ? <p>{event.detail}</p> : null}<small className="event-calendar-meta">{event.source || "数据服务"}{event.url ? <> · <a href={event.url} target="_blank" rel="noreferrer">查看来源</a></> : null} · 能力 EVENT.CALENDAR.CORP</small></div></article>)}</section> : null}
+    {filtered.length > 0 && viewMode === "list" ? <section className="event-calendar-list" aria-label="真实公司事件列表">{filtered.map(renderEventCard)}</section> : null}
+    {filtered.length > 0 && viewMode === "month" ? <section className="event-month-view" aria-label="真实公司事件月视图">
+      <div className="event-month-heading"><div><strong>{monthLabel(monthCursor)}</strong><small>{filtered.length} 个符合当前筛选的真实事件</small></div><div className="event-month-actions"><button type="button" className="icon-button" onClick={() => moveMonth(-1)} aria-label="上一个月"><CaretLeft size={16} /></button><button type="button" className="secondary-button" onClick={goToday}>今天</button><button type="button" className="icon-button" onClick={() => moveMonth(1)} aria-label="下一个月"><CaretRight size={16} /></button></div></div>
+      <div className="event-month-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</div>
+      <div className="event-month-grid">{monthDays.map((cell) => { const dayEvents = groupedEvents.get(cell.key) || []; return <button type="button" key={cell.key} className={`event-calendar-day${cell.inMonth ? "" : " outside"}${cell.isToday ? " today" : ""}${selectedDate === cell.key ? " selected" : ""}`} onClick={() => setSelectedDate(cell.key)} aria-label={`${cell.key}${dayEvents.length ? `，${dayEvents.length} 个事件` : ""}`} aria-current={cell.isToday ? "date" : undefined}><span>{cell.date.getDate()}</span>{dayEvents.length > 0 ? <div className="event-day-markers" aria-hidden="true">{dayEvents.slice(0, 3).map((event) => <i key={event.id} title={event.type || "公司事件"} />)}{dayEvents.length > 3 ? <em>+{dayEvents.length - 3}</em> : null}</div> : null}</button>; })}</div>
+      <div className="event-month-detail"><div className="event-month-detail-heading"><strong>{selectedDate ? eventDateLabel(selectedDate) : "所选日期"}</strong><small>{selectedEvents.length ? `${selectedEvents.length} 个事件` : "当天没有符合筛选的事件"}</small></div>{selectedEvents.length ? <div className="event-calendar-list">{selectedEvents.map(renderEventCard)}</div> : <p>选择带标记的日期查看事件详情；没有事件的日期保持空状态。</p>}</div>
+    </section> : null}
     <p className="security-note">数据范围：自选标的 · 公司事件 CAP · {eventDataLastRefreshAt ? `最近刷新 ${new Date(eventDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : "尚未刷新"}；没有事件时保持空状态。</p>
   </div>;
 }

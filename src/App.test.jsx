@@ -182,6 +182,36 @@ describe("FolioMind core flows", () => {
     expect(healthStrip).toHaveTextContent("刷新");
   });
 
+  it("switches the real event calendar between list and month views", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    const eventDate = new Date();
+    eventDate.setDate(eventDate.getDate() + 5);
+    const dateKey = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, "0")}-${String(eventDate.getDate()).padStart(2, "0")}`;
+    useLabStore.setState({ userStateLoaded: true, eventDataLoaded: true, eventDataReceivedCount: 1, eventDataTotalCount: 1, events: [{ id: "event-1", date: dateKey, symbol: "600519", name: "贵州茅台", type: "财报", title: "业绩披露", detail: "真实事件", source: "真实事件源" }] });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "事件" }));
+    expect(await screen.findByRole("heading", { name: "事件日历" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /月视图/ }));
+    expect(screen.getByRole("region", { name: "真实公司事件月视图" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /个事件|\d{4}-\d{2}-\d{2}/ }).length).toBeGreaterThanOrEqual(42);
+    expect(screen.getByRole("button", { name: new RegExp(`${dateKey}，1 个事件`) })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下一个月" }));
+    expect(screen.getByRole("button", { name: "上一个月" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /列表/ }));
+    expect(screen.getByRole("region", { name: "真实公司事件列表" })).toBeInTheDocument();
+  });
+
   it("pauses background quote polling and refreshes when the page returns", async () => {
     const refreshLiveData = vi.fn().mockResolvedValue(true);
     integrationMocks.loadIntegrationStatus.mockResolvedValue({
