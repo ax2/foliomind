@@ -410,11 +410,25 @@ describe("FolioMind core flows", () => {
     expect(integrationMocks.applyIntegrationSettings).not.toHaveBeenCalled();
   });
 
-  it("routes a live-data request through the agent conversation", async () => {
+  it("refreshes the selected quote directly instead of routing through chat", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    const refreshSelectedQuote = vi.fn().mockResolvedValue(true);
+    useLabStore.setState({ userStateLoaded: true, refreshLiveData: vi.fn().mockResolvedValue(true), refreshSelectedQuote });
     render(<App />);
+    await screen.findByText("实时行情已启用 · 每分钟更新");
     fireEvent.click(screen.getByRole("button", { name: "获取实时数据" }));
-    expect(await screen.findByText(/已配置的数据工具/)).toBeInTheDocument();
-    expect(screen.getAllByText("分析摘要").length).toBeGreaterThan(0);
+    expect(refreshSelectedQuote).toHaveBeenCalledWith("600519");
+    expect(screen.getByRole("button", { name: "交给 Agent 查询" })).toBeInTheDocument();
   });
 
   it("announces an in-progress assistant response", () => {

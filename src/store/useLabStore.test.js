@@ -58,6 +58,48 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveDataError).toBe("");
   });
 
+  it("refreshes only the selected quote through the cached data path", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [
+        { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },
+        { symbol: "AAPL", name: "Apple Inc.", market: "NASDAQ", category: "科技" },
+      ],
+      liveQuotes: { AAPL: { price: 200, source: "已有数据" } },
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: { quotes: [{ symbol: "600519", price: 1297.4, changePercent: 0.39, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] },
+      cacheHit: true,
+      mode: "qveris-cap",
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshSelectedQuote("600519")).resolves.toBe(true);
+    expect(runtime.queryCachedData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519.SH", range: "" }, { timeoutMs: 60_000 });
+    expect(useLabStore.getState().liveQuotes).toMatchObject({ "600519": { price: 1297.4 }, AAPL: { price: 200 } });
+    expect(useLabStore.getState().liveDataLoading).toBe(false);
+  });
+
+  it("does not block a selected refresh while the background batch is running", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      liveDataLoading: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: { quotes: [{ symbol: "600519", price: 1297.4, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] },
+      cacheHit: true,
+      mode: "qveris-cap",
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshSelectedQuote("600519")).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes["600519"].price).toBe(1297.4);
+    expect(useLabStore.getState().liveDataLoading).toBe(true);
+  });
+
   it("creates edge-triggered portfolio price alerts from real quotes", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

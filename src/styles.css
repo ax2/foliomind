@@ -337,6 +337,7 @@ textarea:focus-visible {
   place-items: center;
   color: #596171;
 }
+.stock-header > div:last-child { flex-shrink: 0; }
 .stock-mark {
   width: 36px;
   height: 36px;
@@ -1459,6 +1460,9 @@ textarea:focus-visible {
 .settings-notice.error { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f1c9c5; border-radius: 8px; padding: 10px 12px; background: #fff7f6; color: #a33b32; }
 .settings-notice.error button { border: 1px solid #e3aba6; border-radius: 6px; padding: 7px 11px; background: #fff; color: #8f3028; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .live-data-button { width: auto !important; padding: 0 10px !important; gap: 5px; color: var(--blue) !important; font-size: 11px; }
+.agent-data-button { width: auto !important; padding: 0 8px !important; gap: 4px; color: #596171 !important; font-size: 11px; }
+.live-data-button, .agent-data-button { white-space: nowrap; flex-shrink: 0; }
+.stock-header .live-data-button:disabled { opacity: .58; cursor: wait; }
 .audit-empty { display: flex; align-items: center; gap: 7px; margin: 4px 0 12px; border: 1px dashed #d9dee7; border-radius: 8px; padding: 10px 11px; color: #7b8490; font-size: 10px; }
 @media (max-width: 1280px) {
   .app-shell {
