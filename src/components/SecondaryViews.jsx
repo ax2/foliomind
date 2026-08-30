@@ -256,6 +256,7 @@ export function EventsView() {
   const eventDataLastRefreshAt = useLabStore((state) => state.eventDataLastRefreshAt);
   const eventDataReceivedCount = useLabStore((state) => state.eventDataReceivedCount);
   const eventDataTotalCount = useLabStore((state) => state.eventDataTotalCount);
+  const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const refreshEvents = useLabStore((state) => state.refreshEvents);
   const retryEvents = useLabStore((state) => state.retryEvents);
   const setActiveView = useLabStore((state) => state.setActiveView);
@@ -266,8 +267,8 @@ export function EventsView() {
   const [selectedDate, setSelectedDate] = useState(() => eventDateKey(new Date().toISOString()));
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   useEffect(() => {
-    if (!eventDataLoaded && !eventDataLoading) void refreshEvents();
-  }, [eventDataLoaded, eventDataLoading, refreshEvents]);
+    if (!eventDataLoaded && !eventDataLoading && !liveDataLoading) void refreshEvents();
+  }, [eventDataLoaded, eventDataLoading, liveDataLoading, refreshEvents]);
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: eventDataLoading, error: eventDataError, receivedCount: eventDataReceivedCount, totalCount: eventDataTotalCount || watchlist.length });
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const now = Date.now();
