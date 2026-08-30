@@ -43,6 +43,9 @@ function sanitizeNotifications(items) {
   return (Array.isArray(items) ? items : []).slice(0, 500).map((item) => ({
     id: text(item?.id, 128),
     kind: text(item?.kind, 32),
+    symbol: text(item?.symbol, 64).toUpperCase(),
+    name: text(item?.name, 128),
+    ruleId: text(item?.ruleId, 128),
     title: text(item?.title, 256),
     body: text(item?.body, 4096),
     severity: ["info", "warning", "critical"].includes(item?.severity) ? item.severity : "info",

@@ -330,8 +330,38 @@ export function NotificationsView() {
   const notifications = useLabStore((state) => state.notifications);
   const markNotificationRead = useLabStore((state) => state.markNotificationRead);
   const markAllNotificationsRead = useLabStore((state) => state.markAllNotificationsRead);
+  const selectSymbol = useLabStore((state) => state.selectSymbol);
+  const setActiveView = useLabStore((state) => state.setActiveView);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState("all");
   const [systemEnabled, setSystemEnabled] = useState(() => systemNotificationsEnabled());
   const [systemNotice, setSystemNotice] = useState("");
+  const unreadCount = notifications.filter((item) => !item.read).length;
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const filteredNotifications = notifications.filter((item) => {
+    if (statusFilter === "unread" && item.read) return false;
+    if (["critical", "warning", "info"].includes(statusFilter) && item.severity !== statusFilter) return false;
+    if (kindFilter !== "all" && item.kind !== kindFilter) return false;
+    if (!normalizedQuery) return true;
+    return [item.title, item.body, item.symbol, item.name, item.source].some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedQuery));
+  });
+  const markRead = (item) => {
+    if (!item.read) markNotificationRead(item.id);
+  };
+  const openSymbol = (item) => {
+    markRead(item);
+    if (item.symbol) selectSymbol(item.symbol);
+  };
+  const openMonitor = (item) => {
+    markRead(item);
+    setActiveView("monitor");
+  };
+  const handleNotificationKeyDown = (event, item) => {
+    if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    markRead(item);
+  };
   const toggleSystemNotifications = async () => {
     setSystemNotice("");
     if (systemEnabled) {
@@ -348,7 +378,7 @@ export function NotificationsView() {
     setSystemEnabled(true);
     setSystemNotice("系统通知已开启，新的盯盘触发会同时显示在系统通知中心。");
   };
-  return <div className="secondary-page notifications-page"><header><div><h1>站内消息</h1><p>盯盘触发、数据查询结果与运行状态都会保存在这里</p></div><div className="notification-actions"><label className="notification-preference"><input type="checkbox" checked={systemEnabled} onChange={() => { void toggleSystemNotifications(); }} />系统通知</label><button className="secondary-button" disabled={!notifications.some((item) => !item.read)} onClick={markAllNotificationsRead}>全部标为已读</button></div></header>{systemNotice && <p className="settings-notice" role="status">{systemNotice}</p>}{notifications.length === 0 ? <div className="empty-state"><BellRinging size={30} /><strong>还没有盯盘消息</strong><p>启用一条策略后，Pi 会按间隔检查真实数据。</p></div> : <div className="notification-list">{notifications.map((item) => <article className={item.read ? "notification read" : "notification unread"} key={item.id} onClick={() => markNotificationRead(item.id)}><div className={`notification-severity ${item.severity}`} /><div><strong>{item.title}</strong><p>{item.body}</p><small>{new Date(item.createdAt).toLocaleString("zh-CN")} · {item.source === "data-service" ? "真实数据服务" : "浏览器预览"}</small></div>{!item.read && <span className="unread-dot" />}</article>)}</div>}</div>;
+  return <div className="secondary-page notifications-page"><header><div><h1>站内消息</h1><p>盯盘触发、数据查询结果与运行状态都会保存在这里</p></div><div className="notification-actions"><span className="notification-unread-count" aria-label={`${unreadCount} 条未读消息`}>{unreadCount ? `${unreadCount} 条未读` : "全部已读"}</span><label className="notification-preference"><input type="checkbox" checked={systemEnabled} onChange={() => { void toggleSystemNotifications(); }} />系统通知</label><button className="secondary-button" disabled={!unreadCount} onClick={markAllNotificationsRead}>全部标为已读</button></div></header>{systemNotice && <p className="settings-notice" role="status">{systemNotice}</p>}<div className="notifications-toolbar"><label className="search-box"><MagnifyingGlass size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索消息、标的或来源…" aria-label="搜索消息" /></label><div className="filter-group" aria-label="消息状态"><button type="button" className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>全部</button><button type="button" className={statusFilter === "unread" ? "active" : ""} onClick={() => setStatusFilter("unread")}>未读</button><button type="button" className={statusFilter === "critical" ? "active" : ""} onClick={() => setStatusFilter("critical")}>关键</button><button type="button" className={statusFilter === "warning" ? "active" : ""} onClick={() => setStatusFilter("warning")}>提醒</button><button type="button" className={statusFilter === "info" ? "active" : ""} onClick={() => setStatusFilter("info")}>信息</button></div><div className="filter-group" aria-label="消息类型"><button type="button" className={kindFilter === "all" ? "active" : ""} onClick={() => setKindFilter("all")}>全部类型</button><button type="button" className={kindFilter === "monitor" ? "active" : ""} onClick={() => setKindFilter("monitor")}>盯盘</button><button type="button" className={kindFilter === "portfolio-alert" ? "active" : ""} onClick={() => setKindFilter("portfolio-alert")}>组合提醒</button></div></div>{notifications.length === 0 ? <div className="empty-state"><BellRinging size={30} /><strong>还没有盯盘消息</strong><p>启用一条策略后，Pi 会按间隔检查真实数据。</p></div> : filteredNotifications.length === 0 ? <div className="empty-state notification-filter-empty"><Funnel size={30} /><strong>没有符合条件的消息</strong><p>调整搜索词或筛选条件；原始消息不会被删除。</p><button className="secondary-button" onClick={() => { setQuery(""); setStatusFilter("all"); setKindFilter("all"); }}>清除筛选</button></div> : <div className="notification-list">{filteredNotifications.map((item) => <article className={item.read ? "notification read" : "notification unread"} key={item.id} tabIndex="0" role="button" aria-label={`${item.read ? "已读" : "未读"}消息：${item.title}`} onClick={() => markRead(item)} onKeyDown={(event) => handleNotificationKeyDown(event, item)}><div className={`notification-severity ${item.severity}`} /><div className="notification-copy"><div className="notification-heading"><strong>{item.title}</strong><span className={`notification-kind ${item.kind}`}>{item.kind === "portfolio-alert" ? "组合提醒" : item.kind === "monitor" ? "盯盘" : "消息"}</span></div><p>{item.body}</p><small>{new Date(item.createdAt).toLocaleString("zh-CN")} · {item.source === "data-service" ? "真实数据服务" : "浏览器预览"}{item.symbol ? ` · ${item.symbol}` : ""}</small>{(item.symbol || item.kind === "monitor") && <div className="notification-item-actions"><button type="button" className="notification-link" onClick={(event) => { event.stopPropagation(); openSymbol(item); }} disabled={!item.symbol}>查看标的</button>{item.kind === "monitor" && <button type="button" className="notification-link" onClick={(event) => { event.stopPropagation(); openMonitor(item); }}>查看盯盘</button>}</div>}</div>{!item.read && <span className="unread-dot" />}</article>)}</div>}</div>;
 }
 
 export function SkillsView() {
