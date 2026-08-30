@@ -1168,6 +1168,8 @@ textarea:focus-visible {
 .research-toolbar .search-box { width: min(340px, 100%); }
 .events-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
 .events-toolbar .search-box { width: min(380px, 100%); }
+.event-industry-filter { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #dfe2e7; border-radius: 8px; padding: 0 8px 0 10px; color: #697586; font-size: 11px; }
+.event-industry-filter select { min-height: 32px; border: 0; background: transparent; color: #3f4e62; font-size: 11px; outline: none; }
 .event-view-switch button { display: inline-flex; align-items: center; gap: 5px; }
 .event-calendar-list { display: grid; gap: 10px; margin-top: 18px; }
 .event-calendar-card { display: grid; grid-template-columns: 104px 14px minmax(0, 1fr); gap: 12px; align-items: start; border: 1px solid var(--line); border-radius: 10px; padding: 15px 16px; background: #fff; }
@@ -1741,6 +1743,7 @@ textarea:focus-visible {
   .research-toolbar .search-box { width: 100%; }
   .events-toolbar { align-items: stretch; flex-direction: column; }
   .events-toolbar .search-box { width: 100%; }
+  .event-industry-filter { justify-content: space-between; width: 100%; }
   .notifications-toolbar { align-items: stretch; flex-direction: column; }
   .notifications-toolbar .search-box { width: 100%; }
   .notifications-toolbar .filter-group { width: 100%; }
