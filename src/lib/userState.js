@@ -54,6 +54,8 @@ function sanitizeNotifications(items) {
     createdAt: text(item?.createdAt, 64),
     read: item?.read === true,
     source: text(item?.source, 64),
+    eventKey: text(item?.eventKey ?? item?.event_key, 512),
+    reminderPhase: text(item?.reminderPhase ?? item?.reminder_phase, 32),
   })).filter((item) => item.id && item.title);
 }
 
