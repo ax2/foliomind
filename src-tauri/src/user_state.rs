@@ -531,7 +531,7 @@ mod tests {
                 "audits": [{"operation": "cap-call", "outcome": "success", "toolId": "qveris_finance.mkt_l1_rt", "capability": "MKT.L1.RT"}]
             }]
         });
-        let state: UserState =
+        let mut state: UserState =
             serde_json::from_value(value).expect("rich state should deserialize");
         assert!(validate(&state).is_ok());
         assert_eq!(state.watchlist[0].group, "核心持仓");
