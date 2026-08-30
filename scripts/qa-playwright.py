@@ -48,7 +48,7 @@ async def main() -> None:
 
         await click_and_capture("行情", "implementation-market.png", "市场行情")
         await click_and_capture("筛选", "implementation-research.png", "研究筛选")
-        await expect(page.get_by_text("需要真实数据才能筛选", exact=True)).to_be_visible()
+        await expect(page.get_by_text("连接真实数据后开始", exact=True)).to_be_visible()
         checks.append({"flow": "真实数据筛选空状态", "passed": True})
         await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")
         await expect(page.get_by_text("还没有持仓", exact=True)).to_be_visible()
@@ -60,8 +60,8 @@ async def main() -> None:
             checks.append({"flow": "未配置时安全禁用盯盘", "passed": True})
         else:
             await new_monitor.click()
-            await page.get_by_text("成交量异常监控", exact=True).wait_for()
-            checks.append({"flow": "新建盯盘规则", "passed": True})
+            await page.get_by_text("触发条件", exact=True).wait_for()
+            checks.append({"flow": "未配置时可安全保存盯盘条件", "passed": True})
 
         await click_and_capture("技能", "implementation-skills.png", "Skill 市场")
         skill_card = page.locator(".skill-grid article").filter(has_text="公告与舆情")

@@ -280,6 +280,40 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("region", { name: "真实公司事件列表" })).toBeInTheDocument();
   });
 
+  it("filters the real event calendar to portfolio holdings", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    const eventDate = new Date();
+    eventDate.setDate(eventDate.getDate() + 5);
+    const dateKey = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, "0")}-${String(eventDate.getDate()).padStart(2, "0")}`;
+    useLabStore.setState({
+      userStateLoaded: true,
+      eventDataLoaded: true,
+      eventDataReceivedCount: 2,
+      eventDataTotalCount: 2,
+      portfolioPositions: [{ id: "position-1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 10, averageCost: 100 }],
+      events: [
+        { id: "event-1", date: dateKey, symbol: "600519", name: "贵州茅台", type: "财报", title: "持仓事件", detail: "真实事件", source: "真实事件源" },
+        { id: "event-2", date: dateKey, symbol: "300750", name: "宁德时代", type: "财报", title: "非持仓事件", detail: "真实事件", source: "真实事件源" },
+      ],
+    });
+    render(<EventsView />);
+    expect(await screen.findByText("持仓事件")).toBeInTheDocument();
+    expect(screen.getByText("非持仓事件")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "只看持仓" }));
+    expect(screen.getByText("持仓事件")).toBeInTheDocument();
+    expect(screen.queryByText("非持仓事件")).not.toBeInTheDocument();
+  });
+
   it("pauses background quote polling and refreshes when the page returns", async () => {
     const refreshLiveData = vi.fn().mockResolvedValue(true);
     integrationMocks.loadIntegrationStatus.mockResolvedValue({

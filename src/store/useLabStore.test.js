@@ -456,6 +456,19 @@ describe("lab store streaming lifecycle", () => {
     expect(messages.filter((message) => message.role === "assistant")).toHaveLength(2);
   });
 
+  it("does not send an unconfigured local-host prompt over the network", async () => {
+    useLabStore.setState({ integrationStatus: { credentialConfigured: false, settings: { modelId: "" } } });
+
+    await expect(useLabStore.getState().sendMessage("分析 AAPL")).resolves.toBe(false);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "数据服务凭据需要重新确认，请到设置中检查配置",
+      mode: "error",
+      streaming: false,
+    });
+  });
+
   it("cancels an active analysis and replaces its partial output in place", async () => {
     let rejectAnalysis;
     runtime.askPi.mockImplementation((_prompt, { onProgress }) => {
