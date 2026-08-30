@@ -1,8 +1,9 @@
 import { ArrowsClockwise, BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { stocks } from "../data/market.js";
 import { formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "../lib/quoteFormatting.js";
 import { useLabStore } from "../store/useLabStore.js";
+import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
 import { MarketChart } from "./MarketChart.jsx";
 
 const ranges = ["分时", "5日", "日K", "周K", "月K", "季K", "年K"];
@@ -34,6 +35,7 @@ export function StockWorkspace() {
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const sendMessage = useLabStore((state) => state.sendMessage);
   const setActiveView = useLabStore((state) => state.setActiveView);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const stock = stocks[symbol] ?? watchlist.find((item) => item.symbol === symbol) ?? { symbol, name: symbol, market: "", category: "" };
   const quote = liveQuotes[symbol];
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
@@ -63,7 +65,7 @@ export function StockWorkspace() {
       <section className={`data-health-strip data-health-${healthState}`} aria-label="行情数据状态">
         <span className="data-health-dot" aria-hidden="true" />
         <div className="data-health-copy"><strong>{healthTitle}</strong><small>{healthDetail}</small></div>
-        <button className="data-health-action" disabled={healthState === "loading"} onClick={() => { if (realDataMode) void refreshLiveData(); else setActiveView("settings"); }}><ArrowsClockwise size={14} />{realDataMode ? healthState === "loading" ? "更新中…" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button>
+        <button className="data-health-action" disabled={healthState === "loading"} onClick={() => { if (realDataMode) void refreshLiveData(); else setActiveView("settings"); }}><ArrowsClockwise size={14} />{realDataMode ? healthState === "loading" ? "更新中…" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button><button className="data-health-evidence" type="button" onClick={() => setEvidenceOpen(true)}>来源与证据</button>
       </section>
       <section className="quote-overview">
         <div className={change == null || change >= 0 ? "primary-price up" : "primary-price down"}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small className={hasQuote ? `quote-source quote-source-${freshness.state}` : ""}>{hasQuote ? `数据源 · ${quote.source || "真实数据"} · ${formatQuoteFreshness(quote.asOf)}` : realDataMode ? liveDataLoading ? "正在查询真实行情" : "暂无已查询数据 · 点击实时数据获取" : "配置模型后显示真实行情"}</small></div>
@@ -76,6 +78,7 @@ export function StockWorkspace() {
       <section className="fundamentals"><h3>关键指标 <small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "真实财务数据"}</small></h3><div>{[["营业收入", "revenue"], ["净利润", "netProfit"], ["毛利率", "grossMargin"], ["净利率", "netMargin"], ["ROE", "roe"]].map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.fundamentals?.[key] ?? quote?.fundamentals?.[label])}</dd><small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "查询详情后显示"}</small></dl>)}</div></section>
       <section className="company-intro"><h3>公司简介</h3><p>{quote?.companyDescription || (quoteDetailsError[symbol] ? "公司资料暂时未返回，系统会稍后自动重试。" : realDataMode ? liveDataLoading || !liveDataLastRefreshAt ? "正在获取公司简介；没有返回时保持空状态。" : "暂无已返回的真实公司简介。" : "配置数据服务后显示真实公司简介。")}</p>{quoteDetailsError[symbol] && <button onClick={() => { void retryQuoteDetails(symbol); }}>重新获取详情</button>}</section>
       <footer className="source-line">{realDataMode ? "仅显示已返回的真实数据；空值不会以示例数据填充。" : "当前为界面预览；配置模型后将只显示真实数据。"}</footer>
+      <EvidenceDrawer open={evidenceOpen} onClose={() => setEvidenceOpen(false)} quote={quote} symbol={symbol} name={stock.name} provider={realDataMode ? provider : "未配置"} channel={realDataMode ? channel : "未配置"} lastRefreshAt={liveDataLastRefreshAt} loading={Boolean(selectedQuoteLoading?.[symbol])} refreshLabel={realDataMode ? "重新获取当前行情" : "去设置"} onRefresh={() => realDataMode ? refreshSelectedQuote(symbol) : setActiveView("settings")} />
     </main>
   );
 }
