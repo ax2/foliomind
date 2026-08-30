@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
+import { EventsView } from "./components/SecondaryViews.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
@@ -65,6 +66,22 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("连接真实数据后开始")).toBeInTheDocument();
     expect(screen.getByText(/不会使用示例行情填充/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "搜索标的" })).toBeInTheDocument();
+  });
+
+  it("retries the events request after the background quote refresh settles", async () => {
+    const refreshEvents = vi.fn().mockResolvedValue(false);
+    useLabStore.setState({
+      activeView: "events",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      eventDataLoaded: false,
+      eventDataLoading: false,
+      liveDataLoading: true,
+      refreshEvents,
+    });
+    render(<EventsView />);
+    expect(refreshEvents).not.toHaveBeenCalled();
+    act(() => useLabStore.setState({ liveDataLoading: false }));
+    await waitFor(() => expect(refreshEvents).toHaveBeenCalledOnce());
   });
 
   it("opens Skills and toggles install state", () => {
