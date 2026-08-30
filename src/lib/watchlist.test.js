@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeWatchlistItem, sortWatchlistItems, watchlistGroupForMarket } from "./watchlist.js";
+import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, watchlistGroupForMarket } from "./watchlist.js";
 
 describe("watchlist organization", () => {
   it("keeps explicit groups and migrates legacy market labels", () => {
@@ -15,5 +15,21 @@ describe("watchlist organization", () => {
     expect(sortWatchlistItems(items, quotes, "change", "asc").map((item) => item.symbol)).toEqual(["B", "A", "C"]);
     expect(sortWatchlistItems(items, {}, "custom").map((item) => item.symbol)).toEqual(["A", "B", "C"]);
   });
-});
 
+  it("round-trips the user watchlist without quotes and parses CSV/TXT imports", () => {
+    const csv = watchlistCsv([{ symbol: "600519", name: "贵州茅台", market: "A股", category: "白酒", group: "核心" }, { symbol: "AAPL", name: "Apple", market: "美股", group: "海外" }]);
+    expect(csv).not.toContain("price");
+    const parsedCsv = parseWatchlistImport(csv);
+    expect(parsedCsv.items).toMatchObject([{ symbol: "600519", name: "贵州茅台", group: "核心" }, { symbol: "AAPL", name: "Apple", group: "海外" }]);
+    const parsedTxt = parseWatchlistImport("NASDAQ:AAPL\nSSE:600519\nSSE:600519\n# comment\n");
+    expect(parsedTxt.items).toMatchObject([{ symbol: "AAPL", market: "美股" }, { symbol: "600519", market: "A股" }]);
+    expect(parsedTxt.skipped).toBe(1);
+  });
+
+  it("reports malformed rows and enforces the import bound", () => {
+    const result = parseWatchlistImport("代码,名称\nBAD SPACE,错误\nAAPL,Apple\nMSFT,Microsoft", { maxItems: 1 });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].symbol).toBe("AAPL");
+    expect(result.errors).toEqual([{ line: 2, reason: "代码格式无法识别" }, { line: 4, reason: "最多导入 1 个标的" }]);
+  });
+});

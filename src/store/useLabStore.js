@@ -674,6 +674,24 @@ export const useLabStore = create((set, get) => ({
     if (get().watchlist.some((entry) => entry.symbol === value.symbol)) throw new Error("该标的已经在自选中");
     set((state) => ({ watchlist: [...state.watchlist, value], selectedSymbol: value.symbol })); await get().persistUserState(); return value;
   },
+  importWatchlistItems: async (items) => {
+    const current = get().watchlist;
+    const seen = new Set(current.map((item) => normalizeWatchlistItem(item).symbol));
+    const added = [];
+    let skipped = 0;
+    for (const item of Array.isArray(items) ? items : []) {
+      const value = normalizeWatchlistItem({ ...item, market: String(item?.market ?? "").trim() || "自定义", category: String(item?.category ?? "").trim() || "自选" });
+      if (!value.symbol || !value.name || value.symbol.length > 64 || value.name.length > 128) { skipped += 1; continue; }
+      if (seen.has(value.symbol)) { skipped += 1; continue; }
+      if (current.length + added.length >= 200) throw new Error("自选最多保存 200 个标的");
+      seen.add(value.symbol);
+      added.push(value);
+    }
+    if (!added.length) throw new Error("没有可导入的新标的（可能已存在或格式无效）");
+    set((state) => ({ watchlist: [...state.watchlist, ...added], selectedSymbol: added[0].symbol }));
+    await get().persistUserState();
+    return { added: added.length, skipped };
+  },
   savePortfolioPosition: async (input) => {
     const normalized = normalizePortfolioPosition(input);
     if (!normalized) throw new Error("请输入有效的持仓数量和成本");

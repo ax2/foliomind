@@ -191,12 +191,56 @@ textarea:focus-visible {
 .sidebar-heading > div {
   display: flex;
 }
+.sidebar-heading-actions {
+  gap: 2px;
+}
 .sidebar-heading button {
   width: 30px;
   height: 30px;
   display: grid;
   place-items: center;
   color: #626b78;
+}
+.sidebar-tools {
+  position: relative;
+}
+.sidebar-tools-menu {
+  position: absolute;
+  z-index: 20;
+  top: 34px;
+  right: 0;
+  width: 206px;
+  padding: 6px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid #dfe4eb;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(38, 51, 69, .14);
+}
+.sidebar-tools-menu button {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: #465264;
+  font-size: 12px;
+  text-align: left;
+}
+.sidebar-tools-menu button:hover,
+.sidebar-tools-menu button:focus-visible {
+  background: #eef5ff;
+  color: var(--blue);
+}
+.sidebar-tools-menu small {
+  padding: 5px 8px 3px;
+  color: #8a94a2;
+  font-size: 10px;
+  line-height: 1.35;
 }
 .watch-groups {
   overflow: auto;
@@ -350,6 +394,15 @@ textarea:focus-visible {
   gap: 7px;
   color: #858d99;
   font-size: 11px;
+}
+.sidebar-feedback {
+  margin: 4px 10px 0;
+  color: #26734d;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.sidebar-feedback.error {
+  color: #b44848;
 }
 .status-dot {
   width: 7px;

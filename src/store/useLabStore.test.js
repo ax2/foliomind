@@ -182,6 +182,15 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().watchlist.at(-1)).toMatchObject({ symbol: "TSLA", group: "成长观察" });
   });
 
+  it("imports watchlist items atomically and skips existing symbols", async () => {
+    const result = await useLabStore.getState().importWatchlistItems([
+      { symbol: "600519", name: "贵州茅台", market: "A股" },
+      { symbol: "TSLA", name: "Tesla", market: "美股", group: "海外" },
+    ]);
+    expect(result).toEqual({ added: 1, skipped: 1 });
+    expect(useLabStore.getState().watchlist.at(-1)).toMatchObject({ symbol: "TSLA", group: "海外" });
+  });
+
   it("records portfolio plan actions and keeps the plan edge auditable", async () => {
     const saved = await useLabStore.getState().savePortfolioPosition({ symbol: "AAPL", name: "Apple", market: "US", quantity: 2, averageCost: 100, takeProfitPrice: 125, planThesis: "盈利增长", planHorizon: "swing" });
     expect(saved).toMatchObject({ planStatus: "active", planHorizon: "swing", planActions: [{ type: "created" }] });
