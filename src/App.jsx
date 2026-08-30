@@ -1,7 +1,7 @@
 import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { ChatView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
+import { ChatView, EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
 import { LIVE_QUOTE_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
 import { useEffect } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
@@ -51,6 +51,7 @@ export function App() {
     if (activeView === "market") return <div className="secondary-view-shell"><LiveQuotesStrip /><MarketView /></div>;
     if (activeView === "research") return <div className="secondary-view-shell"><LiveQuotesStrip /><ResearchView /></div>;
     if (activeView === "monitor") return <div className="secondary-view-shell"><LiveQuotesStrip /><MonitorView /></div>;
+    if (activeView === "events") return <div className="secondary-view-shell"><LiveQuotesStrip /><EventsView /></div>;
     if (activeView === "portfolio") return <PortfolioView />;
     if (activeView === "notifications") return <NotificationsView />;
     if (activeView === "skills") return <SkillsView />;

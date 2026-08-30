@@ -1046,6 +1046,22 @@ textarea:focus-visible {
 }
 .research-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
 .research-toolbar .search-box { width: min(340px, 100%); }
+.events-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+.events-toolbar .search-box { width: min(380px, 100%); }
+.event-calendar-list { display: grid; gap: 10px; margin-top: 18px; }
+.event-calendar-card { display: grid; grid-template-columns: 104px 14px minmax(0, 1fr); gap: 12px; align-items: start; border: 1px solid var(--line); border-radius: 10px; padding: 15px 16px; background: #fff; }
+.event-calendar-date { display: grid; gap: 4px; color: #34465e; }
+.event-calendar-date strong { font-size: 12px; font-variant-numeric: tabular-nums; }
+.event-calendar-date small { color: var(--muted); font-size: 10px; }
+.event-calendar-dot { width: 9px; height: 9px; margin-top: 3px; border: 2px solid #79aef2; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px #edf5ff; }
+.event-calendar-copy { min-width: 0; }
+.event-calendar-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.event-calendar-heading span { border-radius: 999px; padding: 3px 7px; background: #edf5ff; color: #3573bf; font-size: 10px; }
+.event-calendar-heading strong { color: #4d5868; font-size: 11px; }
+.event-calendar-copy h2 { margin: 7px 0 0; color: #202a38; font-size: 14px; }
+.event-calendar-copy p { margin: 5px 0 0; color: #657181; font-size: 11px; line-height: 1.55; }
+.event-calendar-meta { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.event-calendar-meta a { color: #3573bf; }
 .filter-group { display: inline-flex; border: 1px solid #dfe2e7; border-radius: 8px; overflow: hidden; }
 .filter-group button, .filter-toggle { border: 0; padding: 8px 11px; background: #fff; color: #697586; cursor: pointer; font-size: 11px; }
 .filter-group button + button { border-left: 1px solid #dfe2e7; }
@@ -1541,8 +1557,11 @@ textarea:focus-visible {
   .condition-row .condition-value { min-width: 0; }
   .research-toolbar { align-items: stretch; flex-direction: column; }
   .research-toolbar .search-box { width: 100%; }
+  .events-toolbar { align-items: stretch; flex-direction: column; }
+  .events-toolbar .search-box { width: 100%; }
   .filter-group, .filter-toggle { width: 100%; }
   .filter-group button { flex: 1; }
+  .event-calendar-card { grid-template-columns: 72px 10px minmax(0, 1fr); gap: 8px; padding: 12px 10px; }
   .event-list article {
     grid-template-columns: 40px 12px minmax(0, 1fr);
   }
