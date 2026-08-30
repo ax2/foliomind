@@ -125,6 +125,7 @@ describe("FolioMind core flows", () => {
     window.localStorage.clear();
     render(<App />);
     await waitFor(() => expect(useLabStore.getState().userStateLoaded).toBe(true));
+    act(() => useLabStore.setState({ portfolioPositions: [] }));
     fireEvent.click(screen.getByRole("button", { name: "组合" }));
     fireEvent.click(screen.getByRole("button", { name: "添加第一笔持仓" }));
     fireEvent.change(screen.getByLabelText("持仓数量"), { target: { value: "10" } });
