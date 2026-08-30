@@ -77,18 +77,59 @@ export function createRuntimeGate() {
 
 const runtimeGate = createRuntimeGate();
 
-function redact(value) {
+function redact(value, max = 800) {
   return String(value || "")
     .replace(/Bearer\s+[^\s,;"']+/gi, "Bearer [REDACTED]")
     .replace(/(api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;"']+/gi, (_match, key) => `${key}=[REDACTED]`)
     .replace(/([?&](?:api[_-]?key|token|secret)=)[^&\s]+/gi, "$1[REDACTED]")
     .replace(/\b(?:sk|cap)_[A-Za-z0-9._-]+\b/g, "[REDACTED]")
-    .slice(0, 800);
+    .slice(0, max);
+}
+function debugPayload(value, max = 3_000) {
+  if (value == null) return "";
+  try {
+    const encoded = JSON.stringify(value);
+    return redact(encoded, max);
+  } catch { return redact(value).slice(0, max); }
+}
+export function costFrom(value, depth = 0) {
+  if (depth > 4 || value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return { amount: value, unit: "credits" };
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)) && Number(value) >= 0) return { amount: Number(value), unit: "credits" };
+  if (Array.isArray(value)) { for (const item of value) { const found = costFrom(item, depth + 1); if (found) return found; } return null; }
+  if (typeof value !== "object") return null;
+  const keys = ["qveris_cost", "qverisCost", "cost", "charged_credits", "credits_used", "fee", "amount"];
+  for (const key of keys) {
+    const candidate = value[key];
+    if (candidate && typeof candidate === "object") {
+      const nested = costFrom(candidate, depth + 1);
+      if (nested) return { ...nested, unit: String(candidate.currency || candidate.unit || candidate.cost_unit || nested.unit) };
+    }
+    const numeric = Number(candidate);
+    if (candidate != null && Number.isFinite(numeric) && numeric >= 0) return { amount: numeric, unit: String(value.currency || value.unit || value.cost_unit || "credits") };
+  }
+  for (const key of ["usage", "billing", "meta", "metadata", "result", "data"]) { const found = costFrom(value[key], depth + 1); if (found) return found; }
+  return null;
+}
+export function costSummary(logs) {
+  const summary = { qverisCalls: 0, qverisCost: 0, qverisCostKnown: 0, modelCalls: 0, modelCost: 0, modelCostKnown: 0, units: new Set() };
+  for (const entry of logs) {
+    const isModel = entry.type === "model";
+    // Direct CAP calls are the fast-path QVeris provider calls and must be
+    // included alongside the older search/inspect/call audit events.
+    const isQveris = entry.type === "qveris" || entry.type === "cap";
+    if (isModel) summary.modelCalls += 1; else if (isQveris) summary.qverisCalls += 1;
+    const amount = Number(entry.cost?.amount);
+    if (!Number.isFinite(amount)) continue;
+    summary.units.add(String(entry.cost.unit || "credits"));
+    if (isModel) { summary.modelCost += amount; summary.modelCostKnown += 1; } else if (isQveris) { summary.qverisCost += amount; summary.qverisCostKnown += 1; }
+  }
+  return { ...summary, qverisCost: Number(summary.qverisCost.toFixed(8)), modelCost: Number(summary.modelCost.toFixed(8)), units: [...summary.units] };
 }
 function logInvocation(event) {
   if (devVariables.logLevel === "silent") return;
   if (devVariables.logLevel === "error" && Number(event.status || 200) < 400) return;
-  devLogs.push({ id: randomUUID(), at: new Date().toISOString(), ...event, detail: event.detail ? redact(event.detail) : undefined });
+  devLogs.push({ id: randomUUID(), at: new Date().toISOString(), ...event, detail: event.detail ? redact(event.detail) : undefined, params: event.params ? debugPayload(event.params) : undefined, response: event.response ? debugPayload(event.response) : undefined, reason: event.reason ? redact(event.reason) : undefined });
   while (devLogs.length > 500) devLogs.shift();
 }
 function safeSettings(settings) {
@@ -284,7 +325,7 @@ async function queryDirectCapability(input, settings, key, signal) {
     const cacheGeneration = directDataCacheGeneration;
     const cached = directDataCache.get(cacheKeyValue);
     if (cached && ttl > 0 && Date.now() - cached.createdAt < ttl) {
-      logInvocation({ type: "cap", operation: "cap-cache-hit", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: 0 });
+      logInvocation({ type: "cap", operation: "cap-cache-hit", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: 0, params: parameters, response: cached.normalized });
       return { selected, normalized: structuredClone(cached.normalized), memoryCacheHit: true };
     }
     const inFlight = directDataInFlight.get(cacheKeyValue);
@@ -300,18 +341,19 @@ async function queryDirectCapability(input, settings, key, signal) {
     const runId = `cap_${randomUUID()}`;
     const startedAt = Date.now();
     const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(selected.toolId)}`;
+    let upstreamResult;
     const request = (async () => {
-      const result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, signal, 1);
-      return normalizeCapabilityResult(callKind, input, result);
+      upstreamResult = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, signal, 1);
+      return normalizeCapabilityResult(callKind, input, upstreamResult);
     })();
     directDataInFlight.set(cacheKeyValue, request);
     try {
       const normalized = await request;
       if (ttl > 0 && cacheGeneration === directDataCacheGeneration) directDataCache.set(cacheKeyValue, { createdAt: Date.now(), normalized: structuredClone(normalized) });
-      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: false, durationMs: Date.now() - startedAt });
+      logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: false, durationMs: Date.now() - startedAt, params: parameters, response: normalized, cost: costFrom(upstreamResult) });
       return { selected, normalized, memoryCacheHit: false };
     } catch (error) {
-      logInvocation({ type: "cap", operation: "cap-call", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: false, durationMs: Date.now() - startedAt, detail: error.message });
+      logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: false, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: parameters });
       throw error;
     } finally {
       if (directDataInFlight.get(cacheKeyValue) === request) directDataInFlight.delete(cacheKeyValue);
@@ -498,10 +540,10 @@ async function qverisOperation(operation, input, settings, key, runId, phases, s
   try {
     result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify(payload) }, signal);
   } catch (error) {
-    logInvocation({ type: "qveris", operation, status: Number(error.status) || 502, durationMs: Date.now() - startedAt, detail: error.message });
+    logInvocation({ type: "qveris", operation, method: "POST", path: url, status: Number(error.status) || 502, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: payload });
     throw error;
   }
-  logInvocation({ type: "qveris", operation, status: 200, durationMs: Date.now() - startedAt, cacheHit: false });
+  logInvocation({ type: "qveris", operation, method: "POST", path: url, status: 200, durationMs: Date.now() - startedAt, cacheHit: false, params: payload, response: result, cost: costFrom(result) });
   if (operation === "search") { const searchId = String(result.search_id || result.result?.search_id || ""); const ids = idsFromSearch(result); if (!searchId || !ids.size) throw new Error("Search 返回缺少 search_id 或候选工具"); phases.searches.set(searchId, ids); }
   if (operation === "inspect") for (const id of input.tool_ids) phases.inspected.add(`${input.search_id}:${id}`);
   return result;
@@ -571,9 +613,9 @@ async function runPromptAgent(message, settings, key, signal) {
     let response;
     try {
       response = await upstreamWithRetry(endpoint(settings.modelGatewayBaseUrl, "chat/completions"), { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model, messages, tools: toolDefinitions(), tool_choice: "auto", max_tokens: 4096 }) }, signal);
-      logInvocation({ type: "model", operation: "chat-completions", model, status: 200, durationMs: Date.now() - modelStartedAt });
+      logInvocation({ type: "model", operation: "chat-completions", method: "POST", path: endpoint(settings.modelGatewayBaseUrl, "chat/completions"), model, status: 200, durationMs: Date.now() - modelStartedAt, params: { model, messageCount: messages.length, toolChoice: "auto" }, response: { id: response.id, model: response.model, choices: response.choices?.map((choice) => ({ finish_reason: choice.finish_reason, hasContent: Boolean(choice.message?.content), toolCallCount: Array.isArray(choice.message?.tool_calls) ? choice.message.tool_calls.length : 0 })), usage: response.usage }, cost: costFrom(response) });
     } catch (error) {
-      logInvocation({ type: "model", operation: "chat-completions", model, status: Number(error.status) || 502, durationMs: Date.now() - modelStartedAt, detail: error.message });
+      logInvocation({ type: "model", operation: "chat-completions", method: "POST", path: endpoint(settings.modelGatewayBaseUrl, "chat/completions"), model, status: Number(error.status) || 502, durationMs: Date.now() - modelStartedAt, detail: error.message, reason: error.message, params: { model, messageCount: messages.length, toolChoice: "auto" } });
       throw error;
     }
     const assistant = response.choices?.[0]?.message;
@@ -644,7 +686,19 @@ async function route(req, body) {
   if (method === "GET" && path === "/api/dev/overview") {
     const settings = await readJson(settingsFile, defaultSettings); const key = await readKey();
     const cache = await readToolCache();
-    return { logs: devLogs.slice(-200), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings) }, variables: { ...devVariables } };
+    return { logs: devLogs.slice(-200), costSummary: costSummary(devLogs), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings) }, variables: { ...devVariables } };
+  }
+  if (method === "GET" && path === "/api/dev/capabilities") {
+    const settings = await readJson(settingsFile, defaultSettings);
+    return capabilityCatalog(settings);
+  }
+  if (method === "POST" && path === "/api/dev/capabilities/test") {
+    const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
+    const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
+    if (!String(input.symbol || "").trim() || !BUILTIN_CAPABILITY_CATALOG[String(input.kind || "")]) throw new Error("能力测试需要有效的 kind 和 symbol");
+    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
+    try { return await queryDirectCapability(input, settings, key, controller.signal); }
+    finally { clearTimeout(timeout); }
   }
   if (method === "DELETE" && path === "/api/dev/logs") { devLogs.length = 0; return { cleared: true }; }
   if (method === "PATCH" && path === "/api/dev/variables") {

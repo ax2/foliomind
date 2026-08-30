@@ -1,10 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, retryDelayMs, shouldInvalidateToolCache, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, retryDelayMs, shouldInvalidateToolCache, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
+
+test("extracts provider and model gateway costs without inventing missing charges", () => {
+  assert.deepEqual(costFrom({ qveris_cost: 0.012, currency: "credits" }), { amount: 0.012, unit: "credits" });
+  assert.deepEqual(costFrom({ usage: { cost: { amount: "0.4", unit: "USD" } } }), { amount: 0.4, unit: "USD" });
+  assert.equal(costFrom({ usage: { prompt_tokens: 10 } }), null);
+  assert.deepEqual(costSummary([{ type: "qveris", cost: { amount: 0.1, unit: "credits" } }, { type: "cap", cost: { amount: 0.05, unit: "credits" } }, { type: "model", cost: { amount: 0.2, unit: "credits" } }, { type: "model" }]), { qverisCalls: 2, qverisCost: 0.15, qverisCostKnown: 2, modelCalls: 2, modelCost: 0.2, modelCostKnown: 1, units: ["credits"] });
 });
 
 test("keeps the qveris_finance CAP contract local and normalizes real envelopes", () => {

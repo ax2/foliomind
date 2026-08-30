@@ -39,6 +39,16 @@ pub struct AuditEvent {
     pub tool_call_id: String,
     pub outcome: String,
     pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_unit: Option<String>,
 }
 
 #[derive(Clone)]
@@ -341,22 +351,32 @@ fn handle_connection(
     match result {
         Ok(result) => {
             audit(AuditEvent {
-                operation,
+                operation: operation.clone(),
                 run_id: environment.run_id,
                 tool_call_id,
                 outcome: "success".into(),
                 detail: None,
+                endpoint: Some(format!("{base_url}/{}", operation)),
+                parameters: Some(bridge.input.clone()),
+                response: Some(audit_response(&result)),
+                cost: extract_cost(&result),
+                cost_unit: extract_cost(&result).map(|_| "credits".into()),
             });
             let _ = write_response(stream, 200, json!({"result":result}));
         }
         Err(error) => {
             let safe = redact(&error);
             audit(AuditEvent {
-                operation,
+                operation: operation.clone(),
                 run_id: environment.run_id,
                 tool_call_id,
                 outcome: "error".into(),
                 detail: Some(safe.clone()),
+                endpoint: Some(format!("{base_url}/{}", operation)),
+                parameters: Some(bridge.input.clone()),
+                response: None,
+                cost: None,
+                cost_unit: None,
             });
             let _ = write_response(stream, 502, json!({"error":safe}));
         }
@@ -1021,6 +1041,55 @@ fn redact(value: &str) -> String {
         .chars()
         .take(800)
         .collect()
+}
+
+fn extract_cost(value: &Value) -> Option<f64> {
+    fn walk(value: &Value, depth: usize) -> Option<f64> {
+        if depth > 4 {
+            return None;
+        }
+        match value {
+            Value::Number(number) => number
+                .as_f64()
+                .filter(|value| value.is_finite() && *value >= 0.0),
+            Value::String(text) => text
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value >= 0.0),
+            Value::Array(items) => items.iter().find_map(|item| walk(item, depth + 1)),
+            Value::Object(map) => {
+                for key in [
+                    "qveris_cost",
+                    "qverisCost",
+                    "cost",
+                    "charged_credits",
+                    "credits_used",
+                    "fee",
+                ] {
+                    if let Some(found) = map.get(key).and_then(|item| walk(item, depth + 1)) {
+                        return Some(found);
+                    }
+                }
+                ["usage", "billing", "meta", "metadata", "result"]
+                    .iter()
+                    .find_map(|key| map.get(*key).and_then(|item| walk(item, depth + 1)))
+            }
+            Value::Null | Value::Bool(_) => None,
+        }
+    }
+    walk(value, 0)
+}
+
+fn audit_response(value: &Value) -> Value {
+    let encoded = serde_json::to_vec(value).unwrap_or_default();
+    if encoded.len() <= 4_096 {
+        return value.clone();
+    }
+    let keys = value
+        .as_object()
+        .map(|map| map.keys().take(40).cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    json!({"truncated": true, "bytes": encoded.len(), "keys": keys})
 }
 
 #[cfg(test)]

@@ -79,3 +79,5 @@ Rust Host 清理继承环境，不向 Pi 传递任何 `QVERIS_*`、OAuth 或控�
 ## Windows 与 macOS
 
 Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳定 WiX UpgradeCode 和 current-user NSIS 模式，升级覆盖应用文件且不触碰安装目录之外的用户配置。生产发布仍需在对应平台补齐代码签名、公证、自动更新签名和干净安装烟测。
+
+开发面板读取本地 Host 的能力目录与脱敏调用审计，可对内置 CAP 做真实测试；能力目录仅把已验证的稳定 tool schema 暴露给 Skill，Provider 尚未验证的能力只显示总量，不伪装为可调用工具。Windows 更新依靠稳定 UpgradeCode/current-user 模式覆盖安装，不能在发布脚本中先删除旧安装目录或用户配置。

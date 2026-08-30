@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarDots, CaretLeft, CaretRight, CheckCircle, DownloadSimple, Funnel, Info, List, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
@@ -16,6 +16,7 @@ import { buildMonthGrid, eventDateKey, eventsByDate, monthCursorFromKey, monthKe
 import { CopilotPanel } from "./CopilotPanel.jsx";
 import { DataState } from "./DataState.jsx";
 import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
+import { anomalyLabel, detectMarketAnomalies } from "../lib/anomalyDetection.js";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error) => friendlySettingsMessage(error);
@@ -131,12 +132,14 @@ export function MarketView() {
   const setActiveView = useLabStore((state) => state.setActiveView);
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const returnedQuotes = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price));
+  const anomalies = useMemo(() => detectMarketAnomalies(watchlist, liveQuotes), [watchlist, liveQuotes]);
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedQuotes.length, totalCount: watchlist.length });
   const retry = () => { void refreshLiveData(); };
   const openSettings = () => setActiveView("settings");
   return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></header>
     {returnedQuotes.length > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedQuotes.length} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     <div className="index-board">{returnedQuotes.length > 0 ? returnedQuotes.map((item) => { const quote = liveQuotes[item.symbol]; const freshness = quoteFreshness(quote.asOf); return <article key={item.symbol}><span>{item.name} <small>{item.symbol}</small></span><strong>{formatPrice(quote.price)}</strong><small className={quote.change >= 0 ? "up" : "down"}>{formatPercent(quote.change)}</small><em className={`quote-source quote-source-${freshness.state}`}>{quote.source || "数据服务"} · {formatQuoteFreshness(quote.asOf)}</em></article>; }) : <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} />}</div>
+    {returnedQuotes.length > 0 ? <section className="anomaly-radar" aria-label="异动雷达"><div className="anomaly-radar-heading"><div><h2>异动雷达</h2><p>基于当前已返回的真实行情，自动识别价格与量能异常。</p></div><span>{anomalies.length ? `${anomalies.length} 条` : "暂无异动"}</span></div>{anomalies.length ? <div className="anomaly-list">{anomalies.map((anomaly) => <article className={`anomaly-card ${anomaly.severity}`} key={anomaly.id}><div className="anomaly-card-main"><strong>{anomaly.name}</strong><small>{anomaly.symbol} · {anomaly.market || "自选"}</small></div><div className="anomaly-card-metric"><b>{anomalyLabel(anomaly)}</b><small>{anomaly.type === "volume" ? `阈值 ${anomaly.threshold.toFixed(2)} 倍` : `阈值 ±${anomaly.threshold.toFixed(1)}%`}</small></div><div className="anomaly-card-meta"><span>{anomaly.severity === "critical" ? "高关注" : "需关注"}</span><small>{anomaly.source} · {formatQuoteFreshness(anomaly.asOf)}</small></div></article>)}</div> : <div className="anomaly-empty"><strong>当前没有符合条件的异动</strong><p>只使用已返回的涨跌幅和量比；字段缺失或数据不足时保持空态。</p></div>}<p className="security-note">异动阈值：涨跌幅绝对值 ≥ 4%，量比 ≥ 2.5 倍。仅作信息提示，不构成投资建议。</p></section> : null}
     <section className="market-table"><h2>我的自选</h2><div className="table-head"><span>名称 / 代码</span><span>最新价</span><span>涨跌幅</span><span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol]; return <div className="table-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span>{Number.isFinite(quote?.price) ? formatPrice(quote.price) : "—"}</span><span className={Number.isFinite(quote?.change) ? quote.change >= 0 ? "up" : "down" : ""}>{formatPercent(quote?.change)}</span><span>{item.market}</span></div>; })}</section>
     <p className="security-note">仅显示已返回的真实数据{liveDataLastRefreshAt ? ` · ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")} 更新` : ""}；缺失值保持为空。</p>
   </div>;
