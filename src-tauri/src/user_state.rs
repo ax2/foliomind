@@ -10,6 +10,7 @@ const MAX_RULES: usize = 200;
 const MAX_NOTIFICATIONS: usize = 500;
 const MAX_PORTFOLIO_POSITIONS: usize = 200;
 const MAX_MONITOR_HISTORY: usize = 500;
+const MAX_PORTFOLIO_REVIEWS: usize = 90;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Serialize)]
@@ -203,6 +204,67 @@ pub struct MonitorHistoryEntry {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReviewPosition {
+    pub symbol: String,
+    pub name: String,
+    pub current_price: f64,
+    pub pnl: Option<f64>,
+    pub pnl_percent: Option<f64>,
+    pub weight: Option<f64>,
+    pub as_of: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRiskSignal {
+    pub level: String,
+    pub title: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewEvent {
+    pub symbol: String,
+    pub name: String,
+    pub date: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub title: String,
+    pub source: String,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortfolioReview {
+    pub id: String,
+    pub kind: String,
+    pub trading_date: String,
+    pub created_at: String,
+    pub as_of: String,
+    pub priced_count: u64,
+    pub total_count: u64,
+    pub total_cost: Option<f64>,
+    pub total_market_value: Option<f64>,
+    pub total_pnl: Option<f64>,
+    pub total_pnl_percent: Option<f64>,
+    pub top_gainer: Option<ReviewPosition>,
+    pub top_loser: Option<ReviewPosition>,
+    #[serde(default)]
+    pub positions: Vec<ReviewPosition>,
+    #[serde(default)]
+    pub risk_signals: Vec<ReviewRiskSignal>,
+    #[serde(default)]
+    pub upcoming_events: Vec<ReviewEvent>,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    pub disclaimer: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserState {
     pub watchlist: Vec<WatchItem>,
     pub monitor_rules: Vec<MonitorRule>,
@@ -211,6 +273,8 @@ pub struct UserState {
     pub portfolio_positions: Vec<PortfolioPosition>,
     #[serde(default)]
     pub monitor_history: Vec<MonitorHistoryEntry>,
+    #[serde(default)]
+    pub portfolio_reviews: Vec<PortfolioReview>,
 }
 
 impl Default for UserState {
@@ -263,6 +327,7 @@ impl Default for UserState {
             notifications: Vec::new(),
             portfolio_positions: Vec::new(),
             monitor_history: Vec::new(),
+            portfolio_reviews: Vec::new(),
         }
     }
 }
@@ -315,6 +380,7 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || state.notifications.len() > MAX_NOTIFICATIONS
         || state.portfolio_positions.len() > MAX_PORTFOLIO_POSITIONS
         || state.monitor_history.len() > MAX_MONITOR_HISTORY
+        || state.portfolio_reviews.len() > MAX_PORTFOLIO_REVIEWS
     {
         return Err("user state exceeds size limit".into());
     }
@@ -430,6 +496,76 @@ pub fn validate(state: &UserState) -> Result<(), String> {
             validate_text_allow_empty(&audit.capability, "monitor history audit capability", 128)?;
         }
     }
+    for review in &state.portfolio_reviews {
+        validate_text(&review.id, "portfolio review id", 128)?;
+        if review.kind != "close"
+            || review.priced_count == 0
+            || review.total_count < review.priced_count
+        {
+            return Err("portfolio review header is invalid".into());
+        }
+        validate_text(&review.trading_date, "portfolio review date", 32)?;
+        validate_text(&review.created_at, "portfolio review created at", 64)?;
+        validate_text_allow_empty(&review.as_of, "portfolio review as of", 128)?;
+        validate_text(&review.disclaimer, "portfolio review disclaimer", 512)?;
+        if review.positions.len() > MAX_PORTFOLIO_POSITIONS
+            || review.risk_signals.len() > 8
+            || review.upcoming_events.len() > 12
+            || review.sources.len() > 12
+        {
+            return Err("portfolio review details exceed size limit".into());
+        }
+        let validate_number = |value: Option<f64>| value.is_none_or(f64::is_finite);
+        if !validate_number(review.total_cost)
+            || !validate_number(review.total_market_value)
+            || !validate_number(review.total_pnl)
+            || !validate_number(review.total_pnl_percent)
+        {
+            return Err("portfolio review totals are invalid".into());
+        }
+        let validate_position = |position: &ReviewPosition| -> Result<(), String> {
+            validate_text(&position.symbol, "portfolio review symbol", 64)?;
+            validate_text(&position.name, "portfolio review name", 128)?;
+            validate_text_allow_empty(&position.as_of, "portfolio review quote time", 128)?;
+            validate_text(&position.source, "portfolio review quote source", 128)?;
+            if !position.current_price.is_finite()
+                || !validate_number(position.pnl)
+                || !validate_number(position.pnl_percent)
+                || !validate_number(position.weight)
+            {
+                return Err("portfolio review position value is invalid".into());
+            }
+            Ok(())
+        };
+        for position in &review.positions {
+            validate_position(position)?;
+        }
+        if let Some(position) = &review.top_gainer {
+            validate_position(position)?;
+        }
+        if let Some(position) = &review.top_loser {
+            validate_position(position)?;
+        }
+        for signal in &review.risk_signals {
+            if !matches!(signal.level.as_str(), "info" | "warning" | "critical") {
+                return Err("portfolio review risk level is invalid".into());
+            }
+            validate_text(&signal.title, "portfolio review risk title", 256)?;
+            validate_text(&signal.detail, "portfolio review risk detail", 1024)?;
+        }
+        for event in &review.upcoming_events {
+            validate_text(&event.symbol, "portfolio review event symbol", 64)?;
+            validate_text(&event.name, "portfolio review event name", 128)?;
+            validate_text(&event.date, "portfolio review event date", 64)?;
+            validate_text(&event.event_type, "portfolio review event type", 64)?;
+            validate_text(&event.title, "portfolio review event title", 256)?;
+            validate_text(&event.source, "portfolio review event source", 128)?;
+            validate_text_allow_empty(&event.url, "portfolio review event url", 1024)?;
+        }
+        for source in &review.sources {
+            validate_text(source, "portfolio review source", 128)?;
+        }
+    }
     Ok(())
 }
 
@@ -529,6 +665,15 @@ mod tests {
                 "outcome": "unknown", "triggered": null, "title": "待核实", "summary": "字段不足", "severity": "info",
                 "source": "data-service", "asOf": "2026-08-29", "conditionResults": [null],
                 "audits": [{"operation": "cap-call", "outcome": "success", "toolId": "qveris_finance.mkt_l1_rt", "capability": "MKT.L1.RT"}]
+            }],
+            "portfolioReviews": [{
+                "id": "review-1", "kind": "close", "tradingDate": "2026-08-30", "createdAt": "2026-08-30T10:00:00Z",
+                "asOf": "2026-08-30T08:00:00Z", "pricedCount": 1, "totalCount": 1, "totalCost": 12000,
+                "totalMarketValue": 13000, "totalPnl": 1000, "totalPnlPercent": 8.33,
+                "topGainer": {"symbol": "600519", "name": "贵州茅台", "currentPrice": 1300, "pnl": 1000, "pnlPercent": 8.33, "weight": 100, "asOf": "2026-08-30T08:00:00Z", "source": "provider"},
+                "topLoser": {"symbol": "600519", "name": "贵州茅台", "currentPrice": 1300, "pnl": 1000, "pnlPercent": 8.33, "weight": 100, "asOf": "2026-08-30T08:00:00Z", "source": "provider"},
+                "positions": [{"symbol": "600519", "name": "贵州茅台", "currentPrice": 1300, "pnl": 1000, "pnlPercent": 8.33, "weight": 100, "asOf": "2026-08-30T08:00:00Z", "source": "provider"}],
+                "riskSignals": [], "upcomingEvents": [], "sources": ["provider"], "disclaimer": "不构成投资建议"
             }]
         });
         let mut state: UserState =
@@ -550,9 +695,14 @@ mod tests {
             state.monitor_history[0].audits[0].tool_id,
             "qveris_finance.mkt_l1_rt"
         );
+        assert_eq!(
+            state.portfolio_reviews[0].positions[0].current_price,
+            1300.0
+        );
         let encoded = serde_json::to_value(&state).expect("rich state should serialize");
         state = serde_json::from_value(encoded).expect("rich state should round trip");
         assert_eq!(state.monitor_history.len(), 1);
+        assert_eq!(state.portfolio_reviews.len(), 1);
     }
 
     #[test]
@@ -570,5 +720,6 @@ mod tests {
         assert!(state.monitor_rules[0].conditions.is_empty());
         assert_eq!(state.monitor_rules[0].logic, "AND");
         assert!(state.monitor_history.is_empty());
+        assert!(state.portfolio_reviews.is_empty());
     }
 }

@@ -119,6 +119,18 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications).toHaveLength(1);
   });
 
+  it("stores a reproducible portfolio close review from real quotes", async () => {
+    useLabStore.setState({
+      portfolioPositions: [{ id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100 }],
+      liveQuotes: { AAPL: { price: 120, asOf: "2026-08-30T08:00:00Z", source: "provider" } },
+      events: [],
+    });
+    await expect(useLabStore.getState().createPortfolioReview()).resolves.toMatchObject({ pricedCount: 1, totalPnl: 40 });
+    expect(useLabStore.getState().portfolioReviews).toHaveLength(1);
+    await expect(useLabStore.getState().removePortfolioReview(useLabStore.getState().portfolioReviews[0].id)).resolves.toBe(true);
+    expect(useLabStore.getState().portfolioReviews).toEqual([]);
+  });
+
   it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },

@@ -35,10 +35,13 @@ export function PortfolioView() {
   const positions = useLabStore((state) => state.portfolioPositions);
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
+  const portfolioReviews = useLabStore((state) => state.portfolioReviews);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const savePortfolioPosition = useLabStore((state) => state.savePortfolioPosition);
   const updatePortfolioPlanStatus = useLabStore((state) => state.updatePortfolioPlanStatus);
   const removePortfolioPosition = useLabStore((state) => state.removePortfolioPosition);
+  const createPortfolioReview = useLabStore((state) => state.createPortfolioReview);
+  const removePortfolioReview = useLabStore((state) => state.removePortfolioReview);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const liveDataError = useLabStore((state) => state.liveDataError);
@@ -47,12 +50,20 @@ export function PortfolioView() {
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [reviewNotice, setReviewNotice] = useState("");
   const [form, setForm] = useState(portfolioFormDefaults);
-  const metrics = portfolioMetrics(positions, liveQuotes);
-  const risk = portfolioRiskMetrics(positions, liveQuotes);
+  const metrics = useMemo(() => portfolioMetrics(positions, liveQuotes), [positions, liveQuotes]);
+  const risk = useMemo(() => portfolioRiskMetrics(positions, liveQuotes), [positions, liveQuotes]);
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   const portfolioDataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: metrics.pricedCount, totalCount: metrics.totalCount });
   const money = (value) => value == null ? "—" : formatPrice(value);
+  const generateReview = async () => {
+    setReviewNotice("");
+    try {
+      const review = await createPortfolioReview();
+      setReviewNotice(`已保存 ${review.tradingDate} 复盘；仅使用 ${review.pricedCount}/${review.totalCount} 个持仓的真实行情。`);
+    } catch (reviewError) { setReviewNotice(errorMessage(reviewError)); }
+  };
   const openCreate = () => {
     const first = watchlist[0];
     setEditing(null);
@@ -99,7 +110,7 @@ export function PortfolioView() {
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
-  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><div className="page-header-actions"><button className="secondary-button" onClick={exportReport} disabled={!positions.length}><DownloadSimple size={17} />导出报告</button><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></div></header>
+  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><div className="page-header-actions"><button className="secondary-button" onClick={() => { void generateReview(); }} disabled={!positions.length}><CalendarDots size={17} />生成复盘</button><button className="secondary-button" onClick={exportReport} disabled={!positions.length}><DownloadSimple size={17} />导出报告</button><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></div></header>
     <p className="security-note">只使用已返回的真实行情计算；缺少现价的持仓会显示为“—”，不会用预览数字填充。</p>
     <section className="portfolio-summary" aria-label="组合概览">
       <article className="portfolio-card"><span>当前市值</span><strong>{money(metrics.totalMarketValue)}</strong><small>{metrics.pricedCount ? `${metrics.pricedCount}/${metrics.totalCount} 个持仓有行情` : "等待真实行情"}</small></article>
@@ -114,6 +125,11 @@ export function PortfolioView() {
     <section className="plan-overview" aria-label="交易计划概览">
       <div className="plan-overview-heading"><div><h2>交易计划</h2><small>记录买入逻辑与目标价；只做提醒和留痕，不会自动下单。</small></div><CheckCircle size={22} /></div>
       <div className="plan-metrics"><article><span>跟踪中</span><strong>{positions.filter((position) => position.planStatus === "active").length}</strong><small>需要持续观察</small></article><article><span>已执行</span><strong>{positions.filter((position) => position.planStatus === "executed").length}</strong><small>保留操作记录</small></article><article><span>未建立</span><strong>{positions.filter((position) => !position.planStatus || position.planStatus === "none").length}</strong><small>可在编辑中补充</small></article></div>
+    </section>
+    <section className="portfolio-review-overview" aria-label="盘后复盘记录">
+      <div className="portfolio-review-heading"><div><h2>盘后复盘</h2><small>保存当前真实行情快照、组合表现、风险信号和未来 7 天已返回事件。</small></div><span>{portfolioReviews.length} 份记录</span></div>
+      {reviewNotice ? <p className="portfolio-review-notice" role="status">{reviewNotice}</p> : null}
+      {portfolioReviews.length === 0 ? <p className="risk-empty">刷新持仓真实行情后生成第一份复盘；缺失行情不会被估算。</p> : <div className="portfolio-review-list">{portfolioReviews.slice(0, 12).map((review) => <details className="portfolio-review-card" key={review.id}><summary><div><strong>{review.tradingDate} 盘后复盘</strong><small>行情覆盖 {review.pricedCount}/{review.totalCount} · 数据截至 {review.asOf || "未知"}</small></div><div className={review.totalPnl == null ? "" : review.totalPnl >= 0 ? "up" : "down"}><strong>{money(review.totalPnl)}</strong><small>{review.totalPnlPercent == null ? "—" : formatPercent(review.totalPnlPercent)}</small></div></summary><div className="portfolio-review-body"><div className="portfolio-review-metrics"><article><span>组合市值</span><strong>{money(review.totalMarketValue)}</strong></article><article><span>表现最好</span><strong>{review.topGainer?.name || "—"}</strong><small>{review.topGainer?.pnlPercent == null ? "—" : formatPercent(review.topGainer.pnlPercent)}</small></article><article><span>表现最弱</span><strong>{review.topLoser?.name || "—"}</strong><small>{review.topLoser?.pnlPercent == null ? "—" : formatPercent(review.topLoser.pnlPercent)}</small></article></div>{review.riskSignals?.length ? <div className="portfolio-review-section"><strong>风险信号</strong>{review.riskSignals.map((signal, index) => <p key={`${review.id}-risk-${index}`}>{signal.title}：{signal.detail}</p>)}</div> : null}{review.upcomingEvents?.length ? <div className="portfolio-review-section"><strong>未来 7 天事件</strong>{review.upcomingEvents.map((event, index) => <p key={`${review.id}-event-${index}`}>{event.date} · {event.name} · {event.title}（{event.source}）</p>)}</div> : <p className="portfolio-review-empty">当前没有已返回的未来 7 天持仓事件。</p>}<p className="portfolio-review-sources">来源：{review.sources?.join("、") || "数据服务"} · {review.disclaimer}</p><button type="button" className="notification-link" onClick={() => { void removePortfolioReview(review.id); }}>删除本条复盘</button></div></details>)}</div>}
     </section>
     {positions.length > 0 && portfolioDataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={portfolioDataState} receivedCount={metrics.pricedCount} totalCount={metrics.totalCount} onRetry={() => { void refreshLiveData(); }} onSettings={() => setActiveView("settings")} /> : null}
     {positions.length === 0 ? <div className="empty-state portfolio-empty"><Briefcase size={30} /><strong>还没有持仓</strong><p>添加持仓后，这里会汇总真实行情与盈亏。</p><button className="primary-action" onClick={openCreate}><Plus size={16} />添加第一笔持仓</button></div> : <section className="portfolio-table" aria-label="持仓明细"><div className="portfolio-table-head"><span>标的</span><span>数量</span><span>成本</span><span>现价</span><span>市值</span><span>未实现盈亏</span><span>占比</span><span>交易计划 / 提醒</span><span>操作</span></div>{metrics.rows.map((row) => <div className="portfolio-row" key={row.id}><span><strong>{row.name}</strong><small>{row.symbol}{row.market ? ` · ${row.market}` : ""}</small></span><span>{row.quantity}</span><span>{money(row.averageCost)}</span><span>{money(row.currentPrice)}</span><span>{money(row.marketValue)}</span><span className={row.pnl == null ? "" : row.pnl >= 0 ? "up" : "down"}>{money(row.pnl)}{row.pnlPercent == null ? "" : ` (${formatPercent(row.pnlPercent)})`}</span><span>{row.weight == null ? "—" : formatPercent(row.weight)}</span><span className="portfolio-alert-plan"><small className={`portfolio-plan-status ${row.planStatus || "none"}`}>{PORTFOLIO_PLAN_STATUSES.find((status) => status.id === row.planStatus)?.label || "未建立计划"}{row.planHorizon ? ` · ${PORTFOLIO_PLAN_HORIZONS.find((horizon) => horizon.id === row.planHorizon)?.label.split("（")[0] || row.planHorizon}` : ""}</small>{row.planThesis ? <small className="portfolio-plan-thesis" title={row.planThesis}>{row.planThesis}</small> : null}{row.planActions?.[0] ? <small className="portfolio-plan-action">最近：{planActionLabels[row.planActions[0].type] || "更新"} · {new Date(row.planActions[0].at).toLocaleDateString("zh-CN")}</small> : null}{row.takeProfitPrice == null && row.stopLossPrice == null ? <small>未设置价格提醒</small> : <>{row.takeProfitPrice != null && <small className={row.takeProfitTriggered ? "triggered" : ""}>止盈 {money(row.takeProfitPrice)}{row.takeProfitTriggered ? " · 已触发" : row.planProgress.targetDistancePercent == null ? "" : ` · 距 ${formatPercent(row.planProgress.targetDistancePercent)}`}</small>}{row.stopLossPrice != null && <small className={row.stopLossTriggered ? "triggered stop" : "stop"}>止损 {money(row.stopLossPrice)}{row.stopLossTriggered ? " · 已触发" : row.planProgress.stopDistancePercent == null ? "" : ` · 距 ${formatPercent(row.planProgress.stopDistancePercent)}`}</small>}</>}</span><span className="portfolio-actions"><button className="icon-button" aria-label={`编辑${row.symbol}持仓`} onClick={() => openEdit(row)}>编辑</button>{row.planStatus === "active" && <button className="icon-button" aria-label={`标记${row.symbol}计划已执行`} onClick={() => { void markPlan(row, "executed"); }}>已执行</button>}{row.planStatus === "executed" && <button className="icon-button" aria-label={`重新跟踪${row.symbol}计划`} onClick={() => { void markPlan(row, "active"); }}>重启</button>}<button className="icon-button" aria-label={`删除${row.symbol}持仓`} onClick={() => { void deletePosition(row); }}>删除</button></span></div>)}</section>}

@@ -30,6 +30,7 @@ const defaultState = {
   monitorRules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }, { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }],
   notifications: [],
   portfolioPositions: [],
+  portfolioReviews: [],
   monitorHistory: [],
 };
 

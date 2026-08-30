@@ -40,9 +40,27 @@ function sanitizeMonitorHistory(items) {
   })).filter((item) => item.id && item.ruleId && item.symbol && item.checkedAt);
 }
 
-export function normalizeUserState(state = {}) {
-  const value = state && typeof state === "object" ? state : {};
-  return { watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory) };
+function sanitizePortfolioReviews(items) {
+  return (Array.isArray(items) ? items : []).slice(0, 90).map((review) => ({
+    id: text(review?.id, 128), kind: review?.kind === "close" ? "close" : "close", tradingDate: text(review?.tradingDate, 32), createdAt: text(review?.createdAt, 64), asOf: text(review?.asOf, 128),
+    pricedCount: finiteNumber(review?.pricedCount), totalCount: finiteNumber(review?.totalCount), totalCost: finiteNumber(review?.totalCost), totalMarketValue: finiteNumber(review?.totalMarketValue), totalPnl: finiteNumber(review?.totalPnl), totalPnlPercent: finiteNumber(review?.totalPnlPercent),
+    topGainer: sanitizeReviewPosition(review?.topGainer), topLoser: sanitizeReviewPosition(review?.topLoser),
+    positions: (Array.isArray(review?.positions) ? review.positions : []).slice(0, 200).map(sanitizeReviewPosition).filter(Boolean),
+    riskSignals: (Array.isArray(review?.riskSignals) ? review.riskSignals : []).slice(0, 8).map((signal) => ({ level: ["info", "warning", "critical"].includes(signal?.level) ? signal.level : "info", title: text(signal?.title, 256), detail: text(signal?.detail, 1024) })).filter((signal) => signal.title),
+    upcomingEvents: (Array.isArray(review?.upcomingEvents) ? review.upcomingEvents : []).slice(0, 12).map((event) => ({ symbol: text(event?.symbol, 64).toUpperCase(), name: text(event?.name, 128), date: text(event?.date, 64), type: text(event?.type, 64), title: text(event?.title, 256), source: text(event?.source, 128), url: text(event?.url, 1024) })).filter((event) => event.symbol && event.date && event.title),
+    sources: (Array.isArray(review?.sources) ? review.sources : []).slice(0, 12).map((source) => text(source, 128)).filter(Boolean), disclaimer: text(review?.disclaimer, 512),
+  })).filter((review) => review.id && review.tradingDate && review.createdAt && review.pricedCount != null && review.pricedCount > 0 && review.totalCount != null && review.totalCount >= review.pricedCount);
 }
 
-export { sanitizeMonitorHistory, sanitizeNotifications, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };
+function sanitizeReviewPosition(value) {
+  if (!value || typeof value !== "object") return null;
+  const position = { symbol: text(value.symbol, 64).toUpperCase(), name: text(value.name, 128), currentPrice: finiteNumber(value.currentPrice), pnl: finiteNumber(value.pnl), pnlPercent: finiteNumber(value.pnlPercent), weight: finiteNumber(value.weight), asOf: text(value.asOf, 128), source: text(value.source, 128) };
+  return position.symbol && position.name && position.currentPrice != null ? position : null;
+}
+
+export function normalizeUserState(state = {}) {
+  const value = state && typeof state === "object" ? state : {};
+  return { watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews) };
+}
+
+export { sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };

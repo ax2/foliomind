@@ -57,6 +57,15 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw).monitorHistory).toMatchObject([{ id: "h1", outcome: "unknown", audits: [{ operation: "call", toolId: "qveris_finance.mkt_l1_rt" }] }]);
   });
 
+  it("round-trips bounded portfolio reviews without raw runtime data", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "AAPL", name: "Apple" }],
+      portfolioReviews: [{ id: "review-1", kind: "close", tradingDate: "2026-08-30", createdAt: "2026-08-30T10:00:00Z", asOf: "2026-08-30T08:00:00Z", pricedCount: 1, totalCount: 1, totalCost: 200, totalMarketValue: 240, totalPnl: 40, totalPnlPercent: 20, positions: [{ symbol: "AAPL", name: "Apple", currentPrice: 120, pnl: 40, pnlPercent: 20, weight: 100, asOf: "2026-08-30T08:00:00Z", source: "provider" }], riskSignals: [], upcomingEvents: [], sources: ["provider"], disclaimer: "不构成投资建议", rawResponse: "drop-me" }],
+    });
+    expect(raw).not.toContain("drop-me");
+    expect(parseUserStateBackup(raw).portfolioReviews).toMatchObject([{ id: "review-1", pricedCount: 1, positions: [{ symbol: "AAPL", currentPrice: 120 }] }]);
+  });
+
   it("uses one bounded contract for malformed state from every transport", () => {
     const normalized = normalizeUserState({
       watchlist: [{ symbol: " 600519 ", name: " 贵州茅台 ", market: "沪深" }, { symbol: "", name: "bad" }],
