@@ -43,7 +43,7 @@ function persistSnapshot(snapshot) {
       lastLocalSnapshot = local;
       return lastPersistedState;
     } catch (error) {
-      useLabStore.setState({ settingsNotice: { type: "error", text: error?.code === "USER_STATE_MERGE_CONFLICT" ? "用户数据已在另一窗口修改，请重新加载后再操作" : "本地数据暂时无法保存，请稍后重试" } });
+      useLabStore.setState((current) => current.settingsNotice?.type === "error" ? current : { settingsNotice: { type: "error", text: error?.code === "USER_STATE_MERGE_CONFLICT" ? "用户数据已在另一窗口修改，请重新加载后再操作" : "本地数据暂时无法保存，请稍后重试" } });
       return null;
     }
   });
