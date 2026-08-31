@@ -8,7 +8,8 @@ import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
-import { listenForDesktopReconcile } from "./lib/desktopLifecycle.js";
+import { listenForBackgroundReviewCompleted, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
+import { isDesktopRuntime } from "./lib/piRuntime.js";
 
 export function App() {
   const activeView = useLabStore((state) => state.activeView);
@@ -30,6 +31,7 @@ export function App() {
   }, [hydrateUserState, runDueMonitorChecks]);
   useEffect(() => {
     if (!userStateLoaded) return undefined;
+    if (isDesktopRuntime()) return undefined;
     const reconcile = () => { void runDuePortfolioReview(); };
     reconcile();
     const timer = window.setInterval(reconcile, BRIEFING_RECONCILE_INTERVAL_MS);
@@ -42,12 +44,22 @@ export function App() {
     if (!userStateLoaded) return undefined;
     let disposed = false;
     let unlisten = () => {};
-    void listenForDesktopReconcile(() => { void runDuePortfolioReview(); }).then((cleanup) => {
+    void listenForDesktopReconcile(() => { void reconcileDesktopNow(); }).then((cleanup) => {
       if (disposed) cleanup();
       else unlisten = cleanup;
     });
     return () => { disposed = true; unlisten(); };
-  }, [userStateLoaded, runDuePortfolioReview]);
+  }, [userStateLoaded]);
+  useEffect(() => {
+    if (!userStateLoaded) return undefined;
+    let disposed = false;
+    let unlisten = () => {};
+    void listenForBackgroundReviewCompleted(() => { void hydrateUserState(); }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unlisten = cleanup;
+    });
+    return () => { disposed = true; unlisten(); };
+  }, [userStateLoaded, hydrateUserState]);
   useEffect(() => {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured || !integrationStatus.settings?.modelId) return undefined;
     if (typeof window === "undefined" || typeof document === "undefined") return undefined;

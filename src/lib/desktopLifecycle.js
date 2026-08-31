@@ -16,3 +16,9 @@ export async function listenForDesktopReconcile(handler) {
   const { listen } = await import("@tauri-apps/api/event");
   return listen("foliomind://background-reconcile", () => handler());
 }
+
+export async function listenForBackgroundReviewCompleted(handler) {
+  if (!isDesktopRuntime()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("foliomind://background-review-completed", (event) => handler(event.payload));
+}

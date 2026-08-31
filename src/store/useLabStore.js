@@ -769,7 +769,7 @@ export const useLabStore = create((set, get) => ({
     const briefingSchedule = normalizeBriefingSchedule({ ...get().briefingSchedule, ...input, lastError: input?.enabled === false ? "" : get().briefingSchedule.lastError });
     set({ briefingSchedule });
     await get().persistUserState();
-    if (briefingSchedule.enabled) void get().runDuePortfolioReview();
+    if (briefingSchedule.enabled && !isDesktopRuntime()) void get().runDuePortfolioReview();
     return briefingSchedule;
   },
   runDuePortfolioReview: async (now = new Date()) => {

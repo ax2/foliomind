@@ -48,7 +48,7 @@ WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex`
 
 取消命令本身也有独立的 pending 锁：即使 Pi 先报告本轮已经完成，前端仍会暂时禁止下一轮提交，直到 abort RPC 返回，避免迟到的取消请求误作用于下一轮分析。
 
-桌面端使用 Tauri 内建 tray 生命周期：主窗口普通关闭会被拦截并隐藏到系统托盘，托盘菜单可恢复窗口、触发一次盘后复盘 reconcile 或显式退出。Rust 驻留 ticker 每 60 秒唤醒仍存活的 WebView 协调器；它提升关闭窗口后的连续性，但仍不是脱离 WebView 的原生任务执行器。应用收到显式 `ExitRequested` 或 `Exit` 时先幂等停止 ticker，再关闭本轮回环代理、拒绝尚未完成的 RPC，并显式终止和回收 Pi 子进程，避免留下孤儿进程或短期能力端口。
+桌面端使用 Tauri 内建 tray 生命周期：主窗口普通关闭会被拦截并隐藏到系统托盘，托盘菜单可恢复窗口、触发一次盘后复盘 reconcile 或显式退出。Rust `BackgroundScheduler` 每 60 秒独立核对到期状态、真实交易日历与持仓行情，不依赖 WebView 执行业务；桌面前端只在任务完成后重新 hydrate 状态，本地 Web 调试则保留浏览器调度。应用收到显式 `ExitRequested` 或 `Exit` 时先幂等停止调度循环，再关闭本轮回环代理、拒绝尚未完成的 RPC，并显式终止和回收 Pi 子进程，避免留下孤儿进程或短期能力端口。
 
 Runtime 启动前由 Host 在同一把状态锁内完成 `Stopped/Crashed → Starting` 预约，多个并发启动请求只有一个能够继续创建 executor 与 Pi 子进程。Host 对出站 JSONL 也执行 1 MiB 上限；Pi 的 stdout JSONL 与 stderr 诊断均由有界逐段读取器处理，超长单行会在固定内存内被丢弃和报告，不会先无限扩张缓冲区再做长度检查。
 
@@ -88,4 +88,4 @@ Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳
 
 用户状态根对象带单调递增的 `revision`。Web Host 与桌面 Host 保存时在同一 I/O 临界区比较 `expectedRevision`，不匹配返回 409/`USER_STATE_CONFLICT`；客户端收到冲突后重新读取最新状态，只自动合并不同记录或不同日程字段的修改，同一记录的相互冲突修改停止保存并提示刷新。旧状态文件迁移为 revision 0，便携备份不携带 revision，避免把另一台设备的并发令牌带入本机。该契约使托盘后台调度写入的新提醒、复盘和检查历史不会被仍持有旧快照的 WebView 静默覆盖。
 
-组合自动复盘使用可持久化的本地调度状态：北京时间到点后先按 `close:<YYYY-MM-DD>` 做幂等检查，再通过固定 `cn_financial_pro.trade_dates.v1` / `REF.EXCHANGE_CALENDAR` 查询上交所目标日期；明确为交易日后才刷新真实持仓行情，只有至少一个持仓存在当日真实报价时才生成快照和站内通知。日历失败时 fail closed 并进入可重试状态，休市日不生成；日历状态、来源和核验时间使用脱敏 schema 持久化，Host 配置变化会使缓存失效。失败按配置间隔节流重试，启动、窗口聚焦、页面恢复可见及一分钟轮询都会 reconcile。当前调度仍依赖应用进程存活，Web 页面关闭或桌面应用完全退出后不会执行；独立后台 worker 和跨市场日历尚未上线。
+组合自动复盘使用可持久化的本地调度状态：北京时间到点后先按 `close:<YYYY-MM-DD>` 做幂等检查，再通过固定 `cn_financial_pro.trade_dates.v1` / `REF.EXCHANGE_CALENDAR` 查询上交所目标日期；明确为交易日后由原生 worker 直接调用固定 `qveris_finance.mkt_l1_rt`，只有至少一个持仓存在当日真实报价时才生成快照和站内通知。网络 I/O 不持有状态锁，最终写入会重验 revision、持仓快照和同日幂等键；只有实际插入的一方发送系统通知。日历失败时 fail closed 并按配置间隔节流重试，休市日不生成。当前 worker 依赖桌面进程存活，显式退出后不会执行；上交所之外的分市场时区、交易日历和收盘时刻仍待拆分。

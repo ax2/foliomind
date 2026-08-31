@@ -1,6 +1,6 @@
 [package]
 name = "foliomind"
-version = "0.1.59"
+version = "0.1.60"
 description = "FolioMind financial agent desktop host"
 authors = ["ax2"]
 edition = "2021"
@@ -18,6 +18,8 @@ keyring = { version = "4.1.5", features = ["v1"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
 
 [profile.release]
 codegen-units = 1
