@@ -24,7 +24,8 @@ check("桌面驻留生命周期", cargoToml.includes('features = ["tray-icon"]')
 check("原生后台调度", backgroundScheduler.includes("market_calendar::fetch_trading_calendar") && backgroundScheduler.includes("user_state::mutate") && backgroundScheduler.includes("background-review-completed"), "桌面复盘必须由原生 worker 执行真实日历、行情门禁和原子幂等写入");
 check("原生调度可观测性", backgroundScheduler.includes("background-scheduler-log") && backgroundScheduler.includes("duration_ms") && backgroundScheduler.includes("cost_from_value") && developerPanel.includes("desktopCostSummary"), "桌面调度调用必须提供脱敏日志、耗时和费用汇总");
 check("用户状态并发控制", userState.includes("revision") && userStateTransport.includes("mergeUserStateChanges") && nativeUserState.includes("save_if_revision") && localHost.includes("USER_STATE_CONFLICT") && hostIntegrationTest.includes("USER_STATE_CONFLICT"), "Web、Local Host 与桌面必须以 revision/CAS 防止后台状态被旧页面覆盖");
-check("CAP 能力工作台", developerPanel.includes("调用测试") && developerPanel.includes("参数 Schema") && developerPanel.includes("返回字段") && localHost.includes("BUILTIN_CAPABILITY_CATALOG") && styles.includes("min(1320px"), "开发面板必须提供大尺寸能力目录、稳定 schema 和真实调用测试");
+check("CAP 能力工作台", developerPanel.includes("调用测试") && developerPanel.includes("参数 Schema") && developerPanel.includes("返回字段") && developerPanel.includes("刷新能力目录") && localHost.includes("BUILTIN_CAPABILITY_CATALOG") && styles.includes("min(1320px"), "开发面板必须提供大尺寸能力目录、稳定 schema 和真实调用测试");
+check("成本单位隔离", localHost.includes("qverisUnits") && localHost.includes("modelUnits") && developerPanel.includes("多单位"), "CAP 与模型网关费用必须按调用类型保留独立计费单位，未知费用不得估算");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

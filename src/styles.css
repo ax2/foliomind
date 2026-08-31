@@ -1960,6 +1960,7 @@ textarea:focus-visible {
 .developer-capability-card h4 span { border-radius: 8px; padding: 2px 6px; background: #edf4ff; color: #3f73b3; font-size: 10px; }
 .developer-capability-card h4 small { color: #8a96a6; font-size: 10px; font-weight: 400; }
 .developer-capability-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; border-radius: 7px; padding: 10px 12px; background: #f5f8fc; color: #718197; font-size: 12px; }
+.developer-capability-toolbar .secondary-button { flex: 0 0 auto; padding: 5px 9px; font-size: 10px; }
 .developer-capability-toolbar label { display: flex; align-items: center; gap: 7px; color: #52667e; white-space: nowrap; }
 .developer-capability-toolbar input { width: 130px; border: 1px solid #cfd9e7; border-radius: 5px; padding: 5px 7px; background: #fff; color: #2b3b50; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .developer-capability-list { display: grid; gap: 6px; }
@@ -1969,12 +1970,13 @@ textarea:focus-visible {
 .developer-capability summary > div { display: grid; min-width: 0; gap: 2px; }
 .developer-capability summary strong { color: #3f5f83; font: 600 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .developer-capability summary small { overflow: hidden; color: #7c8999; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.developer-capability summary .secondary-button { flex: 0 0 auto; padding: 5px 8px; font-size: 10px; }
 .developer-capability-detail { display: grid; gap: 7px; margin: 8px 0 2px; border-top: 1px solid #eef1f5; padding-top: 8px; color: #607188; font-size: 12px; }
 .developer-capability-detail > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 7px; }
 .developer-capability-detail b { color: #8a96a6; font-weight: 500; }
 .developer-capability-detail code { overflow-wrap: anywhere; color: #536981; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .developer-capability-detail span { overflow-wrap: anywhere; }
+.developer-capability-action { display: flex !important; align-items: center; gap: 8px; grid-template-columns: none !important; }
+.developer-capability-action .secondary-button { flex: 0 0 auto; padding: 5px 8px; font-size: 10px; }
 .developer-capability-success, .developer-capability-error { margin: 0; font-size: 10px; }
 .developer-capability-success { color: #2b8c5d; }
 .developer-capability-error { color: #b14d45; }

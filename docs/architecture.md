@@ -91,3 +91,5 @@ Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳
 组合自动复盘使用可持久化的本地调度状态：北京时间到点后先按 `close:<YYYY-MM-DD>` 做幂等检查，再通过固定 `cn_financial_pro.trade_dates.v1` / `REF.EXCHANGE_CALENDAR` 查询上交所目标日期；明确为交易日后由原生 worker 直接调用固定 `qveris_finance.mkt_l1_rt`，只有至少一个持仓存在当日真实报价时才生成快照和站内通知。网络 I/O 不持有状态锁，最终写入会重验 revision、持仓快照和同日幂等键；只有实际插入的一方发送系统通知。日历失败时 fail closed 并按配置间隔节流重试，休市日不生成。当前 worker 依赖桌面进程存活，显式退出后不会执行；上交所之外的分市场时区、交易日历和收盘时刻仍待拆分。
 
 原生 `BackgroundScheduler` 同时向桌面开发面板发送脱敏 `foliomind://background-scheduler-log` 事件。事件统一记录稳定 tool/capability 标识、受限参数、HTTP 状态、耗时、返回摘要、失败原因和可验证费用；`cost_from_value` 只提取已知费用字段，不保存原始响应或凭证。开发面板按 CAP 与模型网关分组汇总调用次数和费用，未返回费用时标记未知；清理日志只影响当前运行期调试视图，不改变用户状态。
+
+能力工作台从 Host 能力目录读取版本化的已验证 CAP 契约，并为每项能力提供独立的真实调用测试。能力条目的参数 schema、返回字段、覆盖边界和 tool ID 都是对外稳定元数据；测试操作与 `<details>` 展开标题分离，结果以状态消息与脱敏调用日志呈现。成本账本在数据结构中分别维护 `qverisUnits` 与 `modelUnits`，避免 CAP credits、模型 USD 等不同计费单位被混用；部分调用缺费时只显示已知笔数，不估算未知费用。

@@ -115,7 +115,7 @@ export function costFrom(value, depth = 0) {
   return null;
 }
 export function costSummary(logs) {
-  const summary = { qverisCalls: 0, qverisCost: 0, qverisCostKnown: 0, modelCalls: 0, modelCost: 0, modelCostKnown: 0, units: new Set() };
+  const summary = { qverisCalls: 0, qverisCost: 0, qverisCostKnown: 0, modelCalls: 0, modelCost: 0, modelCostKnown: 0, units: new Set(), qverisUnits: new Set(), modelUnits: new Set() };
   for (const entry of logs) {
     const isModel = entry.type === "model";
     // Direct CAP calls are the fast-path QVeris provider calls and must be
@@ -124,10 +124,11 @@ export function costSummary(logs) {
     if (isModel) summary.modelCalls += 1; else if (isQveris) summary.qverisCalls += 1;
     const amount = Number(entry.cost?.amount);
     if (!Number.isFinite(amount)) continue;
-    summary.units.add(String(entry.cost.unit || "credits"));
-    if (isModel) { summary.modelCost += amount; summary.modelCostKnown += 1; } else if (isQveris) { summary.qverisCost += amount; summary.qverisCostKnown += 1; }
+    const unit = String(entry.cost.unit || "credits");
+    summary.units.add(unit);
+    if (isModel) { summary.modelCost += amount; summary.modelCostKnown += 1; summary.modelUnits.add(unit); } else if (isQveris) { summary.qverisCost += amount; summary.qverisCostKnown += 1; summary.qverisUnits.add(unit); }
   }
-  return { ...summary, qverisCost: Number(summary.qverisCost.toFixed(8)), modelCost: Number(summary.modelCost.toFixed(8)), units: [...summary.units] };
+  return { ...summary, qverisCost: Number(summary.qverisCost.toFixed(8)), modelCost: Number(summary.modelCost.toFixed(8)), units: [...summary.units], qverisUnits: [...summary.qverisUnits], modelUnits: [...summary.modelUnits] };
 }
 function logInvocation(event) {
   if (devVariables.logLevel === "silent") return;
