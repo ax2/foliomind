@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { AreaSeries, CandlestickSeries, createChart } from "lightweight-charts";
+import { AreaSeries, CandlestickSeries, LineSeries, createChart } from "lightweight-charts";
 import { DataState } from "./DataState.jsx";
 
 function normalizeSeries(series) {
@@ -12,16 +12,21 @@ function normalizeSeries(series) {
   }).filter((point) => point.time != null && Number.isFinite(point.value));
 }
 
-export function MarketChart({ series = [], range = "分时", loading = false, error = "", onRetry }) {
+export function MarketChart({ series = [], range = "分时", loading = false, error = "", onRetry, showGrid = true, showMovingAverage = false }) {
   const ref = useRef(null);
   const points = useMemo(() => normalizeSeries(series), [series]);
+  const movingAverage = useMemo(() => points.map((point, index) => {
+    if (index < 4) return null;
+    const window = points.slice(index - 4, index + 1);
+    return { time: point.time, value: window.reduce((total, item) => total + item.value, 0) / window.length };
+  }).filter(Boolean), [points]);
   useEffect(() => {
     if (!ref.current || points.length < 2) return undefined;
     const chart = createChart(ref.current, {
       autoSize: true,
       height: 280,
       layout: { background: { color: "transparent" }, textColor: "#7b8494", fontFamily: "Inter, PingFang SC, sans-serif", fontSize: 11 },
-      grid: { vertLines: { color: "#f0f2f5" }, horzLines: { color: "#f0f2f5" } },
+      grid: { vertLines: { color: showGrid ? "#f0f2f5" : "transparent" }, horzLines: { color: showGrid ? "#f0f2f5" : "transparent" } },
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.12, bottom: 0.12 } },
       timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
       crosshair: { vertLine: { color: "#8ebcff", style: 2 }, horzLine: { color: "#8ebcff", style: 2 } },
@@ -29,9 +34,13 @@ export function MarketChart({ series = [], range = "分时", loading = false, er
     const candles = range !== "分时" && range !== "5日" && points.every((point) => [point.open, point.high, point.low, point.close].every(Number.isFinite));
     const seriesView = candles ? chart.addSeries(CandlestickSeries, { upColor: "#18a66a", downColor: "#f04444", borderVisible: false, wickUpColor: "#18a66a", wickDownColor: "#f04444" }) : chart.addSeries(AreaSeries, { lineColor: "#1677ff", topColor: "rgba(22, 119, 255, 0.18)", bottomColor: "rgba(22, 119, 255, 0.01)", lineWidth: 2, priceLineVisible: false });
     seriesView.setData(candles ? points : points.map((point) => ({ time: point.time, value: point.value })));
+    if (showMovingAverage && movingAverage.length >= 2) {
+      const averageView = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: "MA5" });
+      averageView.setData(movingAverage);
+    }
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [points, range]);
+  }, [points, range, showGrid, showMovingAverage, movingAverage]);
   if (loading) return <div className="market-chart chart-empty" aria-label="正在获取真实行情"><DataState compact state="loading" title={`正在获取${range}数据`} description="正在从已配置渠道获取真实行情。" /></div>;
   if (error) return <div className="market-chart chart-empty" aria-label={`${range}数据暂不可用`}><DataState compact state="error" title="该周期暂时没有可用数据" description="系统会稍后自动重试，也可以立即重新获取。" actionLabel={onRetry ? "立即重试" : ""} onAction={onRetry} /></div>;
   if (points.length < 2) return <div className="market-chart chart-empty" aria-label={`暂无真实${range}数据`}><DataState compact state="empty" title={`暂无真实${range}数据`} description="有新数据返回后会自动显示，空白区域不会使用示例走势填充。" /></div>;
