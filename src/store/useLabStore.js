@@ -12,6 +12,7 @@ import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeCo
 import { normalizeWatchlistItem } from "../lib/watchlist.js";
 import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "../lib/briefingSchedule.js";
+import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -29,6 +30,7 @@ const selectedQuoteGenerations = new Map();
 let detailsRequestGeneration = 0;
 let seriesRequestGeneration = 0;
 let eventsRequestGeneration = 0;
+const anomalyAttributionGenerations = new Map();
 
 function persistenceState(snapshot) {
   return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule });
@@ -335,6 +337,12 @@ function monitorFieldsFromReply(text, symbol) {
   return fields;
 }
 
+function portfolioContextForSymbol(positions, symbol, quote) {
+  const normalized = String(symbol || "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "");
+  const position = (Array.isArray(positions) ? positions : []).find((item) => String(item?.symbol || "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "") === normalized);
+  return portfolioAttributionContext(position, quote);
+}
+
 async function queryMonitorData(kind, symbol) {
   if (!isLocalWebRuntime() || typeof queryCachedData !== "function") return null;
   try {
@@ -442,7 +450,7 @@ async function fetchLiveQuote(item, options = {}) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -475,8 +483,9 @@ export const useLabStore = create((set, get) => ({
       detailsRequestGeneration += 1;
       seriesRequestGeneration += 1;
       eventsRequestGeneration += 1;
+      anomalyAttributionGenerations.clear();
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
   refreshLiveData: async () => {
     const state = get();
@@ -555,6 +564,42 @@ export const useLabStore = create((set, get) => ({
     if (get().liveDataLoading) return false;
     set({ liveDataError: "" });
     return get().refreshLiveData();
+  },
+  explainAnomaly: async (anomaly) => {
+    const id = String(anomaly?.id || "").trim();
+    const symbol = String(anomaly?.symbol || "").trim();
+    const state = get();
+    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    if (!id || !symbol || !configured || state.anomalyAttributionLoading[id] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
+    const requestGeneration = (anomalyAttributionGenerations.get(id) || 0) + 1;
+    anomalyAttributionGenerations.set(id, requestGeneration);
+    set((current) => ({ anomalyAttributionLoading: { ...current.anomalyAttributionLoading, [id]: true }, anomalyAttributionError: { ...current.anomalyAttributionError, [id]: "" } }));
+    const quote = state.liveQuotes[symbol];
+    const portfolio = portfolioContextForSymbol(state.portfolioPositions, symbol, quote);
+    let evidence = normalizeAttributionEvidence({ quote });
+    let audits = [];
+    try {
+      if (isLocalWebRuntime() && typeof queryCachedData === "function") {
+        const results = await Promise.allSettled(["sentiment", "core_event", "capital_flow"].map((kind) => queryCachedData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 })));
+        const data = results.filter((result) => result.status === "fulfilled").flatMap((result) => {
+          const value = result.value;
+          audits = [...audits, ...(Array.isArray(value?.audits) ? value.audits : [])];
+          return [value?.data ?? value ?? {}];
+        }).reduce((merged, value) => ({ ...merged, ...value }), {});
+        evidence = normalizeAttributionEvidence({ quote, news: data.news, events: data.events, capitalFlow: data.capitalFlow || data.capital_flow });
+      }
+      if (!evidence.length) throw new Error("当前没有足够的真实证据，暂时无法生成解读");
+      const reply = await askPi(buildAttributionPrompt({ anomaly, evidence, portfolio }), { settleTimeoutMs: 120_000 });
+      if (requestGeneration !== anomalyAttributionGenerations.get(id)) return false;
+      audits = [...audits, ...(reply.audits || [])];
+      const attribution = normalizeAttribution(reply.text, { anomaly, evidence, portfolio });
+      set((current) => ({ anomalyAttributions: { ...current.anomalyAttributions, [id]: { ...attribution, audits } }, anomalyAttributionLoading: { ...current.anomalyAttributionLoading, [id]: false }, anomalyAttributionError: { ...current.anomalyAttributionError, [id]: "" } }));
+      return true;
+    } catch (error) {
+      if (requestGeneration !== anomalyAttributionGenerations.get(id)) return false;
+      set((current) => ({ anomalyAttributionLoading: { ...current.anomalyAttributionLoading, [id]: false }, anomalyAttributionError: { ...current.anomalyAttributionError, [id]: friendlyDataMessage(error, "暂时没有足够的真实证据，稍后可以重试") } }));
+      return false;
+    }
   },
   refreshQuoteDetails: async (symbol) => {
     const state = get();
@@ -686,7 +731,8 @@ export const useLabStore = create((set, get) => ({
     seriesRequestGeneration += 1;
     eventsRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
-    set({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
+    anomalyAttributionGenerations.clear();
+    set({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
     await get().persistUserState();
     return true;
   },

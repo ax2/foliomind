@@ -61,6 +61,39 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveDataError).toBe("");
   });
 
+  it("builds an auditable anomaly explanation from real CAP evidence", async () => {
+    const anomaly = { id: "600519-price", symbol: "600519", name: "贵州茅台", type: "price", value: 8.2, threshold: 4, asOf: "2026-08-31", source: "真实行情源" };
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      liveQuotes: { "600519": { price: 1_300, change: 8.2, volumeRatio: 3.4, asOf: "2026-08-31", source: "真实行情源" } },
+      portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", quantity: 2, averageCost: 1_000 }],
+    });
+    runtime.queryCachedData.mockImplementation(async ({ kind }) => ({ data: kind === "sentiment"
+      ? { news: [{ title: "已验证新闻", summary: "公告摘要", source: "交易所", url: "https://example.com/news", published_at: "2026-08-31" }] }
+      : kind === "core_event"
+        ? { events: [{ title: "财报披露", date: "2026-09-01", source: "公司事件" }] }
+        : { capitalFlow: [{ mainNetInflow: 2_000_000, date: "2026-08-31", source: "资金流" }] }, audits: [{ operation: "cap-call", outcome: "success" }] }));
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ fact: "涨幅超过阈值", drivers: [{ text: "公告是可核验背景", evidenceIndex: [1] }], portfolioRelation: "持仓浮盈", watchNext: ["核验公告原文"], asOf: "2026-08-31" }), mode: "pi-local-host", audits: [{ operation: "chat-completions", outcome: "success" }] });
+
+    await expect(useLabStore.getState().explainAnomaly(anomaly)).resolves.toBe(true);
+    const result = useLabStore.getState().anomalyAttributions[anomaly.id];
+    expect(runtime.queryCachedData).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ fact: "涨幅超过阈值", evidenceCount: 4, portfolioRelation: "持仓浮盈" });
+    expect(result.drivers[0].references[0]).toMatchObject({ title: "已验证新闻", url: "https://example.com/news" });
+    expect(result.audits).toHaveLength(4);
+  });
+
+  it("keeps anomaly attribution empty when no real quote or evidence exists", async () => {
+    const anomaly = { id: "AAPL-volume", symbol: "AAPL", name: "Apple", type: "volume", value: 3, threshold: 2.5, asOf: "2026-08-31" };
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } }, userStateLoaded: true, liveQuotes: {} });
+    runtime.queryCachedData.mockResolvedValue({ data: { news: [], events: [], capitalFlow: [] } });
+
+    await expect(useLabStore.getState().explainAnomaly(anomaly)).resolves.toBe(false);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().anomalyAttributionError[anomaly.id]).toContain("没有足够");
+  });
+
   it("refreshes only the selected quote through the cached data path", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

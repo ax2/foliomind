@@ -4,9 +4,9 @@ const load = (file) => readFile(new URL(file, root), "utf8");
 const checks = [];
 const check = (name, pass, detail) => checks.push({ name, pass, detail });
 
-const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, userStateTransport, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, localHost, developerPanel, styles, marketCalendar, desktopLifecycle, nativeMain, backgroundScheduler] = await Promise.all([
+const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, userStateTransport, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, localHost, developerPanel, styles, marketCalendar, desktopLifecycle, nativeMain, backgroundScheduler, anomalyAttribution] = await Promise.all([
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
-  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"),
+  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"), load("src/lib/anomalyAttribution.js"),
 ]);
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -28,6 +28,7 @@ check("CAP 能力工作台", developerPanel.includes("调用测试") && develope
 check("成本单位隔离", localHost.includes("qverisUnits") && localHost.includes("modelUnits") && developerPanel.includes("多单位"), "CAP 与模型网关费用必须按调用类型保留独立计费单位，未知费用不得估算");
 check("自选列视图", marketViews.includes("MARKET_COLUMN_DEFINITIONS") && marketViews.includes("MARKET_COLUMNS_STORAGE_KEY") && marketViews.includes("恢复默认列") && styles.includes("--market-table-columns"), "市场页应支持非敏感、可恢复的自选行情列视图，并保持动态表格对齐");
 check("命名行情视图", marketViews.includes("MARKET_VIEWS_STORAGE_KEY") && marketViews.includes("DEFAULT_MARKET_VIEWS") && marketViews.includes("CUSTOM_MARKET_VIEW_ID") && marketViews.includes(">= 10") && marketViews.includes("临时视图"), "命名行情视图只保存列偏好，手动修改进入临时视图并有数量上限");
+check("异动证据解读", marketViews.includes("AnomalyAttribution") && anomalyAttribution.includes("buildAttributionPrompt") && anomalyAttribution.includes("evidenceIndex") && anomalyAttribution.includes("ANOMALY_ATTRIBUTION_DISCLAIMER") && anomalyAttribution.includes("https?"), "异动解读必须基于真实证据、引用来源、带免责声明并过滤不安全链接");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

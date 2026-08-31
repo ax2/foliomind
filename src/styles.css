@@ -2005,4 +2005,22 @@ textarea:focus-visible {
 .developer-capability-success { color: #2b8c5d; }
 .developer-capability-error { color: #b14d45; }
 .developer-log-list p { margin: 12px 0 5px; color: #94a0af; font-size: 10px; text-align: center; }
+.anomaly-explain-button { align-self: flex-start; border: 1px solid #c7d9ef; border-radius: 6px; padding: 6px 10px; background: #f7fbff; color: #2d6ca5; cursor: pointer; font-size: 11px; white-space: nowrap; }
+.anomaly-explain-button:hover { border-color: #8cb8e3; background: #edf6ff; }
+.anomaly-attribution { grid-column: 1 / -1; margin-top: 4px; border-top: 1px solid rgb(99 138 180 / 18%); padding-top: 10px; }
+.anomaly-attribution-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.anomaly-attribution-heading strong { color: #315d88; font-size: 12px; }
+.anomaly-attribution-heading span { color: #7b8da2; font-size: 11px; }
+.anomaly-attribution-body { display: grid; gap: 8px; margin-top: 8px; color: #4d6179; font-size: 12px; }
+.anomaly-attribution-body > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: start; }
+.anomaly-attribution-body b { color: #7a8da4; font-size: 11px; font-weight: 600; }
+.anomaly-attribution-body p { margin: 0; line-height: 1.5; }
+.anomaly-attribution-body ul { display: grid; gap: 5px; margin: 0; padding-left: 17px; }
+.anomaly-attribution-body li { line-height: 1.45; }
+.anomaly-attribution-body li small { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 2px; color: #7a8da4; font-size: 10px; }
+.anomaly-attribution-body li a, .anomaly-attribution-body li em { color: #4c7cae; font-style: normal; text-decoration: none; }
+.anomaly-attribution-body li a:hover { text-decoration: underline; }
+.anomaly-attribution-asof { color: #8393a6; font-size: 10px; }
+.anomaly-attribution-error { margin-top: 7px; color: #ad5048; font-size: 11px; }
+.anomaly-attribution-loading { margin: 7px 0 0; color: #73869c; font-size: 11px; line-height: 1.5; }
 @media (max-width: 600px) { .developer-panel { right: 10px; bottom: 9px; width: calc(100vw - 20px); } .developer-grid { grid-template-columns: 1fr; } .developer-panel-content { max-height: 82vh; padding: 14px; } .developer-capability-toolbar { align-items: flex-start; flex-direction: column; } }

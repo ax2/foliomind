@@ -218,6 +218,23 @@ export function PortfolioView() {
   </div>;
 }
 
+function AnomalyAttribution({ anomaly, attribution, loading, error, onExplain }) {
+  if (!attribution && !loading && !error) return <button className="anomaly-explain-button" type="button" onClick={onExplain}>AI 解读</button>;
+  return <div className="anomaly-attribution" aria-live="polite">
+    <div className="anomaly-attribution-heading"><strong>证据解读</strong>{loading ? <span>正在聚合真实证据…</span> : <button className="anomaly-explain-button" type="button" onClick={onExplain}>重新解读</button>}</div>
+    {error ? <div className="anomaly-attribution-error" role="status">{error}</div> : null}
+    {loading ? <p className="anomaly-attribution-loading">正在查询已验证的新闻、公司事件和资金流能力；没有证据时不会猜测原因。</p> : null}
+    {attribution ? <div className="anomaly-attribution-body">
+      <div><b>异动事实</b><p>{attribution.fact}</p></div>
+      <div><b>与持仓关系</b><p>{attribution.portfolioRelation}</p></div>
+      <div><b>可能诱因</b>{attribution.drivers?.length ? <ul>{attribution.drivers.map((driver, index) => <li key={`${driver.text}-${index}`}><span>{driver.text}</span><small>{driver.references.map((reference) => reference.url ? <a key={`${reference.id}-${reference.url}`} href={reference.url} target="_blank" rel="noreferrer">{reference.source}{reference.title ? ` · ${reference.title}` : ""}</a> : <em key={reference.id}>{reference.source}{reference.title ? ` · ${reference.title}` : ""}</em>)}</small></li>)}</ul> : <p>暂无已验证证据，暂时不能确认异动原因。</p>}</div>
+      {attribution.watchNext?.length ? <div><b>后续核验</b><ul>{attribution.watchNext.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div> : null}
+      {attribution.asOf ? <small className="anomaly-attribution-asof">证据截至 {attribution.asOf} · 已聚合 {attribution.evidenceCount || 0} 条来源</small> : null}
+      <small className="security-note">{attribution.disclaimer}</small>
+    </div> : null}
+  </div>;
+}
+
 export function MarketView() {
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
@@ -226,6 +243,10 @@ export function MarketView() {
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const liveDataError = useLabStore((state) => state.liveDataError);
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
+  const anomalyAttributions = useLabStore((state) => state.anomalyAttributions);
+  const anomalyAttributionLoading = useLabStore((state) => state.anomalyAttributionLoading);
+  const anomalyAttributionError = useLabStore((state) => state.anomalyAttributionError);
+  const explainAnomaly = useLabStore((state) => state.explainAnomaly);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const [marketColumns, setMarketColumns] = useState(loadMarketColumns);
   const [marketViews, setMarketViews] = useState(loadMarketViews);
@@ -302,7 +323,7 @@ export function MarketView() {
     {viewSaveOpen && <div className="market-view-save-popover" role="dialog" aria-label="保存行情视图"><form onSubmit={saveMarketView}><label>视图名称<input autoFocus maxLength={32} value={viewName} onChange={(event) => { setViewName(event.target.value); setViewNotice(""); }} placeholder="例如 我的交易盘面" /></label><div><button type="button" className="secondary-button" onClick={() => setViewSaveOpen(false)}>取消</button><button type="submit" className="primary-action">保存</button></div></form></div>}
     {returnedQuotes.length > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedQuotes.length} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     <div className="index-board">{returnedQuotes.length > 0 ? returnedQuotes.map((item) => { const quote = liveQuotes[item.symbol]; const freshness = quoteFreshness(quote.asOf); return <article key={item.symbol}><span>{item.name} <small>{item.symbol}</small></span><strong>{formatPrice(quote.price)}</strong><small className={quote.change >= 0 ? "up" : "down"}>{formatPercent(quote.change)}</small><em className={`quote-source quote-source-${freshness.state}`}>{quote.source || "数据服务"} · {formatQuoteFreshness(quote.asOf)}</em></article>; }) : <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} />}</div>
-    {returnedQuotes.length > 0 ? <section className="anomaly-radar" aria-label="异动雷达"><div className="anomaly-radar-heading"><div><h2>异动雷达</h2><p>基于当前已返回的真实行情，自动识别价格与量能异常。</p></div><span>{anomalies.length ? `${anomalies.length} 条` : "暂无异动"}</span></div>{anomalies.length ? <div className="anomaly-list">{anomalies.map((anomaly) => <article className={`anomaly-card ${anomaly.severity}`} key={anomaly.id}><div className="anomaly-card-main"><strong>{anomaly.name}</strong><small>{anomaly.symbol} · {anomaly.market || "自选"}</small></div><div className="anomaly-card-metric"><b>{anomalyLabel(anomaly)}</b><small>{anomaly.type === "volume" ? `阈值 ${anomaly.threshold.toFixed(2)} 倍` : `阈值 ±${anomaly.threshold.toFixed(1)}%`}</small></div><div className="anomaly-card-meta"><span>{anomaly.severity === "critical" ? "高关注" : "需关注"}</span><small>{anomaly.source} · {formatQuoteFreshness(anomaly.asOf)}</small></div></article>)}</div> : <div className="anomaly-empty"><strong>当前没有符合条件的异动</strong><p>只使用已返回的涨跌幅和量比；字段缺失或数据不足时保持空态。</p></div>}<p className="security-note">异动阈值：涨跌幅绝对值 ≥ 4%，量比 ≥ 2.5 倍。仅作信息提示，不构成投资建议。</p></section> : null}
+    {returnedQuotes.length > 0 ? <section className="anomaly-radar" aria-label="异动雷达"><div className="anomaly-radar-heading"><div><h2>异动雷达</h2><p>基于当前已返回的真实行情，自动识别价格与量能异常。</p></div><span>{anomalies.length ? `${anomalies.length} 条` : "暂无异动"}</span></div>{anomalies.length ? <div className="anomaly-list">{anomalies.map((anomaly) => <article className={`anomaly-card ${anomaly.severity}`} key={anomaly.id}><div className="anomaly-card-main"><strong>{anomaly.name}</strong><small>{anomaly.symbol} · {anomaly.market || "自选"}</small></div><div className="anomaly-card-metric"><b>{anomalyLabel(anomaly)}</b><small>{anomaly.type === "volume" ? `阈值 ${anomaly.threshold.toFixed(2)} 倍` : `阈值 ±${anomaly.threshold.toFixed(1)}%`}</small></div><div className="anomaly-card-meta"><span>{anomaly.severity === "critical" ? "高关注" : "需关注"}</span><small>{anomaly.source} · {formatQuoteFreshness(anomaly.asOf)}</small></div>{realDataMode ? <AnomalyAttribution anomaly={anomaly} attribution={anomalyAttributions[anomaly.id]} loading={Boolean(anomalyAttributionLoading[anomaly.id])} error={anomalyAttributionError[anomaly.id]} onExplain={() => { void explainAnomaly(anomaly); }} /> : null}</article>)}</div> : <div className="anomaly-empty"><strong>当前没有符合条件的异动</strong><p>只使用已返回的涨跌幅和量比；字段缺失或数据不足时保持空态。</p></div>}<p className="security-note">异动阈值：涨跌幅绝对值 ≥ 4%，量比 ≥ 2.5 倍。仅作信息提示，不构成投资建议。</p></section> : null}
     <section className="market-table"><div className="market-table-heading"><h2>我的自选</h2><small>{visibleColumns.length} 个数据列 · 视图会保存在本机</small></div><div className="table-head" style={{ "--market-table-columns": `minmax(250px, 1fr) repeat(${visibleColumns.length}, minmax(120px, 1fr)) 120px` }}><span>名称 / 代码</span>{visibleColumns.map((column) => <span key={column.id}>{column.label}</span>)}<span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol]; return <div className="table-row" key={item.symbol} style={{ "--market-table-columns": `minmax(250px, 1fr) repeat(${visibleColumns.length}, minmax(120px, 1fr)) 120px` }}><span><strong>{item.name}</strong><small>{item.symbol}</small></span>{visibleColumns.map((column) => { const cell = marketColumnValue(item, quote, column); return <span className={cell.className || ""} key={`${item.symbol}-${column.id}`}>{cell.value}</span>; })}<span>{item.market}</span></div>; })}</section>
     <p className="security-note">仅显示已返回的真实数据{liveDataLastRefreshAt ? ` · ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")} 更新` : ""}；缺失值保持为空。</p>
   </div>;
