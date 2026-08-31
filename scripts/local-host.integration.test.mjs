@@ -78,13 +78,18 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(credential.payload.keyPrefix, "sk_contr…");
 
   const state = {
+    revision: 0,
     watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     monitorRules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [],
     briefingSchedule: { enabled: true, closeTime: "15:40", timezone: "Asia/Shanghai", retryIntervalMinutes: 20 },
   };
-  const saved = await hostRequest(host, "/api/user-state", { method: "POST", body: { state } });
+  const saved = await hostRequest(host, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } });
   assert.equal(saved.response.status, 200);
+  assert.equal(saved.payload.revision, 1);
   assert.equal(saved.payload.briefingSchedule.closeTime, "15:40");
+  const stale = await hostRequest(host, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } });
+  assert.equal(stale.response.status, 409);
+  assert.equal(stale.payload.code, "USER_STATE_CONFLICT");
 
   await stopHost(host.child);
   host = await startHost(dataDir);
@@ -94,6 +99,7 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(Object.hasOwn(status.payload, "apiKey"), false);
   const restored = await hostRequest(host, "/api/user-state");
   assert.equal(restored.payload.watchlist[0].symbol, "600519");
+  assert.equal(restored.payload.revision, 1);
   assert.equal(restored.payload.briefingSchedule.closeTime, "15:40");
 });
 

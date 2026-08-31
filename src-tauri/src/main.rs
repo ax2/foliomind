@@ -1302,8 +1302,9 @@ fn user_state_load(app: AppHandle) -> Result<user_state::UserState, String> {
 fn user_state_save(
     app: AppHandle,
     state: user_state::UserState,
+    expected_revision: u64,
 ) -> Result<user_state::UserState, String> {
-    user_state::save(&app, &state)
+    user_state::save_if_revision(&app, &state, expected_revision)
 }
 
 #[tauri::command]

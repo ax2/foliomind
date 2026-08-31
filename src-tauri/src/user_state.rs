@@ -313,6 +313,8 @@ impl Default for BriefingSchedule {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserState {
+    #[serde(default)]
+    pub revision: u64,
     pub watchlist: Vec<WatchItem>,
     pub monitor_rules: Vec<MonitorRule>,
     pub notifications: Vec<Notification>,
@@ -329,6 +331,7 @@ pub struct UserState {
 impl Default for UserState {
     fn default() -> Self {
         Self {
+            revision: 0,
             watchlist: vec![
                 WatchItem {
                     symbol: "600519".into(),
@@ -656,10 +659,7 @@ pub fn validate(state: &UserState) -> Result<(), String> {
     Ok(())
 }
 
-pub fn load(app: &AppHandle) -> Result<UserState, String> {
-    let _guard = STATE_IO_LOCK
-        .lock()
-        .map_err(|_| "user state I/O lock poisoned")?;
+fn load_unlocked(app: &AppHandle) -> Result<UserState, String> {
     let file = path(app)?;
     if !file.is_file() {
         return Ok(UserState::default());
@@ -677,16 +677,20 @@ pub fn load(app: &AppHandle) -> Result<UserState, String> {
     Ok(state)
 }
 
-pub fn save(app: &AppHandle, state: &UserState) -> Result<UserState, String> {
+pub fn load(app: &AppHandle) -> Result<UserState, String> {
+    let _guard = STATE_IO_LOCK
+        .lock()
+        .map_err(|_| "user state I/O lock poisoned")?;
+    load_unlocked(app)
+}
+
+fn save_unlocked(app: &AppHandle, state: &UserState) -> Result<UserState, String> {
     validate(state)?;
     let bytes = serde_json::to_vec_pretty(state)
         .map_err(|error| format!("cannot encode user state: {error}"))?;
     if bytes.len() as u64 > MAX_BYTES {
         return Err("user state exceeds size limit".into());
     }
-    let _guard = STATE_IO_LOCK
-        .lock()
-        .map_err(|_| "user state I/O lock poisoned")?;
     let file = path(app)?;
     let parent = file.parent().ok_or("user state directory is unavailable")?;
     fs::create_dir_all(parent)
@@ -709,6 +713,42 @@ pub fn save(app: &AppHandle, state: &UserState) -> Result<UserState, String> {
     Ok(state.clone())
 }
 
+pub fn save_if_revision(
+    app: &AppHandle,
+    state: &UserState,
+    expected_revision: u64,
+) -> Result<UserState, String> {
+    let _guard = STATE_IO_LOCK
+        .lock()
+        .map_err(|_| "user state I/O lock poisoned")?;
+    let current = load_unlocked(app)?;
+    let next = advance_revision(&current, state, expected_revision)?;
+    save_unlocked(app, &next)
+}
+
+fn advance_revision(
+    current: &UserState,
+    state: &UserState,
+    expected_revision: u64,
+) -> Result<UserState, String> {
+    if current.revision != expected_revision || state.revision != expected_revision {
+        return Err(format!(
+            "USER_STATE_CONFLICT: expected revision {expected_revision}, current revision {}",
+            current.revision
+        ));
+    }
+    let mut next = state.clone();
+    next.revision = current
+        .revision
+        .checked_add(1)
+        .ok_or("user state revision exhausted")?;
+    Ok(next)
+}
+
+pub fn save(app: &AppHandle, state: &UserState) -> Result<UserState, String> {
+    save_if_revision(app, state, state.revision)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,6 +756,21 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         assert!(validate(&UserState::default()).is_ok());
+        assert_eq!(UserState::default().revision, 0);
+    }
+
+    #[test]
+    fn revision_compare_and_swap_rejects_stale_writers() {
+        let mut current = UserState::default();
+        current.revision = 7;
+        let mut submitted = current.clone();
+        submitted.watchlist[0].name = "本地修改".into();
+        let saved = advance_revision(&current, &submitted, 7).unwrap();
+        assert_eq!(saved.revision, 8);
+        assert_eq!(saved.watchlist[0].name, "本地修改");
+        assert!(advance_revision(&saved, &submitted, 7)
+            .unwrap_err()
+            .starts_with("USER_STATE_CONFLICT:"));
     }
 
     #[test]

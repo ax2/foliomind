@@ -39,6 +39,7 @@ async function fetchJson(url, options = {}) {
       const error = new Error(body.error || `本地 Host 请求失败（${response.status}）`);
       error.status = response.status;
       if (body.code) error.code = body.code;
+      error.response = body;
       throw error;
     }
     return body;

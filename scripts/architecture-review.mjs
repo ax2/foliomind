@@ -4,14 +4,14 @@ const load = (file) => readFile(new URL(file, root), "utf8");
 const checks = [];
 const check = (name, pass, detail) => checks.push({ name, pass, detail });
 
-const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, marketCalendar, desktopLifecycle, nativeMain] = await Promise.all([
+const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, userStateTransport, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, localHost, developerPanel, styles, marketCalendar, desktopLifecycle, nativeMain] = await Promise.all([
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
-  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"),
+  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"),
 ]);
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
-check("状态脱敏", userState.includes("normalizeUserState") && userState.includes("return { watchlist") && !userState.includes("integration-settings.json"), "用户状态 schema 只处理脱敏用户事实");
+check("状态脱敏", userState.includes("normalizeUserState") && userState.includes("revision:") && userState.includes("watchlist:") && userState.includes("briefingSchedule:") && !userState.includes("integration-settings.json") && !userState.includes("apiKey"), "用户状态 schema 只处理脱敏用户事实");
 check("发布资产", workflow.includes("SHA256SUMS") && workflow.includes("gh release upload"), "Release workflow 需校验并上传安装包");
 check("安装升级路径", tauriConfig.bundle?.windows?.allowDowngrades === false && tauriConfig.bundle?.windows?.nsis?.installMode === "currentUser" && Boolean(tauriConfig.bundle?.windows?.wix?.upgradeCode) && readme.includes("不要求用户先手动卸载"), "Windows 同一产品必须覆盖升级、阻止降级并保留用户配置");
 check("阶段设计", prd.includes("Stage 1E") && prd.includes("异动雷达"), "新功能必须先有可验收的 PRD 阶段设计");
@@ -21,6 +21,8 @@ check("自动复盘可靠性", app.includes("runDuePortfolioReview") && briefing
 check("Local Host 公开契约", packageJson.scripts.test.includes("local-host.integration.test.mjs") && hostIntegrationTest.includes("RUNTIME_BUSY") && hostIntegrationTest.includes("invalid local host session") && hostIntegrationTest.includes("activeRequest"), "真实 HTTP 集成测试必须覆盖鉴权、持久化、并发互斥、取消和状态释放");
 check("真实交易日门禁", briefingSchedule.includes("calendar-needed") && nativeUserState.includes("calendar_status") && marketCalendar.includes("REF.EXCHANGE_CALENDAR") && marketCalendar.includes("cn_financial_pro.trade_dates.v1"), "自动复盘必须先通过固定真实交易日历 CAP，失败时禁止猜测交易日");
 check("桌面驻留生命周期", cargoToml.includes('features = ["tray-icon"]') && desktopLifecycle.includes("CloseAction::Hide") && desktopLifecycle.includes("foliomind_reconcile") && desktopLifecycle.includes("begin_cleanup") && nativeMain.includes("stop_and_join"), "主窗口关闭需隐藏到托盘，显式退出需幂等回收 ticker、Web Host 与 Pi");
+check("用户状态并发控制", userState.includes("revision") && userStateTransport.includes("mergeUserStateChanges") && nativeUserState.includes("save_if_revision") && localHost.includes("USER_STATE_CONFLICT") && hostIntegrationTest.includes("USER_STATE_CONFLICT"), "Web、Local Host 与桌面必须以 revision/CAS 防止后台状态被旧页面覆盖");
+check("CAP 能力工作台", developerPanel.includes("调用测试") && developerPanel.includes("参数 Schema") && developerPanel.includes("返回字段") && localHost.includes("BUILTIN_CAPABILITY_CATALOG") && styles.includes("min(1320px"), "开发面板必须提供大尺寸能力目录、稳定 schema 和真实调用测试");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
