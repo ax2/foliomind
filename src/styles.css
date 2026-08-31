@@ -47,6 +47,57 @@ textarea:focus-visible {
   height: 100vh;
   background: #fff;
 }
+.app-error-boundary {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  background: #f7f9fc;
+}
+.app-error-card {
+  width: min(460px, 100%);
+  border: 1px solid #dce4ef;
+  border-radius: 16px;
+  padding: 32px;
+  background: #fff;
+  box-shadow: 0 16px 48px rgb(35 66 110 / 12%);
+  text-align: center;
+}
+.app-error-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: #fff0ef;
+  color: #c5473d;
+  font-size: 22px;
+  font-weight: 700;
+}
+.app-error-card h1 {
+  margin: 0;
+  color: #1b2638;
+  font-size: 21px;
+}
+.app-error-card p {
+  margin: 12px 0 20px;
+  color: #65758b;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.app-error-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.app-error-card small {
+  display: block;
+  margin-top: 18px;
+  color: #8a98aa;
+  font-size: 11px;
+}
 .app-shell:not(.view-watchlist) {
   grid-template-columns: 74px minmax(0, 1fr);
 }
