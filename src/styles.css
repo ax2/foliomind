@@ -1023,6 +1023,13 @@ textarea:focus-visible {
   place-items: center;
   cursor: pointer;
 }
+.composer-tool-wrap { position: relative; }
+.composer-tool:disabled { cursor: not-allowed; opacity: .5; }
+.quick-prompts { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 12; display: grid; min-width: 270px; gap: 3px; border: 1px solid #dce4ef; border-radius: 9px; padding: 6px; background: #fff; box-shadow: 0 12px 30px rgb(35 66 110 / 18%); }
+.quick-prompts button { display: grid; gap: 3px; border: 0; border-radius: 6px; padding: 8px 9px; background: transparent; color: #53647a; text-align: left; cursor: pointer; }
+.quick-prompts button:hover, .quick-prompts button:focus-visible { background: #f1f6fd; color: #2167b6; }
+.quick-prompts strong { font-size: 11px; }
+.quick-prompts span { color: #7b8490; font-size: 10px; line-height: 1.35; }
 .mode-select {
   margin-left: auto;
   color: #626b79;

@@ -84,6 +84,15 @@ describe("FolioMind core flows", () => {
     expect(movingAverage).toBeChecked();
   });
 
+  it("offers editable quick prompts in the copilot composer", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "快捷指令" }));
+    expect(screen.getByRole("menu", { name: "快捷指令" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "最新行情" }));
+    expect(screen.getByRole("textbox", { name: "分析问题" })).toHaveValue("查询当前标的的最新真实行情、数据截至时间和来源。");
+    expect(screen.queryByRole("menu", { name: "快捷指令" })).not.toBeInTheDocument();
+  });
+
   it("organizes the watchlist by group and keeps empty real quotes honest", () => {
     render(<WatchlistSidebar />);
     expect(screen.getByRole("region", { name: "A 股自选" })).toBeInTheDocument();
