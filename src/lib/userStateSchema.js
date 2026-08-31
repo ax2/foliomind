@@ -17,9 +17,17 @@ function sanitizeWatchlist(items) {
 }
 
 function sanitizeRules(items) {
-  return (Array.isArray(items) ? items : []).slice(0, 500).map((rule) => ({
-    id: text(rule?.id, 128), symbol: text(rule?.symbol, 64).toUpperCase(), strategyId: text(rule?.strategyId, 64), threshold: finiteNumber(rule?.threshold), conditions: normalizeConditions(rule?.conditions, text(rule?.strategyId, 64)), logic: String(rule?.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", intervalSeconds: finiteNumber(rule?.intervalSeconds), enabled: rule?.enabled !== false, lastCheckedAt: rule?.lastCheckedAt ? text(rule.lastCheckedAt, 64) : null, lastTriggeredAt: rule?.lastTriggeredAt ? text(rule.lastTriggeredAt, 64) : null, lastSignalTriggered: typeof rule?.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null,
-  })).filter((rule) => rule.id && rule.symbol && rule.strategyId && rule.threshold !== null && rule.intervalSeconds !== null);
+  return (Array.isArray(items) ? items : []).slice(0, 500).map((rule) => {
+    const scope = rule?.scope === "watchlist" ? "watchlist" : "symbol";
+    const symbol = scope === "watchlist" ? "*" : text(rule?.symbol, 64).toUpperCase();
+    const lastSignalBySymbol = Object.fromEntries(Object.entries(rule?.lastSignalBySymbol || {})
+      .map(([key, value]) => [text(key, 64).toUpperCase(), value])
+      .filter(([key, value]) => key && typeof value === "boolean")
+      .slice(0, 200));
+    return {
+      id: text(rule?.id, 128), scope, symbol, strategyId: text(rule?.strategyId, 64), threshold: finiteNumber(rule?.threshold), conditions: normalizeConditions(rule?.conditions, text(rule?.strategyId, 64)), logic: String(rule?.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", intervalSeconds: finiteNumber(rule?.intervalSeconds), enabled: rule?.enabled !== false, lastCheckedAt: rule?.lastCheckedAt ? text(rule.lastCheckedAt, 64) : null, lastTriggeredAt: rule?.lastTriggeredAt ? text(rule.lastTriggeredAt, 64) : null, lastSignalTriggered: typeof rule?.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol,
+    };
+  }).filter((rule) => rule.id && rule.symbol && rule.strategyId && rule.threshold !== null && rule.intervalSeconds !== null);
 }
 
 function sanitizeNotifications(items) {

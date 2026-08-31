@@ -29,6 +29,7 @@ check("成本单位隔离", localHost.includes("qverisUnits") && localHost.inclu
 check("自选列视图", marketViews.includes("MARKET_COLUMN_DEFINITIONS") && marketViews.includes("MARKET_COLUMNS_STORAGE_KEY") && marketViews.includes("恢复默认列") && styles.includes("--market-table-columns"), "市场页应支持非敏感、可恢复的自选行情列视图，并保持动态表格对齐");
 check("命名行情视图", marketViews.includes("MARKET_VIEWS_STORAGE_KEY") && marketViews.includes("DEFAULT_MARKET_VIEWS") && marketViews.includes("CUSTOM_MARKET_VIEW_ID") && marketViews.includes(">= 10") && marketViews.includes("临时视图"), "命名行情视图只保存列偏好，手动修改进入临时视图并有数量上限");
 check("异动证据解读", marketViews.includes("AnomalyAttribution") && anomalyAttribution.includes("buildAttributionPrompt") && anomalyAttribution.includes("evidenceIndex") && anomalyAttribution.includes("ANOMALY_ATTRIBUTION_DISCLAIMER") && anomalyAttribution.includes("https?"), "异动解读必须基于真实证据、引用来源、带免责声明并过滤不安全链接");
+check("动态自选组盯盘", marketViews.includes("scope === \"watchlist\"") && marketViews.includes("lastSignalBySymbol") && userState.includes("lastSignalBySymbol") && prd.includes("Stage 2E 动态自选组盯盘"), "自选组规则必须动态展开当前标的、逐标的去重并通过状态 schema 脱敏迁移");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

@@ -212,6 +212,17 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("combobox", { name: "条件组合逻辑" })).toHaveValue("AND");
   });
 
+  it("creates a dynamic watchlist monitor rule", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
+    fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "监控范围" }), { target: { value: "watchlist" } });
+    expect(screen.getByText(/将检查当前自选中的 8 个标的/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));
+    await waitFor(() => expect(useLabStore.getState().rules.some((rule) => rule.scope === "watchlist" && rule.symbol === "*")).toBe(true));
+    expect(screen.getByText(/整个自选（动态）/)).toBeInTheDocument();
+  });
+
   it("builds an OR rule from multiple real-data conditions", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));

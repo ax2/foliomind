@@ -1494,6 +1494,7 @@ textarea:focus-visible {
 .modal-card label small { margin-top: -25px; margin-left: auto; padding-right: 10px; color: var(--muted); }
 .modal-help { margin: -5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .condition-modal { width: min(680px, 100%); max-height: min(88vh, 760px); overflow: auto; }
+.monitor-scope-note { margin: -2px 0 2px; padding: 9px 10px; border: 1px solid #dce8f7; border-radius: 7px; background: #f5f9ff; color: #54708f; font-size: 11px; line-height: 1.5; }
 .condition-builder { display: grid; gap: 10px; border: 1px solid #e1e8f2; border-radius: 9px; padding: 12px; background: #fbfdff; }
 .condition-builder-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .condition-builder-heading > div { display: grid; gap: 4px; }

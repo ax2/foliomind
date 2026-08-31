@@ -43,6 +43,14 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ logic: "OR", conditions: [{ type: "price_change", value: 3 }, { type: "volume_spike", value: 2.5 }] });
   });
 
+  it("round-trips dynamic watchlist monitor scope and bounded per-symbol edge state", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      monitorRules: [{ id: "watchlist-rule", scope: "watchlist", symbol: "*", strategyId: "price_change", threshold: 3, intervalSeconds: 300, lastSignalBySymbol: { "600519": true, AAPL: false, ignored: "invalid" } }],
+    });
+    expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ scope: "watchlist", symbol: "*", lastSignalBySymbol: { "600519": true, AAPL: false } });
+  });
+
   it("round-trips watchlist groups while migrating legacy items", () => {
     const raw = serializeUserStateBackup({ watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", group: "核心持仓" }] });
     expect(parseUserStateBackup(raw).watchlist[0]).toMatchObject({ symbol: "600519", group: "核心持仓" });

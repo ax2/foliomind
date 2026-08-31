@@ -98,7 +98,13 @@ function normalizeRule(rule) {
   const conditions = normalizeConditions(rule.conditions, strategy.id);
   const firstValue = conditions[0]?.value;
   const threshold = Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : Number.isFinite(Number(firstValue)) ? Number(firstValue) : strategy.defaultThreshold;
-  return { id: String(rule.id ?? createId("rule")), symbol: String(rule.symbol ?? "600519"), strategyId: strategy.id, conditions, logic: String(rule.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", threshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null };
+  const scope = rule.scope === "watchlist" ? "watchlist" : "symbol";
+  const symbol = scope === "watchlist" ? "*" : String(rule.symbol ?? "600519");
+  const lastSignalBySymbol = Object.fromEntries(Object.entries(rule.lastSignalBySymbol || {})
+    .map(([key, value]) => [String(key).trim().toUpperCase(), value])
+    .filter(([key, value]) => key && typeof value === "boolean")
+    .slice(0, 200));
+  return { id: String(rule.id ?? createId("rule")), scope, symbol, strategyId: strategy.id, conditions, logic: String(rule.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", threshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol };
 }
 function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
@@ -179,7 +185,8 @@ function monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluati
   return {
     id: createId("monitor-check"),
     ruleId: rule.id,
-    symbol: rule.symbol,
+    symbol: String(item?.symbol || rule.symbol || ""),
+    scope: rule.scope || "symbol",
     checkedAt,
     outcome: outcome || (triggered === true ? "triggered" : triggered === false ? "not_triggered" : "unknown"),
     triggered,
@@ -445,6 +452,38 @@ async function fetchLiveQuote(item, options = {}) {
   }
   if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
   return { quotes, reply };
+}
+
+async function executeMonitorForItem(rule, item) {
+  const strategy = strategyFor(rule.strategyId);
+  let reply;
+  let result;
+  let parsed = null;
+  const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${item?.symbol || rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
+  if (isLocalWebRuntime() && typeof queryCachedData === "function") {
+    const kinds = [...new Set(conditionsForRule(rule).map((condition) => monitorDataKind(condition.type)))];
+    const directResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, item?.symbol || rule.symbol)))).filter(Boolean);
+    const monitorData = directResults.reduce((merged, current) => ({ ...merged, ...current.fields, asOf: current.fields.asOf || merged.asOf, source: current.fields.source || merged.source }), {});
+    reply = { text: JSON.stringify(monitorData), mode: directResults[0]?.mode || "pi-local-host", audits: directResults.flatMap((current) => current.audits || []) };
+    const evaluation = evaluateRuleConditions(rule, monitorData);
+    if (directResults.length && evaluation.known) {
+      result = conditionsForRule(rule).every((condition) => condition.type === "price_change") && monitorData.price !== undefined
+        ? priceMonitorResult(rule, item, monitorData)
+        : conditionMonitorResult(rule, item, monitorData);
+      parsed = result;
+    } else {
+      // Direct CAP responses may be empty or omit a condition-specific field.
+      // Ask the managed runtime once for the unresolved decision.
+      reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
+      parsed = findJsonObject(reply.text);
+      result = parsed || { triggered: null, title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: "数据服务未返回完整条件字段。", severity: "info" };
+    }
+  } else {
+    reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
+    parsed = findJsonObject(reply.text);
+    result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
+  }
+  return { result, reply, parsed };
 }
 
 export const initialLabState = {
@@ -890,62 +929,69 @@ export const useLabStore = create((set, get) => ({
   markNotificationRead: (id) => { set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); void get().persistUserState(); },
   markAllNotificationsRead: () => { set((state) => ({ notifications: state.notifications.map((item) => ({ ...item, read: true })) })); void get().persistUserState(); },
   runMonitorCheck: async (ruleId) => {
-    let acquired = false; let rule; let item;
-    set((state) => { rule = state.rules.find((candidate) => candidate.id === ruleId); item = state.watchlist.find((candidate) => candidate.symbol === rule?.symbol); if (!rule || !rule.enabled || state.monitorBusy || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {}; acquired = true; const checkedAt = nowIso(); return { monitorBusy: true, monitorLastRunAt: checkedAt, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastCheckedAt: checkedAt } : candidate) }; });
+    let acquired = false; let rule; let items = [];
+    set((state) => {
+      rule = state.rules.find((candidate) => candidate.id === ruleId);
+      items = rule?.scope === "watchlist" ? state.watchlist : state.watchlist.filter((candidate) => candidate.symbol === rule?.symbol);
+      if (!rule || !rule.enabled || !items.length || state.monitorBusy || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {};
+      acquired = true;
+      const checkedAt = nowIso();
+      return { monitorBusy: true, monitorLastRunAt: checkedAt, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastCheckedAt: checkedAt } : candidate) };
+    });
     if (!acquired) return false;
-    const strategy = strategyFor(rule.strategyId);
-    try {
-      let reply; let result; let parsed = null;
-      const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
-      if (isLocalWebRuntime() && typeof queryCachedData === "function") {
-        const kinds = [...new Set(conditionsForRule(rule).map((condition) => monitorDataKind(condition.type)))];
-        const directResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, rule.symbol)))).filter(Boolean);
-        const monitorData = directResults.reduce((merged, current) => ({ ...merged, ...current.fields, asOf: current.fields.asOf || merged.asOf, source: current.fields.source || merged.source }), {});
-        reply = { text: JSON.stringify(monitorData), mode: directResults[0]?.mode || "pi-local-host", audits: directResults.flatMap((current) => current.audits || []) };
-        const evaluation = evaluateRuleConditions(rule, monitorData);
-        if (directResults.length && evaluation.known) {
-          result = conditionsForRule(rule).every((condition) => condition.type === "price_change") && monitorData.price !== undefined
-            ? priceMonitorResult(rule, item, monitorData)
-            : conditionMonitorResult(rule, item, monitorData);
-          parsed = result;
-        } else {
-          // Direct CAP responses may be empty or omit a condition-specific
-          // field. Ask the managed runtime once for the unresolved decision.
-          reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
-          parsed = findJsonObject(reply.text);
-          result = parsed || { triggered: null, title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: "数据服务未返回完整条件字段。", severity: "info" };
-        }
-      } else {
-        reply = await askPi(monitorPrompt, { settleTimeoutMs: 120_000 });
-        parsed = findJsonObject(reply.text); result = parsed || { triggered: reply.mode !== "browser-demo", title: `${item?.name || rule.symbol} · ${strategy.name}`, summary: reply.mode === "browser-demo" ? "浏览器预览未执行真实数据查询，请先配置数据服务。" : reply.text, severity: "info" };
+    const outcomes = await mapWithConcurrency(items, resolveLiveQuoteConcurrency(), async (item) => {
+      const checkedAt = nowIso();
+      try {
+        const { result, reply, parsed } = await executeMonitorForItem(rule, item);
+        const evaluation = parsed && typeof parsed === "object" && Array.isArray(parsed.conditionResults) ? { results: parsed.conditionResults } : null;
+        return { item, result, reply, parsed, history: monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluation) };
+      } catch (error) {
+        const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试");
+        return { item, error: message, history: monitorHistoryFromResult(rule, item, { title: `${item?.name || rule.symbol} · 暂未完成检查`, summary: message, severity: "warning" }, { mode: "pi-local-host", audits: [] }, checkedAt, null, "error") };
       }
-      let deliveredNotification = null;
-      const checkedAt = nowIso();
-      const evaluation = parsed && typeof parsed === "object" && Array.isArray(parsed.conditionResults) ? { results: parsed.conditionResults } : null;
-      const historyEntry = monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluation);
-      set((state) => {
-        const hasDecision = typeof result.triggered === "boolean";
-        const triggered = result.triggered === true;
-        // Alerts are edge-triggered: keep one notification while a condition
-        // remains true, then allow a new notification after it resets.
-        const shouldNotify = hasDecision && ((triggered && rule.lastSignalTriggered !== true) || reply.mode === "browser-demo" || !parsed);
-        const notification = shouldNotify ? notificationFromResult(rule, item, result, reply) : null;
-        deliveredNotification = notification;
-        return {
-          monitorBusy: false,
-          rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastTriggeredAt: triggered ? nowIso() : candidate.lastTriggeredAt, lastSignalTriggered: hasDecision ? triggered : candidate.lastSignalTriggered } : candidate),
-          notifications: notification ? [notification, ...state.notifications].slice(0, 500) : state.notifications,
-          monitorHistory: [historyEntry, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY),
-        };
-      });
-      if (deliveredNotification) void sendSystemNotification(deliveredNotification);
-      await get().persistUserState(); return true;
-    } catch (error) {
-      const message = friendlyDataMessage(error, "这次检查暂时没有返回结果，系统会稍后重试");
-      const checkedAt = nowIso();
-      const historyEntry = monitorHistoryFromResult(rule, item, { title: `${item?.name || rule.symbol} · 暂未完成检查`, summary: message, severity: "warning" }, { mode: "pi-local-host", audits: [] }, checkedAt, null, "error");
-      set((state) => ({ monitorBusy: false, monitorHistory: [historyEntry, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY), notifications: [{ id: createId("notification"), kind: "monitor", symbol: String(item?.symbol || rule.symbol || ""), name: String(item?.name || ""), ruleId: String(rule.id || ""), title: `${item?.name || rule.symbol} · 暂未完成检查`, body: message, severity: "warning", createdAt: checkedAt, read: false, source: "data-service" }, ...state.notifications].slice(0, 500) })); await get().persistUserState(); return false;
-    }
+    });
+    const deliveredNotifications = [];
+    const checkedAt = nowIso();
+    set((state) => {
+      const currentRule = state.rules.find((candidate) => candidate.id === rule.id) || rule;
+      const signalBySymbol = { ...(currentRule.lastSignalBySymbol || {}) };
+      let lastSignalTriggered = currentRule.lastSignalTriggered;
+      let lastTriggeredAt = currentRule.lastTriggeredAt;
+      const notifications = [];
+      const histories = outcomes.map((outcome) => outcome.history).filter(Boolean);
+      for (const outcome of outcomes) {
+        const symbol = outcome.item?.symbol || currentRule.symbol;
+        if (outcome.error) continue;
+        const hasDecision = typeof outcome.result?.triggered === "boolean";
+        const triggered = outcome.result?.triggered === true;
+        const previous = currentRule.scope === "watchlist" ? signalBySymbol[symbol] : currentRule.lastSignalTriggered;
+        if (currentRule.scope === "watchlist") signalBySymbol[symbol] = hasDecision ? triggered : previous;
+        else lastSignalTriggered = hasDecision ? triggered : lastSignalTriggered;
+        if (triggered) lastTriggeredAt = checkedAt;
+        // Alerts are edge-triggered per symbol; repeated true checks do not spam notifications.
+        if (hasDecision && ((triggered && previous !== true) || outcome.reply?.mode === "browser-demo" || !outcome.parsed)) {
+          const notification = notificationFromResult(currentRule, outcome.item, outcome.result, outcome.reply);
+          notifications.push(notification);
+          deliveredNotifications.push(notification);
+        }
+      }
+      const failures = outcomes.filter((outcome) => outcome.error);
+      if (failures.length) {
+        const detail = failures.slice(0, 4).map((outcome) => `${outcome.item?.name || outcome.item?.symbol}：${outcome.error}`).join("；");
+        const notification = { id: createId("notification"), kind: "monitor", symbol: currentRule.scope === "watchlist" ? "*" : String(currentRule.symbol || ""), name: currentRule.scope === "watchlist" ? "整个自选" : String(failures[0]?.item?.name || ""), ruleId: String(currentRule.id || ""), title: `${currentRule.scope === "watchlist" ? "整个自选" : failures[0]?.item?.name || currentRule.symbol} · 暂未完成检查`, body: `${detail}${failures.length > 4 ? `；另有 ${failures.length - 4} 个标的失败` : ""}`, severity: "warning", createdAt: checkedAt, read: false, source: "data-service" };
+        notifications.push(notification);
+        deliveredNotifications.push(notification);
+      }
+      return {
+        monitorBusy: false,
+        rules: state.rules.map((candidate) => candidate.id === currentRule.id ? { ...candidate, lastTriggeredAt, lastSignalTriggered, lastSignalBySymbol: signalBySymbol } : candidate),
+        notifications: notifications.length ? [...notifications, ...state.notifications].slice(0, 500) : state.notifications,
+        monitorHistory: [...histories, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY),
+      };
+    });
+    for (const notification of deliveredNotifications) void sendSystemNotification(notification);
+    await get().persistUserState();
+    return outcomes.some((outcome) => !outcome.error);
   },
   runDueMonitorChecks: async () => {
     const state = get();

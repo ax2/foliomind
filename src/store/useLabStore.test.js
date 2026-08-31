@@ -463,6 +463,34 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications).toHaveLength(2);
   });
 
+  it("checks a dynamic watchlist rule independently and de-duplicates each symbol", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "watchlist-rule", scope: "watchlist", symbol: "*", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [
+        { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },
+        { symbol: "AAPL", name: "Apple", market: "NASDAQ", category: "科技" },
+      ],
+    });
+    runtime.queryCachedData
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] })
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "AAPL", price: 200, changePercent: 1.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+
+    await expect(useLabStore.getState().runMonitorCheck("watchlist-rule")).resolves.toBe(true);
+    expect(runtime.queryCachedData).toHaveBeenCalledTimes(2);
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+    expect(useLabStore.getState().notifications[0]).toMatchObject({ symbol: "600519" });
+    expect(useLabStore.getState().rules[0].lastSignalBySymbol).toEqual({ "600519": true, AAPL: false });
+    expect(useLabStore.getState().monitorHistory.map((entry) => entry.symbol)).toEqual(["600519", "AAPL"]);
+
+    runtime.queryCachedData
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: "2026-08-29 10:01:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] })
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "AAPL", price: 200, changePercent: 1.2, asOf: "2026-08-29 10:01:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+    await expect(useLabStore.getState().runMonitorCheck("watchlist-rule")).resolves.toBe(true);
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+  });
+
   it("keeps an auditable monitor timeline for triggered checks", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
