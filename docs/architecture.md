@@ -84,7 +84,7 @@ Rust Host 清理继承环境，不向 Pi 传递任何 `QVERIS_*`、OAuth 或控�
 
 Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳定 WiX UpgradeCode 和 current-user NSIS 模式，升级覆盖应用文件且不触碰安装目录之外的用户配置。生产发布仍需在对应平台补齐代码签名、公证、自动更新签名和干净安装烟测。
 
-开发面板读取本地 Host 的能力目录与脱敏调用审计，可在 Web 通过 Host 直连测试，在桌面通过内置 Tool Runtime 测试；只有观察到目标 tool ID 的成功审计才判定测试成功。能力目录仅把已验证的稳定 tool schema 暴露给 Skill，Provider 尚未验证的能力只显示总量，不伪装为可调用工具。Windows 更新依靠稳定 UpgradeCode、禁止降级和 current-user 模式覆盖安装，不能在发布脚本中先删除旧安装目录或用户配置。
+开发面板读取本地 Host 的能力目录与脱敏调用审计，可在 Web 通过 Host 直连测试，在桌面通过内置 Tool Runtime 测试；只有观察到目标 tool ID 的成功审计才判定测试成功。能力目录支持通过免费 Search 动态加载 provider 返回的完整工具元数据，动态项测试必须携带同一 `search_id`、`tool_id` 与参数 schema，结果不会自动进入产品默认工具链；只有已验证的稳定 tool schema 暴露给 Skill。Windows 更新依靠稳定 UpgradeCode、禁止降级和 current-user 模式覆盖安装，不能在发布脚本中先删除旧安装目录或用户配置。
 
 用户状态根对象带单调递增的 `revision`。Web Host 与桌面 Host 保存时在同一 I/O 临界区比较 `expectedRevision`，不匹配返回 409/`USER_STATE_CONFLICT`；客户端收到冲突后重新读取最新状态，只自动合并不同记录或不同日程字段的修改，同一记录的相互冲突修改停止保存并提示刷新。旧状态文件迁移为 revision 0，便携备份不携带 revision，避免把另一台设备的并发令牌带入本机。该契约使托盘后台调度写入的新提醒、复盘和检查历史不会被仍持有旧快照的 WebView 静默覆盖。
 

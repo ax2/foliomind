@@ -13,6 +13,7 @@ const DEFAULT_GATEWAY = "https://aigateway.qveris.ai/v1";
 export const DEFAULT_DATA_PROVIDER = "qveris_finance";
 export const CAPABILITY_CATALOG_VERSION = 2;
 const BRIDGE_LIMIT = 20;
+const CAPABILITY_DIRECTORY_LIMIT = 100;
 export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
 const token = `fh_${randomUUID()}`;
 const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
@@ -192,6 +193,31 @@ export const BUILTIN_CAPABILITY_CATALOG = Object.freeze({
   sentiment: { toolId: "qveris_finance.news_fin_tagged", capability: "NEWS.FIN.TAGGED", description: "带主题与情绪标签的财经新闻", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["title", "url", "published_at", "source", "summary", "sentiment_label", "sentiment_score"], coverage: "已验证按标的新闻；市场范围过滤暂不透传，避免上游参数映射错误" },
   trading_calendar: { toolId: "cn_financial_pro.trade_dates.v1", provider: "cn_financial_pro", capability: "REF.EXCHANGE_CALENDAR", description: "按交易所查询真实交易日期，用于休市日门禁", parameters: { marketcode: "string", startdate: "string", enddate: "string" }, returns: ["time"], coverage: "已验证 SSE/SZSE/HKEX/CFFEX；只判断是否交易，不解释休市原因" },
 });
+
+/** Convert QVeris Search results into the stable shape consumed by the dev panel. */
+export function normalizeDiscoveredCapability(item, { searchId = "", provider = DEFAULT_DATA_PROVIDER } = {}) {
+  const params = Array.isArray(item?.params) ? item.params.slice(0, 64) : [];
+  const sampleParameters = item?.examples?.sample_parameters && typeof item.examples.sample_parameters === "object" ? item.examples.sample_parameters : {};
+  const boundedSample = (() => { try { return JSON.stringify(sampleParameters).length <= 8_000 ? sampleParameters : {}; } catch { return {}; } })();
+  const parameters = Object.fromEntries(params
+    .filter((param) => param && typeof param.name === "string" && param.name.trim())
+    .map((param) => [String(param.name).trim(), `${String(param.type || "string").trim() || "string"}${param.required ? "" : "?"}`]));
+  return {
+    kind: `discovered:${String(item?.tool_id || item?.id || "unknown")}`,
+    toolId: String(item?.tool_id || item?.id || ""),
+    capability: String(item?.capability || item?.name || item?.tool_id || "未知能力"),
+    description: String(item?.description || item?.provider_description || "QVeris 返回的金融能力").slice(0, 2_000),
+    provider: String(item?.provider_name || provider),
+    parameters,
+    parameterDetails: params.map((param) => ({ name: String(param.name || ""), type: String(param.type || "string"), required: Boolean(param.required), description: String(param.description || ""), enum: Array.isArray(param.enum) ? param.enum.slice(0, 32) : undefined })).filter((param) => param.name),
+    sampleParameters: boundedSample,
+    expectedCost: item?.expected_cost || item?.billing_rule?.description || null,
+    billingRule: item?.billing_rule || null,
+    stats: item?.stats || null,
+    searchId: String(searchId || ""),
+    discoveredAt: new Date().toISOString(),
+  };
+}
 
 const QVERIS_FINANCE_PROVIDER_SUMMARY = Object.freeze({
   capabilityCount: 141,
@@ -581,6 +607,53 @@ async function qverisOperation(operation, input, settings, key, runId, phases, s
   if (operation === "inspect") for (const id of input.tool_ids) phases.inspected.add(`${input.search_id}:${id}`);
   return result;
 }
+
+async function discoverCapabilityDirectory(input, settings, key, signal) {
+  const query = String(input?.query || `provider:${settings?.dataProvider || DEFAULT_DATA_PROVIDER}`).trim().slice(0, 160);
+  if (!query) throw new Error("能力目录查询不能为空");
+  const limit = Math.max(1, Math.min(CAPABILITY_DIRECTORY_LIMIT, Number(input?.limit) || CAPABILITY_DIRECTORY_LIMIT));
+  const runId = `catalog_${randomUUID()}`;
+  const url = endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "search");
+  const startedAt = Date.now();
+  let result;
+  try {
+    // Directory browsing is an explicit user action. Do not hold the panel for
+    // a Retry-After window on a rate limit; the user can retry after the short
+    // message and regular data requests keep their normal retry policy.
+    result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ query, limit, session_id: runId, view: "full", lang: "zh" }) }, signal, 0);
+  } catch (error) {
+    logInvocation({ type: "qveris", operation: "capability-discover", method: "POST", path: url, status: Number(error.status) || 502, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: { query, limit } });
+    throw error;
+  }
+  const searchId = String(result?.search_id || result?.result?.search_id || "");
+  const rawResults = Array.isArray(result?.results) ? result.results : Array.isArray(result?.result?.results) ? result.result.results : [];
+  const tools = rawResults.map((item) => normalizeDiscoveredCapability(item, { searchId, provider: settings?.dataProvider || DEFAULT_DATA_PROVIDER })).filter((item) => item.toolId);
+  logInvocation({ type: "qveris", operation: "capability-discover", method: "POST", path: url, status: 200, durationMs: Date.now() - startedAt, params: { query, limit }, response: { searchId, total: result?.total ?? tools.length, tools: tools.map((tool) => ({ toolId: tool.toolId, capability: tool.capability, provider: tool.provider })) }, cost: costFrom(result) });
+  if (!searchId && !tools.length) throw new Error("能力目录暂未返回可用结果");
+  const directory = { query, searchId, total: Number(result?.total) || tools.length, tools, remainingCredits: result?.remaining_credits ?? null, updatedAt: new Date().toISOString() };
+  const cache = await readToolCache();
+  cache.__directory = directory;
+  await writeToolCache(cache);
+  return directory;
+}
+
+async function testDiscoveredCapability(input, settings, key, signal) {
+  const toolId = String(input?.toolId || "").trim();
+  const searchId = String(input?.searchId || "").trim();
+  const parameters = input?.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters) ? input.parameters : null;
+  if (!toolId || !searchId || !parameters) throw new Error("能力测试需要 toolId、searchId 和 JSON 参数");
+  const runId = `cap_test_${randomUUID()}`;
+  const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(toolId)}`;
+  const startedAt = Date.now();
+  try {
+    const result = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ search_id: searchId, session_id: runId, parameters, max_response_size: 20480, respond_with: "full" }) }, signal);
+    logInvocation({ type: "cap", operation: "capability-test", method: "POST", path: url, status: 200, durationMs: Date.now() - startedAt, params: { toolId, searchId, parameters }, response: result, cost: costFrom(result) });
+    return { toolId, searchId, result, cost: costFrom(result), success: result?.success !== false };
+  } catch (error) {
+    logInvocation({ type: "cap", operation: "capability-test", method: "POST", path: url, status: Number(error.status) || 502, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: { toolId, searchId, parameters } });
+    throw error;
+  }
+}
 async function rememberToolSelection(kind, settings, input, runId) {
   if (!kind || !devVariables.toolCacheEnabled || !input?.tool_id || !input?.search_id) return;
   const cache = await readToolCache();
@@ -719,15 +792,32 @@ async function route(req, body) {
   if (method === "GET" && path === "/api/dev/overview") {
     const settings = await readJson(settingsFile, defaultSettings); const key = await readKey();
     const cache = await readToolCache();
-    return { logs: devLogs.slice(-200), costSummary: costSummary(devLogs), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings) }, variables: { ...devVariables } };
+    return { logs: devLogs.slice(-200), costSummary: costSummary(devLogs), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings), capabilityDirectory: cache.__directory || null }, variables: { ...devVariables } };
   }
   if (method === "GET" && path === "/api/dev/capabilities") {
     const settings = await readJson(settingsFile, defaultSettings);
     return capabilityCatalog(settings);
   }
+  if (method === "POST" && path === "/api/dev/capabilities/discover") {
+    const key = await readKey(); if (!key) return { available: false, errorMessage: "请先在设置中配置 API Key" };
+    const settings = await readJson(settingsFile, defaultSettings);
+    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
+    try { return await discoverCapabilityDirectory(body.input || {}, settings, key, controller.signal); }
+    catch (error) {
+      // Keep expected upstream throttling/service failures inside the Host
+      // contract so the browser does not surface a noisy failed-resource error.
+      return { available: false, query: String(body.input?.query || `provider:${settings?.dataProvider || DEFAULT_DATA_PROVIDER}`), errorMessage: Number(error?.status) === 429 ? "能力目录当前请求较多，请稍后重试" : "能力目录暂时无法加载，请稍后重试" };
+    }
+    finally { clearTimeout(timeout); }
+  }
   if (method === "POST" && path === "/api/dev/capabilities/test") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
+    if (input.toolId || input.searchId) {
+      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
+      try { return await testDiscoveredCapability(input, settings, key, controller.signal); }
+      finally { clearTimeout(timeout); }
+    }
     if (!BUILTIN_CAPABILITY_CATALOG[String(input.kind || "")] || (String(input.kind || "") !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("能力测试需要有效的 kind 和查询参数");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
     try { return await queryDirectCapability(input, settings, key, controller.signal); }

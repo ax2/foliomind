@@ -91,6 +91,10 @@ export function testCapability(input, options = {}) {
   return localHostRequest("/api/dev/capabilities/test", { ...options, method: "POST", body: JSON.stringify({ input }) });
 }
 
+export function discoverCapabilities(input = {}, options = {}) {
+  return localHostRequest("/api/dev/capabilities/discover", { timeoutMs: 30_000, ...options, method: "POST", body: JSON.stringify({ input }) });
+}
+
 export async function loadDeveloperOverview(options = {}) {
   const overview = await localHostRequest("/api/dev/overview", options);
   if (overview?.variables && typeof overview.variables === "object") developerVariables = { ...overview.variables };

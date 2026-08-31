@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, retryDelayMs, shouldInvalidateToolCache, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -29,6 +29,15 @@ test("keeps the qveris_finance CAP contract local and normalizes real envelopes"
   const calendar = normalizeCapabilityResult("trading_calendar", { date: "2026-08-31", marketcode: "212001" }, { success: true, result: { data: { time: ["2026-08-28", "2026-08-31"] } } });
   assert.deepEqual(calendar.tradingDates, ["2026-08-28", "2026-08-31"]);
   assert.equal(calendar.isTradingDay, true);
+});
+
+test("normalizes discovered capabilities without losing schema, examples, or billing hints", () => {
+  const capability = normalizeDiscoveredCapability({ tool_id: "qveris_finance.analytics_rsi", name: "RSI 技术指标", description: "计算相对强弱指标", provider_name: "qveris_finance", params: [{ name: "symbol", type: "string", required: true, description: "证券代码" }, { name: "period", type: "integer", required: false }], examples: { sample_parameters: { symbol: "600519" } }, expected_cost: "1 credit", stats: { success_rate: 0.98 } }, { searchId: "srch_demo" });
+  assert.equal(capability.kind, "discovered:qveris_finance.analytics_rsi");
+  assert.deepEqual(capability.parameters, { symbol: "string", period: "integer?" });
+  assert.equal(capability.sampleParameters.symbol, "600519");
+  assert.equal(capability.expectedCost, "1 credit");
+  assert.equal(capability.searchId, "srch_demo");
 });
 
 test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {

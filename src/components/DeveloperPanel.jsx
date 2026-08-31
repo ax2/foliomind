@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowClockwise, CaretUp, Code, Trash, X } from "@phosphor-icons/react";
-import { clearDeveloperLogs, isLocalWebRuntime, loadDeveloperOverview, testCapability, updateDeveloperVariables } from "../lib/localHost.js";
+import { clearDeveloperLogs, discoverCapabilities, isLocalWebRuntime, loadDeveloperOverview, testCapability, updateDeveloperVariables } from "../lib/localHost.js";
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { BUILTIN_CAPABILITIES } from "../lib/builtinCapabilities.js";
 import { queryTradingCalendar } from "../lib/integrations.js";
@@ -34,7 +34,7 @@ export function capabilityToolSchema(capability) {
   return {
     type: "function",
     function: {
-      name: `foliomind_cap_${capability?.kind || "unknown"}`,
+      name: `foliomind_cap_${String(capability?.kind || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48)}`,
       description: capability?.description || "FolioMind 金融数据能力",
       parameters: { type: "object", properties, required, additionalProperties: false },
     },
@@ -65,6 +65,43 @@ function costLabel(summary, calls, known, units) {
   return `${Number(summary || 0).toFixed(4)} ${unitLabel}${known < calls ? ` · ${known}/${calls} 笔已返回` : ""}`;
 }
 
+function discoveredAsCapability(item) {
+  if (!item) return null;
+  return {
+    ...item,
+    kind: item.kind || `discovered:${item.toolId}`,
+    returns: Array.isArray(item.returns) ? item.returns : [],
+  };
+}
+
+function sampleParametersFor(capability, symbol) {
+  const sample = capability?.sampleParameters && typeof capability.sampleParameters === "object" ? structuredClone(capability.sampleParameters) : {};
+  for (const name of Object.keys(capability?.parameters || {})) {
+    if (sample[name] != null && sample[name] !== "") continue;
+    if (/^(symbol|ticker|code|stock_code|stockCode|securities_code)$/i.test(name)) sample[name] = symbol;
+    else if (/date/i.test(name)) sample[name] = new Date().toISOString().slice(0, 10);
+  }
+  return sample;
+}
+
+function CapabilityCard({ capability, result, onTest, onCopy }) {
+  return <details className="developer-capability" key={capability.kind}>
+    <summary><div><strong>{capability.capability}</strong><small>{capability.toolId} · {capability.description}</small></div></summary>
+    <div className="developer-capability-detail">
+      <div><b>能力说明</b><span>{capability.description}</span></div>
+      <div><b>Provider</b><span>{capability.provider || "qveris_finance"}</span></div>
+      <div><b>Tool ID</b><code>{capability.toolId}</code></div>
+      <div><b>参数 Schema</b><code>{JSON.stringify(capability.parameters || {})}</code></div>
+      {capability.parameterDetails?.length ? <div><b>参数说明</b><span>{capability.parameterDetails.map((param) => `${param.name}${param.required ? "（必填）" : "（可选）"}${param.description ? `：${param.description}` : ""}`).join("；")}</span></div> : null}
+      <div><b>返回字段</b><span>{(capability.returns || []).join("、") || "由上游返回"}</span></div>
+      {capability.coverage ? <div><b>覆盖边界</b><span>{capability.coverage}</span></div> : null}
+      {capability.expectedCost ? <div><b>费用提示</b><span>{capability.expectedCost}（调用测试可能扣费）</span></div> : null}
+      {capability.stats?.success_rate != null ? <div><b>近期成功率</b><span>{`${(Number(capability.stats.success_rate) * 100).toFixed(1)}%`}{capability.stats.sample_size ? ` · ${capability.stats.sample_size} 次样本` : ""}</span></div> : null}
+      <div className="developer-capability-action"><button type="button" className="secondary-button" disabled={result?.state === "loading"} onClick={() => void onTest(capability)}>{result?.state === "loading" ? "测试中…" : "调用测试"}</button><button type="button" className="secondary-button" onClick={() => void onCopy(capability)}>{result?.copied ? "已复制" : "复制 Tool Schema"}</button>{result?.state === "success" ? <span className="developer-capability-success" role="status">测试成功：已收到真实响应，详细调用已写入日志。</span> : null}{result?.state === "error" ? <span className="developer-capability-error" role="status">{result.error}</span> : null}</div>
+    </div>
+  </details>;
+}
+
 export function DeveloperPanel() {
   const local = isLocalWebRuntime();
   const desktop = isDesktopRuntime();
@@ -77,12 +114,18 @@ export function DeveloperPanel() {
   const [capabilityTests, setCapabilityTests] = useState({});
   const [copiedCapability, setCopiedCapability] = useState("");
   const [testSymbol, setTestSymbol] = useState("600519");
+  const [directoryQuery, setDirectoryQuery] = useState("provider:qveris_finance");
+  const [directory, setDirectory] = useState(null);
+  const [directoryState, setDirectoryState] = useState("idle");
+  const [directoryError, setDirectoryError] = useState("");
   const dragStart = useRef(null);
 
   const refresh = async () => {
     try {
       if (local) {
-        setOverview(await loadDeveloperOverview({ timeoutMs: 4_000 }));
+        const next = await loadDeveloperOverview({ timeoutMs: 4_000 });
+        setOverview(next);
+        if (next?.state?.capabilityDirectory) setDirectory(next.state.capabilityDirectory);
       } else if (desktop) {
         const [{ invoke }] = await Promise.all([import("@tauri-apps/api/core")]);
         const [runtime, integration] = await Promise.all([invoke("runtime_status"), invoke("integration_status")]);
@@ -99,6 +142,7 @@ export function DeveloperPanel() {
             settings: integration?.settings || {},
             toolCache: current?.state?.toolCache || [],
             capabilityCatalog: current?.state?.capabilityCatalog || null,
+            capabilityDirectory: current?.state?.capabilityDirectory || null,
           },
           variables: current?.variables || {},
         }));
@@ -158,18 +202,32 @@ export function DeveloperPanel() {
   const variables = overview?.variables || {};
   const logs = overview?.logs || [];
   const capabilities = overview?.state?.capabilityCatalog?.tools?.length ? overview.state.capabilityCatalog.tools : BUILTIN_CAPABILITIES;
+  const discoveredCapabilities = (directory?.tools || []).map((item) => discoveredAsCapability({ ...item, searchId: item.searchId || directory.searchId })).filter((capability) => capability && !capabilities.some((item) => item.toolId === capability.toolId));
+  const discoverDirectory = async () => {
+    if (!local) { setDirectoryError("完整能力目录仅支持本地 Web Host"); return; }
+    setDirectoryState("loading"); setDirectoryError("");
+    try {
+      const result = await discoverCapabilities({ query: directoryQuery.trim() || "provider:qveris_finance", limit: 100 });
+      if (result?.available === false) throw new Error(result.errorMessage || "能力目录暂时无法加载");
+      setDirectory(result); setDirectoryState("success");
+      setOverview((current) => current ? { ...current, state: { ...current.state, capabilityDirectory: result } } : current);
+    } catch (cause) { setDirectoryState("error"); setDirectoryError(cause?.message || "能力目录暂时无法加载"); }
+  };
   const runCapabilityTest = async (capability) => {
     const symbol = testSymbol.trim().toUpperCase();
-    if (!symbol && capability.kind !== "trading_calendar") {
+    if (!symbol && capability.kind !== "trading_calendar" && !capability.kind?.startsWith("discovered:")) {
       setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "error", error: "请先输入测试标的" } }));
       return;
     }
     setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "loading" } }));
     try {
       const calendarDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-      const result = capability.kind === "trading_calendar"
+      const result = capability.kind?.startsWith("discovered:")
+        ? await testCapability({ toolId: capability.toolId, searchId: capability.searchId, parameters: sampleParametersFor(capability, symbol) })
+        : capability.kind === "trading_calendar"
         ? desktop ? await queryTradingCalendar(calendarDate) : await testCapability({ kind: capability.kind, date: calendarDate, marketcode: "212001" })
         : local ? await testCapability({ kind: capability.kind, symbol }) : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
+      if (capability.kind?.startsWith("discovered:") && result?.success === false) throw new Error(result?.result?.error_message || "上游返回未成功结果");
       if (desktop && capability.kind !== "trading_calendar" && !result?.audits?.some((audit) => audit?.outcome === "success" && (audit?.toolId === capability.toolId || audit?.tool_id === capability.toolId))) {
         throw new Error("未观察到该 CAP 的成功调用记录，请在调用日志中查看原因");
       }
@@ -199,7 +257,8 @@ export function DeveloperPanel() {
         <div className="developer-card"><h4>调用成本</h4><dl><div><dt>CAP 调用</dt><dd>{overview?.costSummary?.qverisCalls || 0} 次 · {costLabel(overview?.costSummary?.qverisCost, overview?.costSummary?.qverisCalls || 0, overview?.costSummary?.qverisCostKnown || 0, overview?.costSummary?.qverisUnits)}</dd></div><div><dt>模型调用</dt><dd>{overview?.costSummary?.modelCalls || 0} 次 · {costLabel(overview?.costSummary?.modelCost, overview?.costSummary?.modelCalls || 0, overview?.costSummary?.modelCostKnown || 0, overview?.costSummary?.modelUnits)}</dd></div><div><dt>统计范围</dt><dd>当前面板日志 · 清理后重置</dd></div></dl></div>
         <div className="developer-card"><h4>可调变量</h4>{desktop ? <p>桌面运行时变量由应用配置管理；本面板实时展示 Pi 与 QVeris 事件。</p> : <><label className="developer-toggle"><input type="checkbox" checked={variables.toolCacheEnabled !== false} onChange={(event) => void patchVariable("toolCacheEnabled", event.target.checked)} />启用工具固化缓存</label><label>请求超时<input type="number" min="5000" max="180000" step="1000" value={variables.requestTimeoutMs || 120000} onChange={(event) => void patchVariable("requestTimeoutMs", Number(event.target.value))} /></label><label>并发上限<input type="number" min="1" max="4" value={variables.maxConcurrentDataRequests || 2} onChange={(event) => void patchVariable("maxConcurrentDataRequests", Number(event.target.value))} /></label><label>日志级别<select value={variables.logLevel || "info"} onChange={(event) => void patchVariable("logLevel", event.target.value)}><option value="silent">静默</option><option value="error">错误</option><option value="info">信息</option><option value="debug">调试</option></select></label></>}</div>
       </div>
-      <div className="developer-capability-card"><h4>当前支持的金融能力（CAP） <span>{capabilities.length} 项</span><small>仅列出已验证且 schema 稳定的能力，可直接作为 Skill Tool 使用</small></h4><div className="developer-capability-toolbar"><label>测试标的<input value={testSymbol} maxLength={32} onChange={(event) => setTestSymbol(event.target.value)} placeholder="例如 600519" /></label><span>Provider 已发现 {overview?.state?.capabilityCatalog?.providerSummary?.capabilityCount || 141} 个能力；未验证能力暂不开放调用。</span><button type="button" className="secondary-button" onClick={() => void refresh()} aria-label="刷新能力目录">刷新目录</button></div><div className="developer-capability-list">{capabilities.map((capability) => { const result = capabilityTests[capability.kind]; return <details className="developer-capability" key={capability.kind}><summary><div><strong>{capability.capability}</strong><small>{capability.toolId} · {capability.description}</small></div></summary><div className="developer-capability-detail"><div><b>能力说明</b><span>{capability.description}</span></div><div><b>Tool ID</b><code>{capability.toolId}</code></div><div><b>参数 Schema</b><code>{JSON.stringify(capability.parameters || {})}</code></div><div><b>返回字段</b><span>{(capability.returns || []).join("、") || "未声明"}</span></div>{capability.coverage ? <div><b>覆盖边界</b><span>{capability.coverage}</span></div> : null}<div className="developer-capability-action"><button type="button" className="secondary-button" disabled={result?.state === "loading"} onClick={() => void runCapabilityTest(capability)}>{result?.state === "loading" ? "测试中…" : "调用测试"}</button><button type="button" className="secondary-button" onClick={() => void copyCapabilitySchema(capability)}>{copiedCapability === capability.kind ? "已复制" : "复制 Tool Schema"}</button>{result?.state === "success" ? <span className="developer-capability-success" role="status">测试成功：已收到真实 CAP 响应，详细调用已写入日志。</span> : null}{result?.state === "error" ? <span className="developer-capability-error" role="status">{result.error}</span> : null}</div></div></details>; })}</div></div>
+      <div className="developer-capability-card"><h4>当前支持的金融能力（CAP） <span>{capabilities.length} 项已固化</span><small>已固化能力可直接作为 Skill Tool 使用；完整目录从 QVeris 免费 Search 动态读取</small></h4><div className="developer-capability-toolbar"><label>测试标的<input value={testSymbol} maxLength={32} onChange={(event) => setTestSymbol(event.target.value)} placeholder="例如 600519" /></label><span>Provider 已发现 {overview?.state?.capabilityCatalog?.providerSummary?.capabilityCount || 141} 个能力；未验证能力不会进入行情自动链路。</span><button type="button" className="secondary-button" onClick={() => void refresh()} aria-label="刷新能力目录">刷新目录</button></div><div className="developer-capability-list">{capabilities.map((capability) => <CapabilityCard capability={capability} result={{ ...(capabilityTests[capability.kind] || {}), copied: copiedCapability === capability.kind }} onTest={runCapabilityTest} onCopy={copyCapabilitySchema} key={capability.kind} />)}</div></div>
+      <div className="developer-capability-card developer-directory-card"><h4>完整能力目录 <span>{directory ? `${directory.tools.length}/${directory.total || directory.tools.length} 项` : "未加载"}</span><small>目录查询只读且不扣费；调用测试会按 QVeris 规则计费</small></h4><div className="developer-capability-toolbar"><label>目录查询<input value={directoryQuery} maxLength={160} onChange={(event) => setDirectoryQuery(event.target.value)} aria-label="目录查询" /></label><button type="button" className="secondary-button" disabled={directoryState === "loading"} onClick={() => void discoverDirectory()}>{directoryState === "loading" ? "加载中…" : "加载完整目录"}</button></div>{directoryError ? <p className="developer-capability-error" role="status">{directoryError}</p> : null}{directory ? <p className="developer-directory-meta" role="status">查询：{directory.query} · Search ID：{directory.searchId || "未返回"} · 更新于 {new Date(directory.updatedAt).toLocaleString("zh-CN")}</p> : <p className="developer-directory-empty">点击“加载完整目录”查看 provider 返回的实时能力说明、参数 schema、成功率和费用提示。</p>}{discoveredCapabilities.length ? <div className="developer-capability-list">{discoveredCapabilities.map((capability) => <CapabilityCard capability={capability} result={{ ...(capabilityTests[capability.kind] || {}), copied: copiedCapability === capability.kind }} onTest={runCapabilityTest} onCopy={copyCapabilitySchema} key={capability.kind} />)}</div> : null}</div>
       <div className="developer-log-card"><h4>调用日志 <span>{logs.length}</span><small>点击记录查看接口、参数、返回摘要和失败原因</small></h4><div className="developer-log-list">{logs.length ? logs.slice().reverse().map((entry) => <details className={`developer-log ${entry.status >= 400 ? "bad" : ""}`} key={entry.id}><summary><time>{formatTime(entry.at)}</time><code>{entry.operation || entry.kind || "request"}</code><span>{entry.cacheHit ? "缓存命中" : entry.status ? `${entry.status} · ${entry.durationMs ?? 0}ms` : "完成"}{entry.cost ? ` · ${formatCost(entry.cost)}` : ""}</span></summary><div className="developer-log-detail"><div><b>接口</b><code>{entry.method ? `${entry.method} ${entry.path}` : entry.operation || "event"}</code></div>{entry.params ? <div><b>参数</b><pre>{debugText(entry.params)}</pre></div> : null}{entry.response ? <div><b>返回摘要</b><pre>{debugText(entry.response)}</pre></div> : null}{entry.reason || entry.detail ? <div className="developer-log-reason"><b>失败原因</b><span>{entry.reason || entry.detail}</span></div> : null}</div></details>) : <p>暂无调用记录。执行一次行情或对话后会显示在这里。</p>}</div></div>
     </div>}
   </section>;

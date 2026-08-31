@@ -2077,6 +2077,10 @@ textarea:focus-visible {
 .developer-capability-success, .developer-capability-error { margin: 0; font-size: 10px; }
 .developer-capability-success { color: #2b8c5d; }
 .developer-capability-error { color: #b14d45; }
+.developer-directory-meta, .developer-directory-empty { margin: 8px 0; color: #718197; font-size: 11px; }
+.developer-directory-card .developer-capability-toolbar { justify-content: flex-start; }
+.developer-directory-card .developer-capability-toolbar label { flex: 1 1 320px; }
+.developer-directory-card .developer-capability-toolbar input { width: 100%; max-width: none; }
 .developer-log-list p { margin: 12px 0 5px; color: #94a0af; font-size: 10px; text-align: center; }
 .anomaly-explain-button { align-self: flex-start; border: 1px solid #c7d9ef; border-radius: 6px; padding: 6px 10px; background: #f7fbff; color: #2d6ca5; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .anomaly-explain-button:hover { border-color: #8cb8e3; background: #edf6ff; }
