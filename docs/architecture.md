@@ -83,3 +83,5 @@ Rust Host 清理继承环境，不向 Pi 传递任何 `QVERIS_*`、OAuth 或控�
 Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳定 WiX UpgradeCode 和 current-user NSIS 模式，升级覆盖应用文件且不触碰安装目录之外的用户配置。生产发布仍需在对应平台补齐代码签名、公证、自动更新签名和干净安装烟测。
 
 开发面板读取本地 Host 的能力目录与脱敏调用审计，可在 Web 通过 Host 直连测试，在桌面通过内置 Tool Runtime 测试；只有观察到目标 tool ID 的成功审计才判定测试成功。能力目录仅把已验证的稳定 tool schema 暴露给 Skill，Provider 尚未验证的能力只显示总量，不伪装为可调用工具。Windows 更新依靠稳定 UpgradeCode、禁止降级和 current-user 模式覆盖安装，不能在发布脚本中先删除旧安装目录或用户配置。
+
+组合自动复盘使用可持久化的本地调度状态：北京时间工作日到点后先按 `close:<YYYY-MM-DD>` 做幂等检查，再刷新真实持仓行情；只有至少一个持仓存在当日真实报价时才生成快照和站内通知。失败按配置间隔节流重试，启动、窗口聚焦、页面恢复可见及一分钟轮询都会 reconcile。当前调度依赖应用进程存活，Web 页面关闭或桌面应用完全退出后不会执行；在交易所节假日日历和独立后台 worker 上线前，不把周一至周五判断宣传为完整交易日调度。

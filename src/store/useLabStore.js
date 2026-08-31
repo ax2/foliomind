@@ -11,10 +11,12 @@ import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { normalizeWatchlistItem } from "../lib/watchlist.js";
 import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
+import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "../lib/briefingSchedule.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
 export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
+export const BRIEFING_RECONCILE_INTERVAL_MS = 60_000;
 const DEFAULT_LIVE_QUOTE_CONCURRENCY = 2;
 const MAX_LIVE_QUOTE_CONCURRENCY = 4;
 const MAX_MONITOR_HISTORY = 500;
@@ -27,7 +29,7 @@ let seriesRequestGeneration = 0;
 let eventsRequestGeneration = 0;
 
 function persistSnapshot(snapshot) {
-  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews }));
+  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule }));
   return persistenceQueue;
 }
 function nowIso() { return new Date().toISOString(); }
@@ -423,7 +425,7 @@ async function fetchLiveQuote(item, options = {}) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -645,7 +647,7 @@ export const useLabStore = create((set, get) => ({
   hydrateUserState: async () => {
     try {
       const persisted = await loadUserState();
-      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, portfolioReviews: Array.isArray(persisted.portfolioReviews) ? persisted.portfolioReviews.slice(0, 90) : state.portfolioReviews, monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
+      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, portfolioReviews: Array.isArray(persisted.portfolioReviews) ? persisted.portfolioReviews.slice(0, 90) : state.portfolioReviews, briefingSchedule: normalizeBriefingSchedule(persisted.briefingSchedule), monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
       else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
     } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
@@ -658,13 +660,14 @@ export const useLabStore = create((set, get) => ({
     const notifications = Array.isArray(snapshot.notifications) ? snapshot.notifications : [];
     const portfolioPositions = Array.isArray(snapshot.portfolioPositions) ? snapshot.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : [];
     const portfolioReviews = Array.isArray(snapshot.portfolioReviews) ? snapshot.portfolioReviews.slice(0, 90) : [];
+    const briefingSchedule = normalizeBriefingSchedule(snapshot.briefingSchedule);
     const monitorHistory = Array.isArray(snapshot.monitorHistory) ? snapshot.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : [];
     liveRequestGeneration += 1;
     detailsRequestGeneration += 1;
     seriesRequestGeneration += 1;
     eventsRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
-    set({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, monitorHistory, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
+    set({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
     await get().persistUserState();
     return true;
   },
@@ -742,6 +745,51 @@ export const useLabStore = create((set, get) => ({
     set({ portfolioReviews: [review, ...state.portfolioReviews].slice(0, 90) });
     await get().persistUserState();
     return review;
+  },
+  updateBriefingSchedule: async (input) => {
+    const briefingSchedule = normalizeBriefingSchedule({ ...get().briefingSchedule, ...input, lastError: input?.enabled === false ? "" : get().briefingSchedule.lastError });
+    set({ briefingSchedule });
+    await get().persistUserState();
+    if (briefingSchedule.enabled) void get().runDuePortfolioReview();
+    return briefingSchedule;
+  },
+  runDuePortfolioReview: async (now = new Date()) => {
+    let acquired = false;
+    let slot;
+    const attemptedAt = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+    set((state) => {
+      slot = briefingSlot({ now, schedule: state.briefingSchedule, reviews: state.portfolioReviews, positionCount: state.portfolioPositions.length });
+      if (slot.status !== "due" || state.briefingScheduleBusy) return {};
+      acquired = true;
+      return { briefingScheduleBusy: true, briefingSchedule: { ...state.briefingSchedule, lastAttemptAt: attemptedAt, lastResult: "waiting-data", lastError: "正在刷新持仓真实行情" } };
+    });
+    if (!acquired) return slot?.status || false;
+    await get().persistUserState();
+    try {
+      if (!hasFreshPortfolioQuote({ positions: get().portfolioPositions, liveQuotes: get().liveQuotes, now })) await get().refreshLiveData();
+      const state = get();
+      if (!hasFreshPortfolioQuote({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, now })) {
+        set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastResult: "waiting-data", lastError: "尚未取得当日真实持仓行情，将按重试间隔再次尝试" } }));
+        await get().persistUserState();
+        return "waiting-data";
+      }
+      if (state.portfolioReviews.some((review) => review.kind === "close" && review.tradingDate === slot.tradingDate)) {
+        set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastSuccessKey: slot.key, lastResult: "success", lastError: "" } }));
+        await get().persistUserState();
+        return "completed";
+      }
+      const review = createPortfolioReviewSnapshot({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, events: state.events, createdAt: attemptedAt, id: createId("portfolio-review") });
+      const notification = { id: createId("notification"), kind: "briefing", symbol: "", name: "", ruleId: "", eventKey: slot.key, reminderPhase: "completed", title: `${review.tradingDate} 组合复盘已生成`, body: `已使用 ${review.pricedCount}/${review.totalCount} 个持仓的当日真实行情生成复盘。`, severity: "info", createdAt: attemptedAt, read: false, source: "data-service" };
+      set((current) => ({ portfolioReviews: [review, ...current.portfolioReviews].slice(0, 90), notifications: [notification, ...current.notifications].slice(0, 500), briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastSuccessKey: slot.key, lastResult: "success", lastError: "" } }));
+      await get().persistUserState();
+      void sendSystemNotification(notification);
+      return "success";
+    } catch (error) {
+      const message = friendlyDataMessage(error);
+      set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastResult: "error", lastError: message } }));
+      await get().persistUserState();
+      return "error";
+    }
   },
   removePortfolioReview: async (id) => {
     const portfolioReviews = get().portfolioReviews.filter((review) => review.id !== id);
