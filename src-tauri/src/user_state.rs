@@ -745,10 +745,6 @@ fn advance_revision(
     Ok(next)
 }
 
-pub fn save(app: &AppHandle, state: &UserState) -> Result<UserState, String> {
-    save_if_revision(app, state, state.revision)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,8 +757,10 @@ mod tests {
 
     #[test]
     fn revision_compare_and_swap_rejects_stale_writers() {
-        let mut current = UserState::default();
-        current.revision = 7;
+        let current = UserState {
+            revision: 7,
+            ..UserState::default()
+        };
         let mut submitted = current.clone();
         submitted.watchlist[0].name = "本地修改".into();
         let saved = advance_revision(&current, &submitted, 7).unwrap();
