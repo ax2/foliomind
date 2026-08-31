@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
-import { EventsView, NotificationsView } from "./components/SecondaryViews.jsx";
+import { EventsView, MarketView, NotificationsView } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
@@ -88,6 +88,19 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("连接真实数据后开始")).toBeInTheDocument();
     expect(screen.getByText(/不会使用示例行情填充/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "搜索标的" })).toBeInTheDocument();
+  });
+
+  it("lets users customize market columns without inventing missing values", () => {
+    window.localStorage.removeItem("foliomind.market-columns.v1");
+    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
+    render(<MarketView />);
+    expect(screen.getByText("市盈率", { selector: ".table-head span" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "列设置" }));
+    expect(screen.getByRole("group", { name: "自选行情列设置" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "市盈率" }));
+    expect(screen.queryByText("市盈率", { selector: ".table-head span" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(JSON.parse(window.localStorage.getItem("foliomind.market-columns.v1"))).not.toContain("pe");
   });
 
   it("retries the events request after the background quote refresh settles", async () => {

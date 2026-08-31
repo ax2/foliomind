@@ -1190,6 +1190,15 @@ textarea:focus-visible {
   font-size: 16px;
   margin: 0 0 12px;
 }
+.market-header-actions { display: flex; align-items: center; gap: 8px; }
+.market-column-menu { position: relative; }
+.market-column-popover { position: absolute; top: calc(100% + 7px); right: 0; z-index: 8; display: grid; min-width: 210px; gap: 8px; border: 1px solid #dce4ef; border-radius: 9px; padding: 12px; background: #fff; box-shadow: 0 12px 30px rgb(35 66 110 / 16%); }
+.market-column-popover strong { color: #34465e; font-size: 12px; }
+.market-column-popover > small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.market-column-popover label { display: flex; align-items: center; gap: 8px; color: #53647a; font-size: 11px; }
+.market-column-popover input { accent-color: var(--blue); }
+.market-table-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.market-table-heading small { color: var(--muted); font-size: 10px; }
 .anomaly-radar { margin-top: 24px; border: 1px solid #e1e7ef; border-radius: 10px; padding: 16px; background: #fbfcfe; }
 .anomaly-radar-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .anomaly-radar-heading h2 { margin: 0; color: #273449; font-size: 16px; }
@@ -1215,7 +1224,7 @@ textarea:focus-visible {
 .table-head,
 .table-row {
   display: grid;
-  grid-template-columns: minmax(250px, 1fr) 160px 140px 120px;
+  grid-template-columns: var(--market-table-columns, minmax(250px, 1fr) 160px 140px 120px);
   align-items: center;
   padding: 0 16px;
 }

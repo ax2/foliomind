@@ -26,6 +26,41 @@ const errorMessage = (error) => friendlySettingsMessage(error);
 
 const portfolioFormDefaults = { symbol: "", name: "", market: "", quantity: "", averageCost: "", takeProfitPrice: "", stopLossPrice: "", planThesis: "", planHorizon: "" };
 const planActionLabels = { created: "建立计划", adjusted: "调整参数", executed: "确认执行", reopened: "重新跟踪", archived: "归档计划" };
+const MARKET_COLUMNS_STORAGE_KEY = "foliomind.market-columns.v1";
+const MARKET_COLUMN_DEFINITIONS = Object.freeze([
+  { id: "price", label: "最新价" },
+  { id: "change", label: "涨跌幅" },
+  { id: "volume", label: "成交量" },
+  { id: "turnover", label: "成交额" },
+  { id: "turnoverRate", label: "换手率" },
+  { id: "pe", label: "市盈率" },
+  { id: "pb", label: "市净率" },
+  { id: "asOf", label: "数据时间" },
+]);
+const DEFAULT_MARKET_COLUMNS = Object.freeze(["price", "change", "pe", "pb"]);
+
+function loadMarketColumns() {
+  if (typeof window === "undefined") return [...DEFAULT_MARKET_COLUMNS];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(MARKET_COLUMNS_STORAGE_KEY) || "null");
+    const allowed = new Set(MARKET_COLUMN_DEFINITIONS.map((column) => column.id));
+    const columns = Array.isArray(stored) ? stored.filter((column) => allowed.has(column)) : [];
+    return columns.length ? [...new Set(columns)] : [...DEFAULT_MARKET_COLUMNS];
+  } catch { return [...DEFAULT_MARKET_COLUMNS]; }
+}
+
+function marketColumnValue(item, quote, column) {
+  const number = (value) => Number.isFinite(Number(value)) ? formatPrice(Number(value)) : "—";
+  if (column === "price") return { value: number(quote?.price) };
+  if (column === "change") return { value: Number.isFinite(Number(quote?.change)) ? formatPercent(quote.change) : "—", className: Number.isFinite(Number(quote?.change)) ? quote.change >= 0 ? "up" : "down" : "" };
+  if (column === "volume") return { value: number(quote?.volume) };
+  if (column === "turnover") return { value: number(quote?.turnover) };
+  if (column === "turnoverRate") return { value: Number.isFinite(Number(quote?.turnoverRate)) ? formatPercent(quote.turnoverRate) : "—" };
+  if (column === "pe") return { value: quote?.pe == null ? "—" : String(quote.pe) };
+  if (column === "pb") return { value: quote?.pb == null ? "—" : String(quote.pb) };
+  if (column === "asOf") return { value: quote?.asOf ? formatQuoteFreshness(quote.asOf) : "—", className: "quote-source" };
+  return { value: "—" };
+}
 
 function LiveDataState({ state, receivedCount = 0, totalCount = 0, onRetry, onSettings, compact = false }) {
   const copy = liveDataStateCopy(state, { receivedCount, totalCount });
@@ -155,17 +190,27 @@ export function MarketView() {
   const liveDataError = useLabStore((state) => state.liveDataError);
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
   const setActiveView = useLabStore((state) => state.setActiveView);
+  const [marketColumns, setMarketColumns] = useState(loadMarketColumns);
+  const [columnsOpen, setColumnsOpen] = useState(false);
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  useEffect(() => {
+    try { window.localStorage.setItem(MARKET_COLUMNS_STORAGE_KEY, JSON.stringify(marketColumns)); } catch { /* Storage may be disabled. */ }
+  }, [marketColumns]);
+  const visibleColumns = MARKET_COLUMN_DEFINITIONS.filter((column) => marketColumns.includes(column.id));
+  const toggleMarketColumn = (columnId) => setMarketColumns((current) => {
+    if (current.includes(columnId)) return current.length === 1 ? current : current.filter((id) => id !== columnId);
+    return [...current, columnId];
+  });
   const returnedQuotes = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price));
   const anomalies = useMemo(() => detectMarketAnomalies(watchlist, liveQuotes), [watchlist, liveQuotes]);
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedQuotes.length, totalCount: watchlist.length });
   const retry = () => { void refreshLiveData(); };
   const openSettings = () => setActiveView("settings");
-  return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></header>
+  return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><div className="market-header-actions"><div className="market-column-menu"><button className="secondary-button" type="button" aria-expanded={columnsOpen} aria-haspopup="true" onClick={() => setColumnsOpen((value) => !value)}><List size={16} />列设置</button>{columnsOpen && <div className="market-column-popover" role="group" aria-label="自选行情列设置"><strong>自选行情列</strong><small>只显示已返回的真实字段；空字段保持“—”。</small>{MARKET_COLUMN_DEFINITIONS.map((column) => <label key={column.id}><input type="checkbox" checked={marketColumns.includes(column.id)} disabled={marketColumns.includes(column.id) && marketColumns.length === 1} onChange={() => toggleMarketColumn(column.id)} />{column.label}</label>)}<button type="button" className="notification-link" onClick={() => setMarketColumns([...DEFAULT_MARKET_COLUMNS])}>恢复默认列</button></div>}</div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></div></header>
     {returnedQuotes.length > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedQuotes.length} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     <div className="index-board">{returnedQuotes.length > 0 ? returnedQuotes.map((item) => { const quote = liveQuotes[item.symbol]; const freshness = quoteFreshness(quote.asOf); return <article key={item.symbol}><span>{item.name} <small>{item.symbol}</small></span><strong>{formatPrice(quote.price)}</strong><small className={quote.change >= 0 ? "up" : "down"}>{formatPercent(quote.change)}</small><em className={`quote-source quote-source-${freshness.state}`}>{quote.source || "数据服务"} · {formatQuoteFreshness(quote.asOf)}</em></article>; }) : <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} />}</div>
     {returnedQuotes.length > 0 ? <section className="anomaly-radar" aria-label="异动雷达"><div className="anomaly-radar-heading"><div><h2>异动雷达</h2><p>基于当前已返回的真实行情，自动识别价格与量能异常。</p></div><span>{anomalies.length ? `${anomalies.length} 条` : "暂无异动"}</span></div>{anomalies.length ? <div className="anomaly-list">{anomalies.map((anomaly) => <article className={`anomaly-card ${anomaly.severity}`} key={anomaly.id}><div className="anomaly-card-main"><strong>{anomaly.name}</strong><small>{anomaly.symbol} · {anomaly.market || "自选"}</small></div><div className="anomaly-card-metric"><b>{anomalyLabel(anomaly)}</b><small>{anomaly.type === "volume" ? `阈值 ${anomaly.threshold.toFixed(2)} 倍` : `阈值 ±${anomaly.threshold.toFixed(1)}%`}</small></div><div className="anomaly-card-meta"><span>{anomaly.severity === "critical" ? "高关注" : "需关注"}</span><small>{anomaly.source} · {formatQuoteFreshness(anomaly.asOf)}</small></div></article>)}</div> : <div className="anomaly-empty"><strong>当前没有符合条件的异动</strong><p>只使用已返回的涨跌幅和量比；字段缺失或数据不足时保持空态。</p></div>}<p className="security-note">异动阈值：涨跌幅绝对值 ≥ 4%，量比 ≥ 2.5 倍。仅作信息提示，不构成投资建议。</p></section> : null}
-    <section className="market-table"><h2>我的自选</h2><div className="table-head"><span>名称 / 代码</span><span>最新价</span><span>涨跌幅</span><span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol]; return <div className="table-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol}</small></span><span>{Number.isFinite(quote?.price) ? formatPrice(quote.price) : "—"}</span><span className={Number.isFinite(quote?.change) ? quote.change >= 0 ? "up" : "down" : ""}>{formatPercent(quote?.change)}</span><span>{item.market}</span></div>; })}</section>
+    <section className="market-table"><div className="market-table-heading"><h2>我的自选</h2><small>{visibleColumns.length} 个数据列 · 视图会保存在本机</small></div><div className="table-head" style={{ "--market-table-columns": `minmax(250px, 1fr) repeat(${visibleColumns.length}, minmax(120px, 1fr)) 120px` }}><span>名称 / 代码</span>{visibleColumns.map((column) => <span key={column.id}>{column.label}</span>)}<span>市场</span></div>{watchlist.map((item) => { const quote = liveQuotes[item.symbol]; return <div className="table-row" key={item.symbol} style={{ "--market-table-columns": `minmax(250px, 1fr) repeat(${visibleColumns.length}, minmax(120px, 1fr)) 120px` }}><span><strong>{item.name}</strong><small>{item.symbol}</small></span>{visibleColumns.map((column) => { const cell = marketColumnValue(item, quote, column); return <span className={cell.className || ""} key={`${item.symbol}-${column.id}`}>{cell.value}</span>; })}<span>{item.market}</span></div>; })}</section>
     <p className="security-note">仅显示已返回的真实数据{liveDataLastRefreshAt ? ` · ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")} 更新` : ""}；缺失值保持为空。</p>
   </div>;
 }
