@@ -408,6 +408,15 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().events[0]).toMatchObject({ symbol: "600519", type: "分红", title: "分红登记日", source: "真实事件源", capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" });
   });
 
+  it("creates idempotent upcoming and same-day event reminders", async () => {
+    const event = { id: "event-1", symbol: "600519", name: "贵州茅台", date: "2026-09-08", type: "股东会", title: "临时股东会", source: "真实事件源" };
+    await expect(useLabStore.getState().notifyDueEventReminders([event], new Date("2026-09-03T01:00:00Z"))).resolves.toBe(1);
+    expect(useLabStore.getState().notifications[0]).toMatchObject({ kind: "event", reminderPhase: "upcoming", eventKey: "600519|2026-09-08|股东会|临时股东会" });
+    await expect(useLabStore.getState().notifyDueEventReminders([event], new Date("2026-09-03T02:00:00Z"))).resolves.toBe(0);
+    await expect(useLabStore.getState().notifyDueEventReminders([event], new Date("2026-09-08T01:00:00Z"))).resolves.toBe(1);
+    expect(useLabStore.getState().notifications.map((item) => item.reminderPhase)).toEqual(["same-day", "upcoming"]);
+  });
+
   it("does not turn an unavailable event response into a false signal", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

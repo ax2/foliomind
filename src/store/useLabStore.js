@@ -13,6 +13,7 @@ import { normalizeWatchlistItem } from "../lib/watchlist.js";
 import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
+import { collectEventReminders } from "../lib/eventReminders.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -729,6 +730,7 @@ export const useLabStore = create((set, get) => ({
         return String(left.date).localeCompare(String(right.date));
       });
       set({ events: unique, eventDataLoading: false, eventDataLoaded: true, eventDataReceivedCount: received, eventDataTotalCount: total, eventDataError: errors.length ? "部分标的事件暂未更新，系统会稍后自动重试" : "", eventDataLastRefreshAt: nowIso() });
+      await get().notifyDueEventReminders(unique);
       return received > 0;
     } catch (error) {
       if (requestGeneration !== eventsRequestGeneration) return false;
@@ -740,6 +742,19 @@ export const useLabStore = create((set, get) => ({
     if (get().eventDataLoading) return false;
     set({ eventDataError: "", eventDataLoaded: false });
     return get().refreshEvents();
+  },
+  notifyDueEventReminders: async (items, now = new Date()) => {
+    let delivered = [];
+    set((state) => {
+      const reminders = collectEventReminders(items, state.notifications, { now });
+      if (!reminders.length) return {};
+      delivered = reminders;
+      return { notifications: [...reminders, ...state.notifications].slice(0, 500) };
+    });
+    if (!delivered.length) return 0;
+    await get().persistUserState();
+    for (const notification of delivered) void sendSystemNotification(notification);
+    return delivered.length;
   },
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
