@@ -4,9 +4,9 @@ const load = (file) => readFile(new URL(file, root), "utf8");
 const checks = [];
 const check = (name, pass, detail) => checks.push({ name, pass, detail });
 
-const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, marketCalendar] = await Promise.all([
+const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, marketCalendar, desktopLifecycle, nativeMain] = await Promise.all([
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
-  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("src-tauri/src/market_calendar.rs"),
+  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"),
 ]);
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -20,6 +20,7 @@ check("复盘证据边界", portfolioReview.includes("createPortfolioReviewSnaps
 check("自动复盘可靠性", app.includes("runDuePortfolioReview") && briefingSchedule.includes("retry-wait") && briefingSchedule.includes("hasFreshPortfolioQuote") && userState.includes("briefingSchedule"), "本地调度必须具备幂等、重试节流、当日真实行情门禁和持久化状态");
 check("Local Host 公开契约", packageJson.scripts.test.includes("local-host.integration.test.mjs") && hostIntegrationTest.includes("RUNTIME_BUSY") && hostIntegrationTest.includes("invalid local host session") && hostIntegrationTest.includes("activeRequest"), "真实 HTTP 集成测试必须覆盖鉴权、持久化、并发互斥、取消和状态释放");
 check("真实交易日门禁", briefingSchedule.includes("calendar-needed") && nativeUserState.includes("calendar_status") && marketCalendar.includes("REF.EXCHANGE_CALENDAR") && marketCalendar.includes("cn_financial_pro.trade_dates.v1"), "自动复盘必须先通过固定真实交易日历 CAP，失败时禁止猜测交易日");
+check("桌面驻留生命周期", cargoToml.includes('features = ["tray-icon"]') && desktopLifecycle.includes("CloseAction::Hide") && desktopLifecycle.includes("foliomind_reconcile") && desktopLifecycle.includes("begin_cleanup") && nativeMain.includes("stop_and_join"), "主窗口关闭需隐藏到托盘，显式退出需幂等回收 ticker、Web Host 与 Pi");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

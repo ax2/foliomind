@@ -48,7 +48,7 @@ WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex`
 
 取消命令本身也有独立的 pending 锁：即使 Pi 先报告本轮已经完成，前端仍会暂时禁止下一轮提交，直到 abort RPC 返回，避免迟到的取消请求误作用于下一轮分析。
 
-应用收到 Tauri `ExitRequested` 或 `Exit` 事件时会幂等关闭本轮回环代理、拒绝尚未完成的 RPC，并显式终止和回收 Pi 子进程，避免桌面窗口退出后遗留孤儿进程或短期能力端口。
+桌面端使用 Tauri 内建 tray 生命周期：主窗口普通关闭会被拦截并隐藏到系统托盘，托盘菜单可恢复窗口、触发一次盘后复盘 reconcile 或显式退出。Rust 驻留 ticker 每 60 秒唤醒仍存活的 WebView 协调器；它提升关闭窗口后的连续性，但仍不是脱离 WebView 的原生任务执行器。应用收到显式 `ExitRequested` 或 `Exit` 时先幂等停止 ticker，再关闭本轮回环代理、拒绝尚未完成的 RPC，并显式终止和回收 Pi 子进程，避免留下孤儿进程或短期能力端口。
 
 Runtime 启动前由 Host 在同一把状态锁内完成 `Stopped/Crashed → Starting` 预约，多个并发启动请求只有一个能够继续创建 executor 与 Pi 子进程。Host 对出站 JSONL 也执行 1 MiB 上限；Pi 的 stdout JSONL 与 stderr 诊断均由有界逐段读取器处理，超长单行会在固定内存内被丢弃和报告，不会先无限扩张缓冲区再做长度检查。
 

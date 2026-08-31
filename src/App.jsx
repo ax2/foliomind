@@ -8,6 +8,7 @@ import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
+import { listenForDesktopReconcile } from "./lib/desktopLifecycle.js";
 
 export function App() {
   const activeView = useLabStore((state) => state.activeView);
@@ -36,6 +37,16 @@ export function App() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", reconcile);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", reconcile); };
+  }, [userStateLoaded, runDuePortfolioReview]);
+  useEffect(() => {
+    if (!userStateLoaded) return undefined;
+    let disposed = false;
+    let unlisten = () => {};
+    void listenForDesktopReconcile(() => { void runDuePortfolioReview(); }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unlisten = cleanup;
+    });
+    return () => { disposed = true; unlisten(); };
   }, [userStateLoaded, runDuePortfolioReview]);
   useEffect(() => {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured || !integrationStatus.settings?.modelId) return undefined;

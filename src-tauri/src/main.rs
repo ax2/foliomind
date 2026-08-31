@@ -3,6 +3,7 @@
 
 mod config;
 mod credentials;
+mod desktop_lifecycle;
 mod executor;
 mod market_calendar;
 mod process_command;
@@ -1305,8 +1306,46 @@ fn user_state_save(
     user_state::save(&app, &state)
 }
 
+#[tauri::command]
+fn desktop_lifecycle_status(
+    lifecycle: State<'_, desktop_lifecycle::DesktopLifecycle>,
+) -> desktop_lifecycle::DesktopLifecycleStatus {
+    lifecycle.status()
+}
+
+#[tauri::command]
+fn desktop_window_show(app: AppHandle) -> desktop_lifecycle::DesktopLifecycleStatus {
+    desktop_lifecycle::show(&app)
+}
+
+#[tauri::command]
+fn desktop_reconcile_now(app: AppHandle) -> desktop_lifecycle::DesktopLifecycleStatus {
+    desktop_lifecycle::reconcile(&app)
+}
+
+#[tauri::command]
+fn desktop_quit(app: AppHandle) {
+    desktop_lifecycle::quit(&app);
+}
+
 fn main() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(desktop_lifecycle::DesktopLifecycle::default())
+        .manage(desktop_lifecycle::ResidentTicker::default())
+        .setup(|app| {
+            desktop_lifecycle::install(app)?;
+            app.state::<desktop_lifecycle::ResidentTicker>()
+                .start(app.handle().clone());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    desktop_lifecycle::hide_on_close(window, api);
+                }
+            }
+        });
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_notification::init());
     let app = builder
@@ -1324,7 +1363,11 @@ fn main() {
             qveris_model_catalog_sync,
             qveris_trading_calendar,
             user_state_load,
-            user_state_save
+            user_state_save,
+            desktop_lifecycle_status,
+            desktop_window_show,
+            desktop_reconcile_now,
+            desktop_quit
         ])
         .build(tauri::generate_context!())
         .expect("error while building FolioMind");
@@ -1341,10 +1384,17 @@ fn main() {
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
-            if let Some(host) = web_host.as_mut() {
-                host.stop();
+            let lifecycle = app_handle.state::<desktop_lifecycle::DesktopLifecycle>();
+            lifecycle.request_exit();
+            if lifecycle.begin_cleanup() {
+                app_handle
+                    .state::<desktop_lifecycle::ResidentTicker>()
+                    .stop_and_join();
+                if let Some(host) = web_host.as_mut() {
+                    host.stop();
+                }
+                app_handle.state::<PiHost>().shutdown();
             }
-            app_handle.state::<PiHost>().shutdown();
         }
     });
 }

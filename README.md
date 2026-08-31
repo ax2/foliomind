@@ -67,6 +67,8 @@ Rust Host
 
 盯盘消息页的“系统通知”开关默认关闭。开启时仅在当前桌面/localhost 环境请求系统通知权限；拒绝权限不会影响站内消息保存和盯盘任务执行。
 
+桌面版关闭主窗口后会隐藏到系统托盘并保持本地 Host 与自动复盘协调器运行。托盘菜单提供“显示 FolioMind”“立即检查盘后复盘”和“退出 FolioMind”；需要完全停止后台进程时请使用托盘退出。Web 本地调试页关闭后不会继续运行。
+
 研究筛选目前以“我的自选”为明确数据范围；添加更多标的或安装额外数据 Skill 后，仍需等真实行情返回才会进入筛选结果。组合风险洞察只展示可解释的已计价暴露，不输出没有数据依据的综合风险分数。
 
 自选侧栏“更多”支持批量导入和导出。导入文件只包含代码、名称、市场、分类和分组，解析会先完整校验，重复或非法行不会污染已有自选；实时行情、凭证和运行日志不会进入文件。
@@ -124,10 +126,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.57`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.58`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.57 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.58 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。
