@@ -54,9 +54,7 @@ fn cost_from_value(value: &Value, depth: u8) -> Option<Value> {
     if depth > 4 {
         return None;
     }
-    let Some(object) = value.as_object() else {
-        return None;
-    };
+    let object = value.as_object()?;
     for key in [
         "qveris_cost",
         "qverisCost",
@@ -86,6 +84,7 @@ fn cost_from_value(value: &Value, depth: u8) -> Option<Value> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_scheduler_log(
     app: &AppHandle,
     operation: &str,
@@ -827,6 +826,22 @@ mod tests {
                 .with_ymd_and_hms(2026, 8, 31, 15, 35, 0)
                 .unwrap()
                 .with_timezone(&Utc)
+        );
+    }
+
+    #[test]
+    fn quote_cost_parser_extracts_known_charge_without_leaking_payload() {
+        let response = json!({
+            "result": {"data": {"price": 123.4}},
+            "usage": {"qveris_cost": 0.25, "currency": "credits", "prompt": "secret"}
+        });
+        assert_eq!(
+            cost_from_value(&response, 0),
+            Some(json!({"amount": 0.25, "unit": "credits"}))
+        );
+        assert_eq!(
+            cost_from_value(&json!({"usage": {"prompt_tokens": 10}}), 0),
+            None
         );
     }
 }
