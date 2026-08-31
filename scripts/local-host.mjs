@@ -244,12 +244,11 @@ function capabilityData(result) {
 
 function latestDataTimestamp(points) {
   const values = points.map((point) => String(point?.date || point?.time || point?.timestamp || "")).filter(Boolean);
-  return values.sort((left, right) => {
-    const leftTime = Date.parse(left);
-    const rightTime = Date.parse(right);
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
-    return left.localeCompare(right);
-  }).at(-1) || null;
+  const parsed = values
+    .map((value) => ({ value, timestamp: Date.parse(value) }))
+    .filter((item) => Number.isFinite(item.timestamp));
+  if (parsed.length) return parsed.sort((left, right) => left.timestamp - right.timestamp).at(-1).value;
+  return values.sort((left, right) => left.localeCompare(right)).at(-1) || null;
 }
 
 export function normalizeCapabilityResult(kind, input, result) {
@@ -790,7 +789,9 @@ export function startLocalHost({ port = PORT } = {}) {
     process.exitCode = 1;
   });
   server.listen(port, HOST, () => {
-    if (process.argv[1]?.endsWith("local-host.mjs")) console.log(`[foliomind-dev-host] listening on http://${HOST}:${port}`);
+    const address = server.address();
+    const actualPort = typeof address === "object" && address ? address.port : port;
+    if (process.argv[1]?.endsWith("local-host.mjs")) console.log(`[foliomind-dev-host] listening on http://${HOST}:${actualPort}`);
   });
   return server;
 }
