@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Local-only Pi RPC host. The only listener is a run-scoped loopback executor.
 
+mod background_scheduler;
 mod config;
 mod credentials;
 mod desktop_lifecycle;
@@ -1320,8 +1321,13 @@ fn desktop_window_show(app: AppHandle) -> desktop_lifecycle::DesktopLifecycleSta
 }
 
 #[tauri::command]
-fn desktop_reconcile_now(app: AppHandle) -> desktop_lifecycle::DesktopLifecycleStatus {
-    desktop_lifecycle::reconcile(&app)
+fn desktop_reconcile_now(
+    app: AppHandle,
+    scheduler: State<'_, background_scheduler::BackgroundScheduler>,
+    host: State<'_, PiHost>,
+) -> desktop_lifecycle::DesktopLifecycleStatus {
+    scheduler.run_now(app.clone(), host.credentials.clone());
+    app.state::<desktop_lifecycle::DesktopLifecycle>().status()
 }
 
 #[tauri::command]
@@ -1332,12 +1338,14 @@ fn desktop_quit(app: AppHandle) {
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(PiHost::default())
         .manage(desktop_lifecycle::DesktopLifecycle::default())
-        .manage(desktop_lifecycle::ResidentTicker::default())
+        .manage(background_scheduler::BackgroundScheduler::default())
         .setup(|app| {
             desktop_lifecycle::install(app)?;
-            app.state::<desktop_lifecycle::ResidentTicker>()
-                .start(app.handle().clone());
+            let credentials = app.state::<PiHost>().credentials.clone();
+            app.state::<background_scheduler::BackgroundScheduler>()
+                .start(app.handle().clone(), credentials);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1350,7 +1358,6 @@ fn main() {
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_notification::init());
     let app = builder
-        .manage(PiHost::default())
         .invoke_handler(tauri::generate_handler![
             runtime_status,
             runtime_start,
@@ -1389,7 +1396,7 @@ fn main() {
             lifecycle.request_exit();
             if lifecycle.begin_cleanup() {
                 app_handle
-                    .state::<desktop_lifecycle::ResidentTicker>()
+                    .state::<background_scheduler::BackgroundScheduler>()
                     .stop_and_join();
                 if let Some(host) = web_host.as_mut() {
                     host.stop();

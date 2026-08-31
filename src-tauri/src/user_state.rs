@@ -726,6 +726,26 @@ pub fn save_if_revision(
     save_unlocked(app, &next)
 }
 
+/// Apply a short, synchronous mutation while holding the state I/O lock.
+/// Callers must finish all network and other slow work before entering this
+/// closure. The latest state is reloaded inside the critical section so native
+/// background writers cannot overwrite a newer WebView save.
+pub fn mutate<F>(app: &AppHandle, operation: F) -> Result<UserState, String>
+where
+    F: FnOnce(&mut UserState) -> Result<(), String>,
+{
+    let _guard = STATE_IO_LOCK
+        .lock()
+        .map_err(|_| "user state I/O lock poisoned")?;
+    let mut state = load_unlocked(app)?;
+    operation(&mut state)?;
+    state.revision = state
+        .revision
+        .checked_add(1)
+        .ok_or("user state revision exhausted")?;
+    save_unlocked(app, &state)
+}
+
 fn advance_revision(
     current: &UserState,
     state: &UserState,

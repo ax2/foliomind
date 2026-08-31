@@ -1,12 +1,5 @@
 use serde::Serialize;
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    thread,
-    time::Duration,
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -20,12 +13,6 @@ pub struct DesktopLifecycle {
     exiting: AtomicBool,
     hidden_to_tray: AtomicBool,
     cleanup_started: AtomicBool,
-}
-
-#[derive(Default)]
-pub struct ResidentTicker {
-    stop: Arc<AtomicBool>,
-    worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,43 +56,6 @@ impl DesktopLifecycle {
 
     pub fn begin_cleanup(&self) -> bool {
         !self.cleanup_started.swap(true, Ordering::SeqCst)
-    }
-}
-
-impl ResidentTicker {
-    pub fn start(&self, app: AppHandle) {
-        let mut worker = self.worker.lock().expect("resident ticker lock poisoned");
-        if worker.is_some() {
-            return;
-        }
-        self.stop.store(false, Ordering::Release);
-        let stop = self.stop.clone();
-        *worker = Some(thread::spawn(move || {
-            let mut elapsed = 0_u8;
-            while !stop.load(Ordering::Acquire) {
-                thread::sleep(Duration::from_secs(1));
-                elapsed = elapsed.saturating_add(1);
-                if elapsed >= 60 {
-                    elapsed = 0;
-                    request_reconcile(&app);
-                }
-            }
-        }));
-    }
-
-    pub fn stop_and_join(&self) {
-        self.stop.store(true, Ordering::Release);
-        if let Ok(mut worker) = self.worker.lock() {
-            if let Some(handle) = worker.take() {
-                let _ = handle.join();
-            }
-        }
-    }
-}
-
-impl Drop for ResidentTicker {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
     }
 }
 
