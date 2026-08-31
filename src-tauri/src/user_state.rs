@@ -274,6 +274,20 @@ pub struct BriefingSchedule {
     pub last_success_key: String,
     pub last_result: String,
     pub last_error: String,
+    #[serde(default)]
+    pub calendar_date: String,
+    #[serde(default = "default_calendar_status")]
+    pub calendar_status: String,
+    #[serde(default)]
+    pub calendar_checked_at: String,
+    #[serde(default)]
+    pub calendar_source: String,
+    #[serde(default)]
+    pub calendar_tool_id: String,
+}
+
+fn default_calendar_status() -> String {
+    "unknown".into()
 }
 
 impl Default for BriefingSchedule {
@@ -287,6 +301,11 @@ impl Default for BriefingSchedule {
             last_success_key: String::new(),
             last_result: "idle".into(),
             last_error: String::new(),
+            calendar_date: String::new(),
+            calendar_status: default_calendar_status(),
+            calendar_checked_at: String::new(),
+            calendar_source: String::new(),
+            calendar_tool_id: String::new(),
         }
     }
 }
@@ -604,7 +623,11 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || !(5..=60).contains(&schedule.retry_minutes)
         || !matches!(
             schedule.last_result.as_str(),
-            "idle" | "success" | "waiting-data" | "error"
+            "idle" | "success" | "waiting-data" | "waiting-calendar" | "market-closed" | "error"
+        )
+        || !matches!(
+            schedule.calendar_status.as_str(),
+            "unknown" | "trading" | "closed" | "error"
         )
     {
         return Err("briefing schedule is invalid".into());
@@ -622,6 +645,14 @@ pub fn validate(state: &UserState) -> Result<(), String> {
     validate_text_allow_empty(&schedule.last_attempt_at, "briefing last attempt", 64)?;
     validate_text_allow_empty(&schedule.last_success_key, "briefing success key", 128)?;
     validate_text_allow_empty(&schedule.last_error, "briefing last error", 512)?;
+    validate_text_allow_empty(&schedule.calendar_date, "briefing calendar date", 10)?;
+    validate_text_allow_empty(
+        &schedule.calendar_checked_at,
+        "briefing calendar checked at",
+        64,
+    )?;
+    validate_text_allow_empty(&schedule.calendar_source, "briefing calendar source", 128)?;
+    validate_text_allow_empty(&schedule.calendar_tool_id, "briefing calendar tool id", 256)?;
     Ok(())
 }
 

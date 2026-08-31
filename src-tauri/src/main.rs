@@ -4,6 +4,7 @@
 mod config;
 mod credentials;
 mod executor;
+mod market_calendar;
 mod process_command;
 mod user_state;
 mod web_host;
@@ -1267,6 +1268,31 @@ async fn qveris_model_catalog_sync(
 }
 
 #[tauri::command]
+async fn qveris_trading_calendar(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+    date: String,
+    marketcode: Option<String>,
+) -> Result<market_calendar::TradingCalendarResult, String> {
+    let host = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = host
+            .credentials
+            .read_qveris_key()?
+            .ok_or("请先配置 QVeris API Key")?;
+        let settings = config::load(&app)?;
+        market_calendar::fetch_trading_calendar(
+            &key,
+            &settings.capability_base_url,
+            &date,
+            marketcode.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| format!("交易日历任务失败: {error}"))?
+}
+
+#[tauri::command]
 fn user_state_load(app: AppHandle) -> Result<user_state::UserState, String> {
     user_state::load(&app)
 }
@@ -1296,6 +1322,7 @@ fn main() {
             integration_status,
             integration_settings_apply,
             qveris_model_catalog_sync,
+            qveris_trading_calendar,
             user_state_load,
             user_state_save
         ])

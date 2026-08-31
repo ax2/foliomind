@@ -3,6 +3,7 @@ import { ArrowClockwise, CaretUp, Code, Trash, X } from "@phosphor-icons/react";
 import { clearDeveloperLogs, isLocalWebRuntime, loadDeveloperOverview, testCapability, updateDeveloperVariables } from "../lib/localHost.js";
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { BUILTIN_CAPABILITIES } from "../lib/builtinCapabilities.js";
+import { queryTradingCalendar } from "../lib/integrations.js";
 
 function formatTime(value) {
   try { return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return "--:--:--"; }
@@ -94,16 +95,17 @@ export function DeveloperPanel() {
   const capabilities = overview?.state?.capabilityCatalog?.tools?.length ? overview.state.capabilityCatalog.tools : BUILTIN_CAPABILITIES;
   const runCapabilityTest = async (capability) => {
     const symbol = testSymbol.trim().toUpperCase();
-    if (!symbol) {
+    if (!symbol && capability.kind !== "trading_calendar") {
       setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "error", error: "请先输入测试标的" } }));
       return;
     }
     setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "loading" } }));
     try {
-      const result = local
-        ? await testCapability({ kind: capability.kind, symbol })
-        : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
-      if (desktop && !result?.audits?.some((audit) => audit?.outcome === "success" && (audit?.toolId === capability.toolId || audit?.tool_id === capability.toolId))) {
+      const calendarDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const result = capability.kind === "trading_calendar"
+        ? desktop ? await queryTradingCalendar(calendarDate) : await testCapability({ kind: capability.kind, date: calendarDate, marketcode: "212001" })
+        : local ? await testCapability({ kind: capability.kind, symbol }) : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
+      if (desktop && capability.kind !== "trading_calendar" && !result?.audits?.some((audit) => audit?.outcome === "success" && (audit?.toolId === capability.toolId || audit?.tool_id === capability.toolId))) {
         throw new Error("未观察到该 CAP 的成功调用记录，请在调用日志中查看原因");
       }
       setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "success", result } }));
