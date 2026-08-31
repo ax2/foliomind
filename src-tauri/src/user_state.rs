@@ -265,6 +265,34 @@ pub struct PortfolioReview {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BriefingSchedule {
+    pub enabled: bool,
+    pub close_time: String,
+    pub time_zone: String,
+    pub retry_minutes: u64,
+    pub last_attempt_at: String,
+    pub last_success_key: String,
+    pub last_result: String,
+    pub last_error: String,
+}
+
+impl Default for BriefingSchedule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            close_time: "15:35".into(),
+            time_zone: "Asia/Shanghai".into(),
+            retry_minutes: 15,
+            last_attempt_at: String::new(),
+            last_success_key: String::new(),
+            last_result: "idle".into(),
+            last_error: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserState {
     pub watchlist: Vec<WatchItem>,
     pub monitor_rules: Vec<MonitorRule>,
@@ -275,6 +303,8 @@ pub struct UserState {
     pub monitor_history: Vec<MonitorHistoryEntry>,
     #[serde(default)]
     pub portfolio_reviews: Vec<PortfolioReview>,
+    #[serde(default)]
+    pub briefing_schedule: BriefingSchedule,
 }
 
 impl Default for UserState {
@@ -328,6 +358,7 @@ impl Default for UserState {
             portfolio_positions: Vec::new(),
             monitor_history: Vec::new(),
             portfolio_reviews: Vec::new(),
+            briefing_schedule: BriefingSchedule::default(),
         }
     }
 }
@@ -566,6 +597,31 @@ pub fn validate(state: &UserState) -> Result<(), String> {
             validate_text(source, "portfolio review source", 128)?;
         }
     }
+    let schedule = &state.briefing_schedule;
+    if schedule.time_zone != "Asia/Shanghai"
+        || schedule.close_time.len() != 5
+        || schedule.close_time.as_bytes().get(2) != Some(&b':')
+        || !(5..=60).contains(&schedule.retry_minutes)
+        || !matches!(
+            schedule.last_result.as_str(),
+            "idle" | "success" | "waiting-data" | "error"
+        )
+    {
+        return Err("briefing schedule is invalid".into());
+    }
+    let time_bytes = schedule.close_time.as_bytes();
+    let valid_time = time_bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| index == 2 || byte.is_ascii_digit())
+        && ((time_bytes[0] - b'0') * 10 + time_bytes[1] - b'0') < 24
+        && ((time_bytes[3] - b'0') * 10 + time_bytes[4] - b'0') < 60;
+    if !valid_time {
+        return Err("briefing schedule time is invalid".into());
+    }
+    validate_text_allow_empty(&schedule.last_attempt_at, "briefing last attempt", 64)?;
+    validate_text_allow_empty(&schedule.last_success_key, "briefing success key", 128)?;
+    validate_text_allow_empty(&schedule.last_error, "briefing last error", 512)?;
     Ok(())
 }
 
@@ -635,6 +691,17 @@ mod tests {
     fn invalid_threshold_is_rejected() {
         let mut state = UserState::default();
         state.monitor_rules[0].threshold = f64::NAN;
+        assert!(validate(&state).is_err());
+    }
+
+    #[test]
+    fn invalid_briefing_schedule_is_rejected() {
+        let mut state = UserState::default();
+        state.briefing_schedule.enabled = true;
+        state.briefing_schedule.close_time = "25:00".into();
+        assert!(validate(&state).is_err());
+        state.briefing_schedule.close_time = "15:35".into();
+        state.briefing_schedule.last_result = "invented".into();
         assert!(validate(&state).is_err());
     }
 

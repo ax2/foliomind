@@ -131,6 +131,21 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioReviews).toEqual([]);
   });
 
+  it("creates one scheduled close review from same-day real quotes", async () => {
+    useLabStore.setState({
+      portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000 }],
+      liveQuotes: { "600519": { price: 1200, asOf: "2026-09-01T07:20:00Z", source: "真实 CAP" } },
+      events: [],
+      briefingSchedule: { ...initialLabState.briefingSchedule, enabled: true, closeTime: "15:35" },
+    });
+    await expect(useLabStore.getState().runDuePortfolioReview(new Date("2026-09-01T08:00:00Z"))).resolves.toBe("success");
+    expect(useLabStore.getState().portfolioReviews).toHaveLength(1);
+    expect(useLabStore.getState().notifications[0]).toMatchObject({ kind: "briefing", eventKey: "close:2026-09-01" });
+    expect(useLabStore.getState().briefingSchedule).toMatchObject({ lastResult: "success", lastSuccessKey: "close:2026-09-01" });
+    await expect(useLabStore.getState().runDuePortfolioReview(new Date("2026-09-01T08:10:00Z"))).resolves.toBe("completed");
+    expect(useLabStore.getState().portfolioReviews).toHaveLength(1);
+  });
+
   it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },

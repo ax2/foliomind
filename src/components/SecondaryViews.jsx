@@ -17,6 +17,7 @@ import { CopilotPanel } from "./CopilotPanel.jsx";
 import { DataState } from "./DataState.jsx";
 import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { anomalyLabel, detectMarketAnomalies } from "../lib/anomalyDetection.js";
+import { nextBriefingLabel } from "../lib/briefingSchedule.js";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error) => friendlySettingsMessage(error);
@@ -36,12 +37,16 @@ export function PortfolioView() {
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
   const portfolioReviews = useLabStore((state) => state.portfolioReviews);
+  const briefingSchedule = useLabStore((state) => state.briefingSchedule);
+  const briefingScheduleBusy = useLabStore((state) => state.briefingScheduleBusy);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const savePortfolioPosition = useLabStore((state) => state.savePortfolioPosition);
   const updatePortfolioPlanStatus = useLabStore((state) => state.updatePortfolioPlanStatus);
   const removePortfolioPosition = useLabStore((state) => state.removePortfolioPosition);
   const createPortfolioReview = useLabStore((state) => state.createPortfolioReview);
   const removePortfolioReview = useLabStore((state) => state.removePortfolioReview);
+  const updateBriefingSchedule = useLabStore((state) => state.updateBriefingSchedule);
+  const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const liveDataError = useLabStore((state) => state.liveDataError);
@@ -128,6 +133,8 @@ export function PortfolioView() {
     </section>
     <section className="portfolio-review-overview" aria-label="盘后复盘记录">
       <div className="portfolio-review-heading"><div><h2>盘后复盘</h2><small>保存当前真实行情快照、组合表现、风险信号和未来 7 天已返回事件。</small></div><span>{portfolioReviews.length} 份记录</span></div>
+      <div className="briefing-schedule-card"><div><strong>自动生成盘后复盘</strong><small>{nextBriefingLabel(briefingSchedule)} · 应用运行期间执行；无当日真实持仓行情不会生成。</small></div><label className="briefing-time">执行时间<input type="time" aria-label="自动复盘时间" value={briefingSchedule.closeTime} disabled={!briefingSchedule.enabled} onChange={(event) => { void updateBriefingSchedule({ closeTime: event.target.value }); }} /></label><label className="briefing-toggle"><input type="checkbox" checked={briefingSchedule.enabled} onChange={(event) => { void updateBriefingSchedule({ enabled: event.target.checked }); }} />{briefingSchedule.enabled ? "已启用" : "未启用"}</label><button type="button" className="secondary-button" disabled={!briefingSchedule.enabled || briefingScheduleBusy} onClick={() => { void runDuePortfolioReview(); }}>{briefingScheduleBusy ? "执行中…" : "立即检查"}</button></div>
+      {briefingSchedule.enabled && briefingSchedule.lastResult !== "idle" ? <p className={`briefing-schedule-status ${briefingSchedule.lastResult}`} role="status">{briefingSchedule.lastResult === "success" ? "最近一次自动复盘已完成" : briefingSchedule.lastResult === "waiting-data" ? "正在等待可用的当日真实行情" : "最近一次执行未完成"}{briefingSchedule.lastAttemptAt ? ` · ${new Date(briefingSchedule.lastAttemptAt).toLocaleString("zh-CN")}` : ""}{briefingSchedule.lastError ? ` · ${briefingSchedule.lastError}` : ""}</p> : null}
       {reviewNotice ? <p className="portfolio-review-notice" role="status">{reviewNotice}</p> : null}
       {portfolioReviews.length === 0 ? <p className="risk-empty">刷新持仓真实行情后生成第一份复盘；缺失行情不会被估算。</p> : <div className="portfolio-review-list">{portfolioReviews.slice(0, 12).map((review) => <details className="portfolio-review-card" key={review.id}><summary><div><strong>{review.tradingDate} 盘后复盘</strong><small>行情覆盖 {review.pricedCount}/{review.totalCount} · 数据截至 {review.asOf || "未知"}</small></div><div className={review.totalPnl == null ? "" : review.totalPnl >= 0 ? "up" : "down"}><strong>{money(review.totalPnl)}</strong><small>{review.totalPnlPercent == null ? "—" : formatPercent(review.totalPnlPercent)}</small></div></summary><div className="portfolio-review-body"><div className="portfolio-review-metrics"><article><span>组合市值</span><strong>{money(review.totalMarketValue)}</strong></article><article><span>表现最好</span><strong>{review.topGainer?.name || "—"}</strong><small>{review.topGainer?.pnlPercent == null ? "—" : formatPercent(review.topGainer.pnlPercent)}</small></article><article><span>表现最弱</span><strong>{review.topLoser?.name || "—"}</strong><small>{review.topLoser?.pnlPercent == null ? "—" : formatPercent(review.topLoser.pnlPercent)}</small></article></div>{review.riskSignals?.length ? <div className="portfolio-review-section"><strong>风险信号</strong>{review.riskSignals.map((signal, index) => <p key={`${review.id}-risk-${index}`}>{signal.title}：{signal.detail}</p>)}</div> : null}{review.upcomingEvents?.length ? <div className="portfolio-review-section"><strong>未来 7 天事件</strong>{review.upcomingEvents.map((event, index) => <p key={`${review.id}-event-${index}`}>{event.date} · {event.name} · {event.title}（{event.source}）</p>)}</div> : <p className="portfolio-review-empty">当前没有已返回的未来 7 天持仓事件。</p>}<p className="portfolio-review-sources">来源：{review.sources?.join("、") || "数据服务"} · {review.disclaimer}</p><button type="button" className="notification-link" onClick={() => { void removePortfolioReview(review.id); }}>删除本条复盘</button></div></details>)}</div>}
     </section>
@@ -272,6 +279,8 @@ function eventSymbolKey(value) {
 export function EventsView() {
   const watchlist = useLabStore((state) => state.watchlist);
   const portfolioPositions = useLabStore((state) => state.portfolioPositions);
+  const portfolioReviews = useLabStore((state) => state.portfolioReviews);
+  const briefingSchedule = useLabStore((state) => state.briefingSchedule);
   const events = useLabStore((state) => state.events);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const eventDataLoading = useLabStore((state) => state.eventDataLoading);
@@ -546,7 +555,7 @@ export function SettingsView() {
   const updateMessage = updateState === "error" ? updateError : latestRelease ? compareVersions(latestRelease.version, currentVersion) > 0 ? `发现新版本 ${latestRelease.version}` : `当前已是最新版本（${currentVersion}）` : `当前版本 ${currentVersion}；发布页可查看安装包与校验和。`;
   const exportBackup = () => {
     try {
-      const content = serializeUserStateBackup({ watchlist, rules, notifications, portfolioPositions, monitorHistory });
+      const content = serializeUserStateBackup({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory });
       const blob = new Blob([content], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

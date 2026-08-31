@@ -1,0 +1,22 @@
+import { describe, expect, it } from "vitest";
+import { briefingSlot, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "./briefingSchedule.js";
+
+describe("portfolio briefing schedule", () => {
+  const enabled = { enabled: true, closeTime: "15:35", retryMinutes: 15 };
+  it("uses Shanghai time, skips weekends, and waits until due", () => {
+    expect(briefingSlot({ now: "2026-09-01T07:34:00Z", schedule: enabled, positionCount: 1 }).status).toBe("not-due");
+    expect(briefingSlot({ now: "2026-09-01T07:35:00Z", schedule: enabled, positionCount: 1 })).toMatchObject({ status: "due", key: "close:2026-09-01" });
+    expect(briefingSlot({ now: "2026-09-05T08:00:00Z", schedule: enabled, positionCount: 1 }).status).toBe("weekend");
+  });
+  it("deduplicates completed reviews and throttles failed retries", () => {
+    const now = "2026-09-01T08:00:00Z";
+    expect(briefingSlot({ now, schedule: enabled, positionCount: 1, reviews: [{ kind: "close", tradingDate: "2026-09-01" }] }).status).toBe("completed");
+    expect(briefingSlot({ now, schedule: { ...enabled, lastAttemptAt: "2026-09-01T07:50:00Z" }, positionCount: 1 }).status).toBe("retry-wait");
+  });
+  it("requires a same-day real quote and sanitizes configuration", () => {
+    const positions = [{ symbol: "AAPL" }];
+    expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 120, asOf: "2026-09-01T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(true);
+    expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 120, asOf: "2026-08-31T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(false);
+    expect(normalizeBriefingSchedule({ enabled: true, closeTime: "99:99", retryMinutes: 999 })).toMatchObject({ enabled: true, closeTime: "15:35", retryMinutes: 60, timeZone: "Asia/Shanghai" });
+  });
+});

@@ -1,5 +1,6 @@
 import { normalizeConditions } from "./monitorConditions.js";
 import { normalizeWatchlistItem } from "./watchlist.js";
+import { normalizeBriefingSchedule } from "./briefingSchedule.js";
 
 const text = (value, max = 512) => String(value ?? "").trim().slice(0, max);
 const finiteNumber = (value) => {
@@ -60,7 +61,7 @@ function sanitizeReviewPosition(value) {
 
 export function normalizeUserState(state = {}) {
   const value = state && typeof state === "object" ? state : {};
-  return { watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews) };
+  return { watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule) };
 }
 
 export { sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };
