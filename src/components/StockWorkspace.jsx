@@ -32,13 +32,19 @@ export function StockWorkspace() {
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
   const refreshSelectedQuote = useLabStore((state) => state.refreshSelectedQuote);
+  const addWatchlist = useLabStore((state) => state.addWatchlist);
+  const removeWatchlist = useLabStore((state) => state.removeWatchlist);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const sendMessage = useLabStore((state) => state.sendMessage);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionNotice, setActionNotice] = useState("");
   const stock = stocks[symbol] ?? watchlist.find((item) => item.symbol === symbol) ?? { symbol, name: symbol, market: "", category: "" };
   const quote = liveQuotes[symbol];
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const isWatched = watchlist.some((item) => item.symbol === symbol);
   useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && !quoteDetailsLoading[symbol] && !quoteDetailsLoaded[symbol]) void refreshQuoteDetails(symbol); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, refreshQuoteDetails, quoteDetailsLoading, quoteDetailsLoaded]);
   useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && quoteDetailsLoaded[symbol] && !quoteSeriesLoading[symbol]?.[chartRange] && !quoteSeriesLoaded[symbol]?.[chartRange]) void refreshQuoteSeries(symbol, chartRange); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, chartRange, refreshQuoteSeries, quoteDetailsLoaded, quoteSeriesLoading, quoteSeriesLoaded]);
   const hasQuote = Number.isFinite(quote?.price);
@@ -53,14 +59,56 @@ export function StockWorkspace() {
   const healthTitle = { preview: "预览模式", loading: "正在获取真实行情", fresh: "真实行情 · 数据新鲜", stale: "真实行情 · 可能已延迟", unknown: "真实行情 · 数据时间未知", error: "暂未获取到行情", empty: "等待真实行情" }[healthState];
   const healthDetail = hasQuote ? `${provider} · MKT.L1.RT · ${formatQuoteFreshness(quote.asOf)}` : realDataMode ? `${provider} · ${channel}${liveDataLastRefreshAt ? ` · 最近尝试 ${formatRefreshTime(liveDataLastRefreshAt)}` : ""}` : "配置模型后显示真实行情";
   const requestAgentAnalysis = () => {
+    setMoreOpen(false);
     setActiveView("chat");
     void sendMessage(`请使用内置 foliomind_data 直连 ${provider} CAP 查询 ${stock.name}（${stock.symbol}）的最新行情、数据截至时间和来源；只返回真实数据，不要编造。`);
+  };
+  const toggleWatchlist = async () => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setActionNotice("");
+    try {
+      if (isWatched) {
+        await removeWatchlist(symbol);
+        setActionNotice("已从自选移除");
+      } else {
+        await addWatchlist(stock);
+        setActionNotice("已加入自选");
+      }
+    } catch (error) {
+      setActionNotice(error?.message || "收藏操作暂时失败");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+  const copySymbol = async () => {
+    setMoreOpen(false);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("当前环境不支持复制");
+      await navigator.clipboard.writeText(symbol);
+      setActionNotice(`已复制 ${symbol}`);
+    } catch (error) {
+      setActionNotice(error?.message || "复制失败，请手动选择代码");
+    }
+  };
+  const refreshCurrentQuote = () => {
+    setMoreOpen(false);
+    if (realDataMode) void refreshSelectedQuote(symbol);
+    else setActiveView("settings");
+  };
+  const openEvidence = () => {
+    setMoreOpen(false);
+    setEvidenceOpen(true);
+  };
+  const openMonitor = () => {
+    setMoreOpen(false);
+    setActiveView("monitor");
   };
   return (
     <main className="stock-workspace">
       <header className="stock-header">
         <div><div className="stock-mark">{stock.name.slice(0, 1)}</div><h1>{stock.name}<span>{stock.symbol}</span></h1><small>{stock.market}</small><small>{stock.category}</small></div>
-        <div><button className="live-data-button" aria-label="获取实时数据" disabled={Boolean(selectedQuoteLoading?.[symbol])} onClick={() => { if (realDataMode) void refreshSelectedQuote(symbol); else setActiveView("settings"); }}><ArrowsClockwise size={17} />{!realDataMode ? "去设置" : selectedQuoteLoading?.[symbol] ? "获取中…" : liveDataLoading ? "后台更新中" : hasQuote ? "刷新行情" : "获取实时数据"}</button><button className="agent-data-button" aria-label="交给 Agent 查询" onClick={requestAgentAnalysis}><Sparkle size={16} />交给 Agent</button><button aria-label="收藏"><BookmarkSimple size={20} /></button><button aria-label="更多"><DotsThree size={22} /></button></div>
+        <div className="stock-header-actions"><button className="live-data-button" aria-label="获取实时数据" disabled={Boolean(selectedQuoteLoading?.[symbol])} onClick={() => { if (realDataMode) void refreshSelectedQuote(symbol); else setActiveView("settings"); }}><ArrowsClockwise size={17} />{!realDataMode ? "去设置" : selectedQuoteLoading?.[symbol] ? "获取中…" : liveDataLoading ? "后台更新中" : hasQuote ? "刷新行情" : "获取实时数据"}</button><button className="agent-data-button" aria-label="交给 Agent 查询" onClick={requestAgentAnalysis}><Sparkle size={16} />交给 Agent</button><button className={isWatched ? "stock-bookmark active" : "stock-bookmark"} aria-label={isWatched ? "取消收藏" : "收藏"} aria-pressed={isWatched} disabled={actionBusy} onClick={() => { void toggleWatchlist(); }}><BookmarkSimple size={20} weight={isWatched ? "fill" : "regular"} /></button><div className="stock-more-wrap"><button className="stock-more-button" aria-label="更多" aria-expanded={moreOpen} aria-controls="stock-more-menu" onClick={() => setMoreOpen((value) => !value)}><DotsThree size={22} /></button>{moreOpen && <div className="stock-more-menu" id="stock-more-menu" role="menu" aria-label="更多操作"><button type="button" role="menuitem" onClick={refreshCurrentQuote}>刷新当前行情</button><button type="button" role="menuitem" onClick={openEvidence}>查看来源与证据</button><button type="button" role="menuitem" onClick={openMonitor}>打开盯盘</button><button type="button" role="menuitem" onClick={copySymbol}>复制证券代码</button></div>}</div>{actionNotice && <span className="stock-action-notice" role="status">{actionNotice}</span>}</div>
       </header>
       <section className={`data-health-strip data-health-${healthState}`} aria-label="行情数据状态">
         <span className="data-health-dot" aria-hidden="true" />

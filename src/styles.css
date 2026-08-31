@@ -456,6 +456,14 @@ textarea:focus-visible {
   color: #596171;
 }
 .stock-header > div:last-child { flex-shrink: 0; }
+.stock-header-actions { position: relative; }
+.stock-header .stock-bookmark.active { color: #2167b6; background: #edf5ff; }
+.stock-header .stock-bookmark:disabled { cursor: wait; opacity: .58; }
+.stock-more-wrap { position: relative; }
+.stock-more-menu { position: absolute; top: calc(100% + 7px); right: 0; z-index: 12; display: grid; min-width: 178px; gap: 2px; border: 1px solid #dce4ef; border-radius: 9px; padding: 6px; background: #fff; box-shadow: 0 12px 30px rgb(35 66 110 / 18%); }
+.stock-more-menu button { width: 100%; height: auto; display: flex; align-items: center; justify-content: flex-start; border-radius: 6px; padding: 8px 10px; color: #53647a; font-size: 12px; text-align: left; white-space: nowrap; }
+.stock-more-menu button:hover, .stock-more-menu button:focus-visible { background: #f1f6fd; color: #2167b6; }
+.stock-action-notice { position: absolute; top: calc(100% + 9px); right: 0; border: 1px solid #cfe2fa; border-radius: 6px; padding: 5px 8px; background: #f4f9ff; color: #35679d; font-size: 10px; white-space: nowrap; }
 .stock-mark {
   width: 36px;
   height: 36px;

@@ -60,6 +60,22 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "5日" })).toHaveClass("active");
   });
 
+  it("makes stock header actions functional", async () => {
+    render(<App />);
+    expect(screen.getByRole("button", { name: "取消收藏" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "取消收藏" }));
+    await waitFor(() => expect(useLabStore.getState().watchlist.some((item) => item.symbol === "600519")).toBe(false));
+    useLabStore.setState({ selectedSymbol: "600519" });
+    const addButton = await screen.findByRole("button", { name: "收藏" });
+    expect(addButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(addButton);
+    await waitFor(() => expect(useLabStore.getState().watchlist.some((item) => item.symbol === "600519")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+    expect(screen.getByRole("menu", { name: "更多操作" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "打开盯盘" }));
+    expect(screen.getByRole("heading", { name: "个股盯盘" })).toBeInTheDocument();
+  });
+
   it("organizes the watchlist by group and keeps empty real quotes honest", () => {
     render(<WatchlistSidebar />);
     expect(screen.getByRole("region", { name: "A 股自选" })).toBeInTheDocument();

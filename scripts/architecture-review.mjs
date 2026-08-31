@@ -4,9 +4,9 @@ const load = (file) => readFile(new URL(file, root), "utf8");
 const checks = [];
 const check = (name, pass, detail) => checks.push({ name, pass, detail });
 
-const [packageJson, cargoToml, tauriConfig, app, marketViews, userState, userStateTransport, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, localHost, developerPanel, styles, marketCalendar, desktopLifecycle, nativeMain, backgroundScheduler, anomalyAttribution] = await Promise.all([
+const [packageJson, cargoToml, tauriConfig, app, stockWorkspace, marketViews, userState, userStateTransport, nativeUserState, workflow, prd, readme, watchlist, portfolioReview, briefingSchedule, hostIntegrationTest, localHost, developerPanel, styles, marketCalendar, desktopLifecycle, nativeMain, backgroundScheduler, anomalyAttribution] = await Promise.all([
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
-  load("src/App.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"), load("src/lib/anomalyAttribution.js"),
+  load("src/App.jsx"), load("src/components/StockWorkspace.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"), load("src/lib/anomalyAttribution.js"),
 ]);
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -30,6 +30,7 @@ check("自选列视图", marketViews.includes("MARKET_COLUMN_DEFINITIONS") && ma
 check("命名行情视图", marketViews.includes("MARKET_VIEWS_STORAGE_KEY") && marketViews.includes("DEFAULT_MARKET_VIEWS") && marketViews.includes("CUSTOM_MARKET_VIEW_ID") && marketViews.includes(">= 10") && marketViews.includes("临时视图"), "命名行情视图只保存列偏好，手动修改进入临时视图并有数量上限");
 check("异动证据解读", marketViews.includes("AnomalyAttribution") && anomalyAttribution.includes("buildAttributionPrompt") && anomalyAttribution.includes("evidenceIndex") && anomalyAttribution.includes("ANOMALY_ATTRIBUTION_DISCLAIMER") && anomalyAttribution.includes("https?"), "异动解读必须基于真实证据、引用来源、带免责声明并过滤不安全链接");
 check("动态自选组盯盘", marketViews.includes("scope === \"watchlist\"") && marketViews.includes("lastSignalBySymbol") && userState.includes("lastSignalBySymbol") && prd.includes("Stage 2E 动态自选组盯盘"), "自选组规则必须动态展开当前标的、逐标的去重并通过状态 schema 脱敏迁移");
+check("详情页快捷操作", stockWorkspace.includes('aria-label={isWatched ? "取消收藏" : "收藏"}') && stockWorkspace.includes('role="menuitem"') && stockWorkspace.includes("复制证券代码") && prd.includes("Stage 3V 股票详情快捷操作闭环"), "股票详情页收藏与更多菜单必须复用现有状态和可访问操作");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
