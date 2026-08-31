@@ -89,3 +89,5 @@ Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳
 用户状态根对象带单调递增的 `revision`。Web Host 与桌面 Host 保存时在同一 I/O 临界区比较 `expectedRevision`，不匹配返回 409/`USER_STATE_CONFLICT`；客户端收到冲突后重新读取最新状态，只自动合并不同记录或不同日程字段的修改，同一记录的相互冲突修改停止保存并提示刷新。旧状态文件迁移为 revision 0，便携备份不携带 revision，避免把另一台设备的并发令牌带入本机。该契约使托盘后台调度写入的新提醒、复盘和检查历史不会被仍持有旧快照的 WebView 静默覆盖。
 
 组合自动复盘使用可持久化的本地调度状态：北京时间到点后先按 `close:<YYYY-MM-DD>` 做幂等检查，再通过固定 `cn_financial_pro.trade_dates.v1` / `REF.EXCHANGE_CALENDAR` 查询上交所目标日期；明确为交易日后由原生 worker 直接调用固定 `qveris_finance.mkt_l1_rt`，只有至少一个持仓存在当日真实报价时才生成快照和站内通知。网络 I/O 不持有状态锁，最终写入会重验 revision、持仓快照和同日幂等键；只有实际插入的一方发送系统通知。日历失败时 fail closed 并按配置间隔节流重试，休市日不生成。当前 worker 依赖桌面进程存活，显式退出后不会执行；上交所之外的分市场时区、交易日历和收盘时刻仍待拆分。
+
+原生 `BackgroundScheduler` 同时向桌面开发面板发送脱敏 `foliomind://background-scheduler-log` 事件。事件统一记录稳定 tool/capability 标识、受限参数、HTTP 状态、耗时、返回摘要、失败原因和可验证费用；`cost_from_value` 只提取已知费用字段，不保存原始响应或凭证。开发面板按 CAP 与模型网关分组汇总调用次数和费用，未返回费用时标记未知；清理日志只影响当前运行期调试视图，不改变用户状态。

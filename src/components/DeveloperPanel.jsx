@@ -17,6 +17,18 @@ function debugText(value) {
   try { return typeof value === "string" ? value : JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
+function desktopCostSummary(logs) {
+  const entries = Array.isArray(logs) ? logs : [];
+  const summarize = (kind) => {
+    const selected = entries.filter((entry) => entry.kind === kind || entry.type === kind);
+    const known = selected.filter((entry) => Number.isFinite(Number(entry.cost?.amount)));
+    return { calls: selected.length, cost: known.reduce((total, entry) => total + Number(entry.cost.amount), 0), costKnown: known.length };
+  };
+  const cap = summarize("qveris");
+  const model = summarize("model");
+  return { qverisCalls: cap.calls, qverisCost: cap.cost, qverisCostKnown: cap.costKnown, modelCalls: model.calls, modelCost: model.cost, modelCostKnown: model.costKnown, units: [...new Set(entries.map((entry) => entry.cost?.unit).filter(Boolean))] };
+}
+
 export function DeveloperPanel() {
   const local = isLocalWebRuntime();
   const desktop = isDesktopRuntime();
@@ -39,7 +51,7 @@ export function DeveloperPanel() {
         const [runtime, integration] = await Promise.all([invoke("runtime_status"), invoke("integration_status")]);
         setOverview((current) => ({
           logs: current?.logs || desktopLogs,
-          costSummary: current?.costSummary,
+          costSummary: current?.costSummary || desktopCostSummary(current?.logs || desktopLogs),
           state: {
             activeRequest: runtime?.state === "running",
             runtimeState: runtime?.state || "unknown",
@@ -75,6 +87,22 @@ export function DeveloperPanel() {
         setDesktopLogs((current) => [...current, entry].slice(-200));
         setOverview((current) => current ? { ...current, logs: [...(current.logs || []), entry].slice(-200), state: { ...current.state, activeRequest: payload?.kind === "started" ? true : payload?.kind === "stopped" || payload?.kind === "crash" ? false : current.state?.activeRequest } } : current);
       })).then((listener) => { if (disposed) listener(); else unlisten = listener; }).catch(() => {});
+      void import("@tauri-apps/api/event").then(({ listen }) => listen("foliomind://background-scheduler-log", ({ payload }) => {
+        if (disposed || !payload) return;
+        const entry = { ...payload, kind: "qveris", cost: payload.cost || payload.response?.cost, id: payload.id || `${Date.now()}-${Math.random()}` };
+        setDesktopLogs((current) => [...current, entry].slice(-200));
+        setOverview((current) => {
+          if (!current) return current;
+          const logs = [...(current.logs || []), entry].slice(-200);
+          return { ...current, logs, costSummary: desktopCostSummary(logs) };
+        });
+      })).then((listener) => {
+        if (disposed) listener();
+        else {
+          const previous = unlisten;
+          unlisten = () => { previous?.(); listener(); };
+        }
+      }).catch(() => {});
     }
     return () => { disposed = true; window.clearInterval(timer); unlisten?.(); };
   }, [enabled, local, desktop, open]);
