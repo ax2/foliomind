@@ -20,6 +20,8 @@ Tauri 与 Web 共用同一份脱敏状态契约，除自选 `group` 和条件 `c
 
 本地 Web 调试时，`npm run web:dev` 同时启动 Vite 和独立 Dev Host，默认监听 `127.0.0.1:43123`（端口冲突时自动递增）。Dev Host 复用同一 HTTP 路由和 Search → Inspect → Call 策略，直接代理模型网关和 QVeris 工具；因此修改 Web/Host 代码后无需安装新桌面版本。Web UI 先通过允许的 localhost Origin 获取一次性会话令牌，再以 `X-FolioMind-Host` 请求头访问配置、凭据、用户状态和运行时 API。该 HTTP 入口仅允许回环请求和本地开发 Origin，不作为公网服务。
 
+默认测试套件会以动态回环端口启动真实 Dev Host 子进程，并把状态目录隔离到系统临时目录；本机 mock 网关覆盖会话鉴权、凭据前缀、跨重启状态恢复、并发 prompt 拒绝、owner 取消和 Runtime 状态释放。测试不连接真实 QVeris，也不读取用户配置。Host 对端口 `0` 报告操作系统实际分配的端口，使 CI 不依赖固定端口且避免并行任务冲突。
+
 金融查询默认使用 QVeris CAP 的 `qveris_finance` provider。Web Host 将稳定的 capability/tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到本地 `tool-selection-cache.json`，行情、公司资料、估值、历史日线、公司事件、资金流和标注新闻直接调用 CAP；CAP 不可用时再回退到 Search → Inspect → Call。对外仍提供稳定的 `foliomind_data(kind, symbol, range)` schema，`kind` 包括 `quote`、`details`、`series`、`core_event`、`capital_flow`、`sentiment`，未来可替换为其它渠道而不影响页面。条件检查对这些能力使用三值逻辑：CAP 明确失败或无可用字段时返回 `unknown`，不把空数组当成未触发。QVeris 和模型网关的瞬时 408/425/429/5xx 失败以及可恢复的网络错误会经过有界指数退避重试，并尊重上游 `Retry-After`；已取消的请求不会重试，取消信号会打断退避等待。桌面端 Rust 桥接器对 Search/Inspect/Call 采用相同的重试分类、退避上限和停止取消语义。自选行情刷新使用受限并发（默认 2，localhost 开发面板可调至 1–4），避免多个标的串行等待。localhost 与桌面端均显示本机开发者面板，分别展示 Host 或 Pi/QVeris 事件日志；密钥和原始提示词不会写入日志。凭据、模型或渠道变更会使相关缓存失效。
 
 事件日历在已返回的真实公司事件之上提供客户端关联范围筛选：默认展示自选标的，用户选择“只看持仓”时按规范化证券代码（A 股交易所后缀 `.SH/.SS/.SZ` 可省略）与 `user-state.json` 中的持仓匹配；也可以按自选项已有的 `category` 做行业筛选。该筛选不改变 CAP 请求范围、不持久化事件结果，也不会把没有持仓的空结果误报为“暂无事件”；列表和月视图共享同一筛选结果。

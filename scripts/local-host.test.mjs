@@ -24,6 +24,8 @@ test("keeps the qveris_finance CAP contract local and normalizes real envelopes"
   assert.deepEqual(series.series[0], { date: "2026-08-28", close: 1297.4, time: "2026-08-28", value: 1297.4 });
   const ascendingSeries = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-26", close: 1290 }, { date: "2026-08-28", close: 1297.4 }] } });
   assert.equal(ascendingSeries.asOf, "2026-08-28");
+  const mixedSeries = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "unknown", close: 1290 }, { date: "2026-08-28", close: 1297.4 }] } });
+  assert.equal(mixedSeries.asOf, "2026-08-28");
 });
 
 test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {
