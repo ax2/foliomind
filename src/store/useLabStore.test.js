@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn(), queryCachedData: vi.fn() }));
+const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn(), queryCachedData: vi.fn(), queryTradingCalendar: vi.fn() }));
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
 vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true, queryCachedData: runtime.queryCachedData }));
 vi.mock("../lib/userState.js", () => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
+vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), queryTradingCalendar: runtime.queryTradingCalendar }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
 
@@ -13,6 +14,8 @@ describe("lab store streaming lifecycle", () => {
     runtime.askPi.mockReset();
     runtime.abortPi.mockReset();
     runtime.queryCachedData.mockReset();
+    runtime.queryTradingCalendar.mockReset();
+    runtime.queryTradingCalendar.mockResolvedValue({ queriedDate: "2026-09-01", isTradingDay: true, source: "cn_financial_pro", toolId: "cn_financial_pro.trade_dates.v1" });
     useLabStore.setState({
       ...initialLabState,
       messages: initialLabState.messages.map((message) => ({ ...message })),
@@ -142,8 +145,21 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioReviews).toHaveLength(1);
     expect(useLabStore.getState().notifications[0]).toMatchObject({ kind: "briefing", eventKey: "close:2026-09-01" });
     expect(useLabStore.getState().briefingSchedule).toMatchObject({ lastResult: "success", lastSuccessKey: "close:2026-09-01" });
+    expect(runtime.queryTradingCalendar).toHaveBeenCalledWith("2026-09-01");
     await expect(useLabStore.getState().runDuePortfolioReview(new Date("2026-09-01T08:10:00Z"))).resolves.toBe("completed");
     expect(useLabStore.getState().portfolioReviews).toHaveLength(1);
+  });
+
+  it("does not create a scheduled review when the real exchange calendar is closed", async () => {
+    runtime.queryTradingCalendar.mockResolvedValue({ queriedDate: "2026-09-01", isTradingDay: false, source: "cn_financial_pro", toolId: "cn_financial_pro.trade_dates.v1" });
+    useLabStore.setState({
+      portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000 }],
+      liveQuotes: { "600519": { price: 1200, asOf: "2026-09-01T07:20:00Z", source: "真实 CAP" } },
+      briefingSchedule: { ...initialLabState.briefingSchedule, enabled: true, closeTime: "15:35" },
+    });
+    await expect(useLabStore.getState().runDuePortfolioReview(new Date("2026-09-01T08:00:00Z"))).resolves.toBe("market-closed");
+    expect(useLabStore.getState().portfolioReviews).toEqual([]);
+    expect(useLabStore.getState().briefingSchedule).toMatchObject({ calendarDate: "2026-09-01", calendarStatus: "closed", lastResult: "market-closed" });
   });
 
   it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {

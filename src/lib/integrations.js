@@ -62,3 +62,11 @@ export async function applyIntegrationSettings(input) {
   }
   return desktopInvoke("integration_settings_apply", { input });
 }
+
+export async function queryTradingCalendar(date, marketcode = "212001") {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) throw new Error("交易日历日期无效");
+  if (isDesktopRuntime()) return desktopInvoke("qveris_trading_calendar", { date, marketcode });
+  if (!isLocalWebRuntime()) throw new Error("交易日历仅在桌面端或 localhost 调试环境可用");
+  const result = await localHostRequest("/api/data/query", { method: "POST", timeoutMs: 30_000, body: JSON.stringify({ input: { kind: "trading_calendar", date, marketcode } }) });
+  return result?.data || result;
+}

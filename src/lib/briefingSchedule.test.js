@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { briefingSlot, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "./briefingSchedule.js";
 
 describe("portfolio briefing schedule", () => {
-  const enabled = { enabled: true, closeTime: "15:35", retryMinutes: 15 };
-  it("uses Shanghai time, skips weekends, and waits until due", () => {
+  const enabled = { enabled: true, closeTime: "15:35", retryMinutes: 15, calendarDate: "2026-09-01", calendarStatus: "trading" };
+  it("uses Shanghai time and requires an authoritative trading calendar", () => {
     expect(briefingSlot({ now: "2026-09-01T07:34:00Z", schedule: enabled, positionCount: 1 }).status).toBe("not-due");
     expect(briefingSlot({ now: "2026-09-01T07:35:00Z", schedule: enabled, positionCount: 1 })).toMatchObject({ status: "due", key: "close:2026-09-01" });
-    expect(briefingSlot({ now: "2026-09-05T08:00:00Z", schedule: enabled, positionCount: 1 }).status).toBe("weekend");
+    expect(briefingSlot({ now: "2026-09-02T08:00:00Z", schedule: enabled, positionCount: 1 }).status).toBe("calendar-needed");
+    expect(briefingSlot({ now: "2026-09-01T08:00:00Z", schedule: { ...enabled, calendarStatus: "closed" }, positionCount: 1 }).status).toBe("market-closed");
   });
   it("deduplicates completed reviews and throttles failed retries", () => {
     const now = "2026-09-01T08:00:00Z";

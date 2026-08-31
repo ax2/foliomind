@@ -54,6 +54,7 @@ const DIRECT_DATA_CACHE_TTL_MS = Object.freeze({
   core_event: 300_000,
   capital_flow: 60_000,
   sentiment: 60_000,
+  trading_calendar: 12 * 60 * 60_000,
 });
 const directDataCache = new Map();
 const directDataInFlight = new Map();
@@ -187,6 +188,7 @@ export const BUILTIN_CAPABILITY_CATALOG = Object.freeze({
   core_event: { toolId: "qveris_finance.event_calendar_corp", capability: "EVENT.CALENDAR.CORP", description: "上市公司分红、拆股、股东会等已排期事件", parameters: { symbol: "string", event_type: "string?", start_date: "string?", end_date: "string?" }, returns: ["date", "event_type", "description", "ratio", "symbol"], coverage: "已验证 corporate calendar；不等同于公告全文或限售解禁日历" },
   capital_flow: { toolId: "qveris_finance.flow_large_order", capability: "FLOW.LARGE_ORDER", description: "按订单规模拆分的个股资金流", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["symbol", "date", "super_large_net", "large_net", "medium_net", "small_net", "main_net", "net_flow"], coverage: "已验证个股大单资金流；空交易日保持缺失" },
   sentiment: { toolId: "qveris_finance.news_fin_tagged", capability: "NEWS.FIN.TAGGED", description: "带主题与情绪标签的财经新闻", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["title", "url", "published_at", "source", "summary", "sentiment_label", "sentiment_score"], coverage: "已验证按标的新闻；市场范围过滤暂不透传，避免上游参数映射错误" },
+  trading_calendar: { toolId: "cn_financial_pro.trade_dates.v1", provider: "cn_financial_pro", capability: "REF.EXCHANGE_CALENDAR", description: "按交易所查询真实交易日期，用于休市日门禁", parameters: { marketcode: "string", startdate: "string", enddate: "string" }, returns: ["time"], coverage: "已验证 SSE/SZSE/HKEX/CFFEX；只判断是否交易，不解释休市原因" },
 });
 
 const QVERIS_FINANCE_PROVIDER_SUMMARY = Object.freeze({
@@ -223,6 +225,10 @@ function directCapabilityParameters(kind, input) {
   const start = new Date(end);
   start.setDate(end.getDate() - (kind === "series" ? 90 : 30));
   const dates = { start_date: String(input?.start_date || start.toISOString().slice(0, 10)), end_date: String(input?.end_date || end.toISOString().slice(0, 10)) };
+  if (kind === "trading_calendar") {
+    const date = String(input?.date || input?.startdate || input?.start_date || end.toISOString().slice(0, 10));
+    return { marketcode: String(input?.marketcode || "212001"), startdate: date, enddate: String(input?.enddate || input?.end_date || date), mode: 1, date_type: 0, period: "D", date_format: 0 };
+  }
   if (["series", "core_event", "capital_flow", "sentiment"].includes(kind)) return { symbol, ...dates, ...(kind === "core_event" && input?.event_type ? { event_type: String(input.event_type) } : {}), ...(kind === "sentiment" && input?.query ? { query: String(input.query) } : {}) };
   return { symbol };
 }
@@ -308,6 +314,12 @@ export function normalizeCapabilityResult(kind, input, result) {
   if (kind === "fundamentals") {
     if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回估值指标");
     return { fundamentals: data, source, capability: "FUNDAMENTALS.DERIVED_RATIOS", asOf: data.as_of_date || null };
+  }
+  if (kind === "trading_calendar") {
+    const values = Array.isArray(data) ? data : Array.isArray(data?.time) ? data.time : Array.isArray(data?.dates) ? data.dates : [];
+    const tradingDates = values.map((value) => String(value || "").slice(0, 10)).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+    const queriedDate = String(input?.date || input?.startdate || input?.start_date || "").slice(0, 10);
+    return { tradingDates, queriedDate, isTradingDay: queriedDate ? tradingDates.includes(queriedDate) : null, marketcode: String(input?.marketcode || "212001"), source, capability: "REF.EXCHANGE_CALENDAR", asOf: queriedDate || tradingDates.at(-1) || null };
   }
   return data;
 }
@@ -695,7 +707,7 @@ async function route(req, body) {
   if (method === "POST" && path === "/api/dev/capabilities/test") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
-    if (!String(input.symbol || "").trim() || !BUILTIN_CAPABILITY_CATALOG[String(input.kind || "")]) throw new Error("能力测试需要有效的 kind 和 symbol");
+    if (!BUILTIN_CAPABILITY_CATALOG[String(input.kind || "")] || (String(input.kind || "") !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("能力测试需要有效的 kind 和查询参数");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
     try { return await queryDirectCapability(input, settings, key, controller.signal); }
     finally { clearTimeout(timeout); }
@@ -712,13 +724,15 @@ async function route(req, body) {
   if (method === "POST" && path === "/api/data/query") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
-    if (!String(input.symbol || "").trim() || !["quote", "details", "series", "core_event", "capital_flow", "sentiment"].includes(String(input.kind || ""))) throw new Error("数据查询参数无效");
+    const kind = String(input.kind || "");
+    if (!["quote", "details", "series", "core_event", "capital_flow", "sentiment", "trading_calendar"].includes(kind) || (kind !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("数据查询参数无效");
     const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
     try {
       const result = await queryDirectCapability(input, settings, key, controller.signal);
       return { ...result, audits: [{ operation: "cap-call", outcome: "success", toolId: result.toolId, capability: result.capability }] };
     } catch (directError) {
       if (controller.signal.aborted) throw directError;
+      if (kind === "trading_calendar") throw directError;
       logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
       const result = await queryCachedData(input, settings, key, controller.signal);
       return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] };

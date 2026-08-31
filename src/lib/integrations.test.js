@@ -4,7 +4,7 @@ const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 
-import { applyIntegrationSettings, syncQVerisModels } from "./integrations.js";
+import { applyIntegrationSettings, queryTradingCalendar, syncQVerisModels } from "./integrations.js";
 
 describe("integration client", () => {
   beforeEach(() => {
@@ -40,5 +40,11 @@ describe("integration client", () => {
     await expect(applyIntegrationSettings(input)).resolves.toMatchObject({ modelId: "model-a" });
     expect(tauri.invoke).toHaveBeenCalledTimes(1);
     expect(tauri.invoke).toHaveBeenCalledWith("integration_settings_apply", { input });
+  });
+
+  it("queries the desktop trading calendar without exposing the credential", async () => {
+    tauri.invoke.mockResolvedValue({ queriedDate: "2026-08-31", isTradingDay: true, source: "cn_financial_pro" });
+    await expect(queryTradingCalendar("2026-08-31")).resolves.toMatchObject({ isTradingDay: true });
+    expect(tauri.invoke).toHaveBeenCalledWith("qveris_trading_calendar", { date: "2026-08-31", marketcode: "212001" });
   });
 });

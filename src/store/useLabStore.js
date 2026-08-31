@@ -3,7 +3,7 @@ import { skills, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { getDeveloperVariable, isLocalWebRuntime, queryCachedData } from "../lib/localHost.js";
-import { loadIntegrationStatus } from "../lib/integrations.js";
+import { loadIntegrationStatus, queryTradingCalendar } from "../lib/integrations.js";
 import { loadUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfolio.js";
@@ -459,7 +459,7 @@ export const useLabStore = create((set, get) => ({
       seriesRequestGeneration += 1;
       eventsRequestGeneration += 1;
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
   refreshLiveData: async () => {
     const state = get();
@@ -756,16 +756,32 @@ export const useLabStore = create((set, get) => ({
   runDuePortfolioReview: async (now = new Date()) => {
     let acquired = false;
     let slot;
+    let calendarQuerying = false;
     const attemptedAt = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
     set((state) => {
       slot = briefingSlot({ now, schedule: state.briefingSchedule, reviews: state.portfolioReviews, positionCount: state.portfolioPositions.length });
-      if (slot.status !== "due" || state.briefingScheduleBusy) return {};
+      if (!["due", "calendar-needed"].includes(slot.status) || state.briefingScheduleBusy) return {};
       acquired = true;
-      return { briefingScheduleBusy: true, briefingSchedule: { ...state.briefingSchedule, lastAttemptAt: attemptedAt, lastResult: "waiting-data", lastError: "正在刷新持仓真实行情" } };
+      calendarQuerying = slot.status === "calendar-needed";
+      return { briefingScheduleBusy: true, briefingSchedule: { ...state.briefingSchedule, lastAttemptAt: attemptedAt, lastResult: calendarQuerying ? "waiting-calendar" : "waiting-data", lastError: calendarQuerying ? "正在核对真实交易日历" : "正在刷新持仓真实行情" } };
     });
     if (!acquired) return slot?.status || false;
     await get().persistUserState();
     try {
+      if (calendarQuerying) {
+        const calendar = await queryTradingCalendar(slot.tradingDate);
+        const calendarStatus = calendar?.isTradingDay === true ? "trading" : "closed";
+        set((current) => ({ briefingSchedule: { ...current.briefingSchedule, calendarDate: slot.tradingDate, calendarStatus, calendarCheckedAt: attemptedAt, calendarSource: String(calendar?.source || "数据服务"), calendarToolId: String(calendar?.toolId || ""), lastResult: calendarStatus === "closed" ? "market-closed" : "waiting-data", lastError: "" } }));
+        await get().persistUserState();
+        if (calendarStatus === "closed") {
+          set({ briefingScheduleBusy: false });
+          return "market-closed";
+        }
+        // This owner already paid for and completed the calendar gate.  Do not
+        // let the attempt timestamp written above throttle the same run before
+        // it reaches the real-quote gate; it only throttles later retries.
+        slot = { ...slot, status: "due" };
+      }
       if (!hasFreshPortfolioQuote({ positions: get().portfolioPositions, liveQuotes: get().liveQuotes, now })) await get().refreshLiveData();
       const state = get();
       if (!hasFreshPortfolioQuote({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, now })) {
@@ -786,7 +802,7 @@ export const useLabStore = create((set, get) => ({
       return "success";
     } catch (error) {
       const message = friendlyDataMessage(error);
-      set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastResult: "error", lastError: message } }));
+      set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, ...(calendarQuerying ? { calendarDate: slot?.tradingDate || "", calendarStatus: "error", calendarCheckedAt: attemptedAt } : {}), lastResult: calendarQuerying ? "waiting-calendar" : "error", lastError: message } }));
       await get().persistUserState();
       return "error";
     }

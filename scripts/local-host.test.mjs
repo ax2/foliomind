@@ -26,6 +26,9 @@ test("keeps the qveris_finance CAP contract local and normalizes real envelopes"
   assert.equal(ascendingSeries.asOf, "2026-08-28");
   const mixedSeries = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "unknown", close: 1290 }, { date: "2026-08-28", close: 1297.4 }] } });
   assert.equal(mixedSeries.asOf, "2026-08-28");
+  const calendar = normalizeCapabilityResult("trading_calendar", { date: "2026-08-31", marketcode: "212001" }, { success: true, result: { data: { time: ["2026-08-28", "2026-08-31"] } } });
+  assert.deepEqual(calendar.tradingDates, ["2026-08-28", "2026-08-31"]);
+  assert.equal(calendar.isTradingDay, true);
 });
 
 test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {
