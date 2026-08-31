@@ -86,4 +86,6 @@ Tauri 配置包含 Windows NSIS/MSI 与 macOS App/DMG 目标。Windows 使用稳
 
 开发面板读取本地 Host 的能力目录与脱敏调用审计，可在 Web 通过 Host 直连测试，在桌面通过内置 Tool Runtime 测试；只有观察到目标 tool ID 的成功审计才判定测试成功。能力目录仅把已验证的稳定 tool schema 暴露给 Skill，Provider 尚未验证的能力只显示总量，不伪装为可调用工具。Windows 更新依靠稳定 UpgradeCode、禁止降级和 current-user 模式覆盖安装，不能在发布脚本中先删除旧安装目录或用户配置。
 
+用户状态根对象带单调递增的 `revision`。Web Host 与桌面 Host 保存时在同一 I/O 临界区比较 `expectedRevision`，不匹配返回 409/`USER_STATE_CONFLICT`；客户端收到冲突后重新读取最新状态，只自动合并不同记录或不同日程字段的修改，同一记录的相互冲突修改停止保存并提示刷新。旧状态文件迁移为 revision 0，便携备份不携带 revision，避免把另一台设备的并发令牌带入本机。该契约使托盘后台调度写入的新提醒、复盘和检查历史不会被仍持有旧快照的 WebView 静默覆盖。
+
 组合自动复盘使用可持久化的本地调度状态：北京时间到点后先按 `close:<YYYY-MM-DD>` 做幂等检查，再通过固定 `cn_financial_pro.trade_dates.v1` / `REF.EXCHANGE_CALENDAR` 查询上交所目标日期；明确为交易日后才刷新真实持仓行情，只有至少一个持仓存在当日真实报价时才生成快照和站内通知。日历失败时 fail closed 并进入可重试状态，休市日不生成；日历状态、来源和核验时间使用脱敏 schema 持久化，Host 配置变化会使缓存失效。失败按配置间隔节流重试，启动、窗口聚焦、页面恢复可见及一分钟轮询都会 reconcile。当前调度仍依赖应用进程存活，Web 页面关闭或桌面应用完全退出后不会执行；独立后台 worker 和跨市场日历尚未上线。

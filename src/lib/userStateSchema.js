@@ -61,7 +61,8 @@ function sanitizeReviewPosition(value) {
 
 export function normalizeUserState(state = {}) {
   const value = state && typeof state === "object" ? state : {};
-  return { watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule) };
+  const revision = Number(value.revision);
+  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule) };
 }
 
 export { sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };

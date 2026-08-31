@@ -35,6 +35,7 @@ const defaultState = {
 };
 
 let runtimeState = "stopped";
+let userStateMutationQueue = Promise.resolve();
 const devLogs = [];
 const devVariables = {
   toolCacheEnabled: true,
@@ -430,6 +431,25 @@ async function saveKey(value) {
 }
 async function deleteKey() { try { await unlink(credentialFile); } catch { /* idempotent */ } }
 function apiKeyPrefix(value) { const key = String(value || "").trim(); return key ? `${key.slice(0, 8)}${key.length > 8 ? "…" : ""}` : ""; }
+function saveUserStateIfRevision(input) {
+  const task = userStateMutationQueue.catch(() => {}).then(async () => {
+    const current = normalizeUserState(await readJson(stateFile, defaultState));
+    const expectedRevision = Number(input?.expectedRevision);
+    const state = normalizeUserState(input?.state || defaultState);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || state.revision !== expectedRevision || current.revision !== expectedRevision) {
+      const error = new Error(`用户数据已在其他窗口更新（当前版本 ${current.revision}）`);
+      error.status = 409;
+      error.code = "USER_STATE_CONFLICT";
+      throw error;
+    }
+    if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
+    const next = { ...state, revision: expectedRevision + 1 };
+    await atomicJson(stateFile, next);
+    return next;
+  });
+  userStateMutationQueue = task.catch(() => {});
+  return task;
+}
 
 function normalizeModels(items) {
   const seen = new Set();
@@ -741,10 +761,7 @@ async function route(req, body) {
   }
   if (method === "GET" && path === "/api/user-state") return normalizeUserState(await readJson(stateFile, defaultState));
   if (method === "POST" && path === "/api/user-state") {
-    const state = normalizeUserState(body.state || defaultState);
-    if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
-    await atomicJson(stateFile, state);
-    return state;
+    return saveUserStateIfRevision(body);
   }
   if (method === "GET" && path === "/api/runtime/status") return { state: runtimeState, pid: process.pid, detail: null };
   if (method === "POST" && path === "/api/runtime/start") { runtimeState = "running"; return { state: runtimeState, pid: process.pid, detail: null }; }

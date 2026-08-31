@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeUserState, parseUserStateBackup, serializeUserStateBackup, userStateBackupData } from "./userState.js";
+import { mergeUserStateChanges, normalizeUserState, parseUserStateBackup, serializeUserStateBackup, userStateBackupData, UserStateMergeConflictError } from "./userState.js";
 
 describe("user state backups", () => {
   it("exports portable data while excluding runtime configuration", () => {
@@ -14,6 +14,7 @@ describe("user state backups", () => {
     });
     expect(raw).not.toContain("sk-secret");
     expect(raw).not.toContain("secret.example");
+    expect(raw).not.toContain('"revision"');
     expect(parseUserStateBackup(raw)).toMatchObject({
       watchlist: [{ symbol: "AAPL", name: "Apple" }],
       monitorRules: [{ threshold: 5, intervalSeconds: 300 }],
@@ -81,5 +82,22 @@ describe("user state backups", () => {
     expect(normalized.notifications).toEqual([{ id: "n1", kind: "", symbol: "", name: "", ruleId: "", title: "安全提醒", body: "x".repeat(4096), severity: "info", createdAt: "", read: false, source: "", eventKey: "event-1", reminderPhase: "" }]);
     expect(normalized.monitorHistory[0]).toMatchObject({ outcome: "unknown", audits: [] });
     expect(JSON.stringify(normalized)).not.toContain("sk_should_never_escape");
+  });
+
+  it("preserves revisions and three-way merges disjoint client and background changes", () => {
+    const base = normalizeUserState({ revision: 4, watchlist: [{ symbol: "AAPL", name: "Apple" }], notifications: [] });
+    const local = normalizeUserState({ ...base, watchlist: [...base.watchlist, { symbol: "MSFT", name: "Microsoft" }] });
+    const remote = normalizeUserState({ ...base, revision: 5, notifications: [{ id: "n1", title: "后台复盘完成" }] });
+    const merged = mergeUserStateChanges(base, local, remote);
+    expect(merged.revision).toBe(5);
+    expect(merged.watchlist.map((item) => item.symbol)).toEqual(["AAPL", "MSFT"]);
+    expect(merged.notifications).toMatchObject([{ id: "n1", title: "后台复盘完成" }]);
+  });
+
+  it("rejects conflicting edits to the same persisted record", () => {
+    const base = normalizeUserState({ revision: 2, watchlist: [{ symbol: "AAPL", name: "Apple" }] });
+    const local = normalizeUserState({ ...base, watchlist: [{ symbol: "AAPL", name: "Apple Local" }] });
+    const remote = normalizeUserState({ ...base, revision: 3, watchlist: [{ symbol: "AAPL", name: "Apple Remote" }] });
+    expect(() => mergeUserStateChanges(base, local, remote)).toThrow(UserStateMergeConflictError);
   });
 });

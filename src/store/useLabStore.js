@@ -4,7 +4,7 @@ import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { getDeveloperVariable, isLocalWebRuntime, queryCachedData } from "../lib/localHost.js";
 import { loadIntegrationStatus, queryTradingCalendar } from "../lib/integrations.js";
-import { loadUserState, saveUserState } from "../lib/userState.js";
+import { loadUserState, mergeUserStateChanges, normalizeUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
@@ -22,14 +22,31 @@ const MAX_LIVE_QUOTE_CONCURRENCY = 4;
 const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) => normalizeWatchlistItem({ ...item, group: group.label }))).slice(0, 8);
 let persistenceQueue = Promise.resolve();
+let lastPersistedState = null;
+let lastLocalSnapshot = null;
 let liveRequestGeneration = 0;
 const selectedQuoteGenerations = new Map();
 let detailsRequestGeneration = 0;
 let seriesRequestGeneration = 0;
 let eventsRequestGeneration = 0;
 
+function persistenceState(snapshot) {
+  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule });
+}
 function persistSnapshot(snapshot) {
-  persistenceQueue = persistenceQueue.catch(() => {}).then(() => saveUserState({ watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule }));
+  persistenceQueue = persistenceQueue.catch(() => {}).then(async () => {
+    const local = persistenceState(snapshot);
+    const candidate = lastPersistedState && lastLocalSnapshot ? mergeUserStateChanges(lastLocalSnapshot, local, lastPersistedState) : local;
+    try {
+      const saved = await saveUserState(candidate, { baseState: lastPersistedState || candidate });
+      lastPersistedState = saved && typeof saved === "object" ? normalizeUserState(saved) : { ...candidate, revision: candidate.revision + 1 };
+      lastLocalSnapshot = local;
+      return lastPersistedState;
+    } catch (error) {
+      useLabStore.setState({ settingsNotice: { type: "error", text: error?.code === "USER_STATE_MERGE_CONFLICT" ? "用户数据已在另一窗口修改，请重新加载后再操作" : "本地数据暂时无法保存，请稍后重试" } });
+      return null;
+    }
+  });
   return persistenceQueue;
 }
 function nowIso() { return new Date().toISOString(); }
@@ -647,8 +664,10 @@ export const useLabStore = create((set, get) => ({
   hydrateUserState: async () => {
     try {
       const persisted = await loadUserState();
-      if (persisted && typeof persisted === "object") set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, portfolioReviews: Array.isArray(persisted.portfolioReviews) ? persisted.portfolioReviews.slice(0, 90) : state.portfolioReviews, briefingSchedule: normalizeBriefingSchedule(persisted.briefingSchedule), monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
-      else { set({ userStateLoaded: true }); void persistSnapshot(get()); }
+      if (persisted && typeof persisted === "object") {
+        lastPersistedState = normalizeUserState(persisted); lastLocalSnapshot = lastPersistedState;
+        set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, portfolioReviews: Array.isArray(persisted.portfolioReviews) ? persisted.portfolioReviews.slice(0, 90) : state.portfolioReviews, briefingSchedule: normalizeBriefingSchedule(persisted.briefingSchedule), monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
+      } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true }); void persistSnapshot(get()); }
     } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
   },
   replaceUserState: async (snapshot) => {

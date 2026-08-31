@@ -49,6 +49,7 @@ struct InputEnvelope<T> {
 #[serde(rename_all = "camelCase")]
 struct StateEnvelope {
     state: user_state::UserState,
+    expected_revision: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,8 +244,16 @@ fn route_request(
         }
         ("POST", "/api/user-state") => {
             let envelope: StateEnvelope = parse_body(request).map_err(client_error)?;
-            serde_json::to_value(user_state::save(app, &envelope.state).map_err(internal_error)?)
-                .map_err(internal_error)
+            let state =
+                user_state::save_if_revision(app, &envelope.state, envelope.expected_revision)
+                    .map_err(|error| {
+                        if error.starts_with("USER_STATE_CONFLICT:") {
+                            (409, error)
+                        } else {
+                            internal_error(error)
+                        }
+                    })?;
+            serde_json::to_value(state).map_err(internal_error)
         }
         ("GET", "/api/runtime/status") => {
             serde_json::to_value(host.status()).map_err(internal_error)

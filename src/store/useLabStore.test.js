@@ -4,7 +4,7 @@ const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn(), queryCache
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
 vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true, queryCachedData: runtime.queryCachedData }));
-vi.mock("../lib/userState.js", () => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
+vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
 vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), queryTradingCalendar: runtime.queryTradingCalendar }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
