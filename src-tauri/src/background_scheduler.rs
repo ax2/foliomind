@@ -27,6 +27,7 @@ use uuid::Uuid;
 const QUOTE_TOOL_ID: &str = "qveris_finance.mkt_l1_rt";
 const DISCLAIMER: &str = "本复盘仅整理已返回的真实数据，不构成投资建议或交易指令。";
 const COMPLETED_EVENT: &str = "foliomind://background-review-completed";
+const LOG_EVENT: &str = "foliomind://background-scheduler-log";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DueState {
@@ -46,6 +47,73 @@ struct Quote {
     price: f64,
     as_of: String,
     source: String,
+    cost: Option<Value>,
+}
+
+fn cost_from_value(value: &Value, depth: u8) -> Option<Value> {
+    if depth > 4 {
+        return None;
+    }
+    let Some(object) = value.as_object() else {
+        return None;
+    };
+    for key in [
+        "qveris_cost",
+        "qverisCost",
+        "charged_credits",
+        "credits_used",
+        "fee",
+    ] {
+        if let Some(number) = object.get(key).and_then(numeric_value) {
+            if number.is_finite() && number >= 0.0 {
+                let unit = object
+                    .get("currency")
+                    .or_else(|| object.get("unit"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("credits");
+                return Some(json!({"amount":number,"unit":unit}));
+            }
+        }
+    }
+    for key in ["usage", "billing", "meta", "metadata", "result", "data"] {
+        if let Some(found) = object
+            .get(key)
+            .and_then(|item| cost_from_value(item, depth + 1))
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn emit_scheduler_log(
+    app: &AppHandle,
+    operation: &str,
+    tool_id: &str,
+    capability: &str,
+    params: Value,
+    status: u16,
+    duration_ms: u128,
+    response: Option<Value>,
+    reason: Option<&str>,
+) {
+    let _ = app.emit(
+        LOG_EVENT,
+        json!({
+            "id": format!("background-log-{}", Uuid::new_v4()),
+            "at": Utc::now().to_rfc3339(),
+            "type": "cap",
+            "operation": operation,
+            "method": "POST",
+            "toolId": tool_id,
+            "capability": capability,
+            "status": status,
+            "durationMs": duration_ms,
+            "params": params,
+            "response": response,
+            "reason": reason,
+        }),
+    );
 }
 
 #[derive(Default)]
@@ -132,6 +200,7 @@ fn parse_quote(value: &Value, symbol: &str) -> Result<Quote, String> {
         return Err("行情渠道暂未返回可用结果".into());
     }
     let data = capability_data(value).ok_or("行情返回结构无法识别")?;
+    let cost = cost_from_value(value, 0);
     let row = data
         .as_array()
         .and_then(|rows| rows.first())
@@ -164,6 +233,7 @@ fn parse_quote(value: &Value, symbol: &str) -> Result<Quote, String> {
         price,
         as_of,
         source,
+        cost,
     })
 }
 
@@ -401,6 +471,7 @@ pub fn reconcile(
     };
     let settings = config::load(app)?;
     if status == DueState::CalendarNeeded {
+        let started_at = std::time::Instant::now();
         match market_calendar::fetch_trading_calendar(
             &api_key,
             &settings.capability_base_url,
@@ -408,6 +479,19 @@ pub fn reconcile(
             None,
         ) {
             Ok(calendar) => {
+                emit_scheduler_log(
+                    app,
+                    "cap-calendar",
+                    "cn_financial_pro.trade_dates.v1",
+                    "REF.EXCHANGE_CALENDAR",
+                    json!({"marketcode":"212001","startdate":trading_date,"enddate":trading_date}),
+                    200,
+                    started_at.elapsed().as_millis(),
+                    Some(
+                        json!({"isTradingDay":calendar.is_trading_day,"source":calendar.source,"toolId":calendar.tool_id}),
+                    ),
+                    None,
+                );
                 user_state::mutate(app, |state| {
                     state.briefing_schedule.calendar_date = trading_date.clone();
                     state.briefing_schedule.calendar_status = if calendar.is_trading_day {
@@ -433,6 +517,17 @@ pub fn reconcile(
                 }
             }
             Err(error) => {
+                emit_scheduler_log(
+                    app,
+                    "cap-calendar",
+                    "cn_financial_pro.trade_dates.v1",
+                    "REF.EXCHANGE_CALENDAR",
+                    json!({"marketcode":"212001","startdate":trading_date,"enddate":trading_date}),
+                    502,
+                    started_at.elapsed().as_millis(),
+                    None,
+                    Some(&error),
+                );
                 set_schedule_error(app, &created_at, "waiting-calendar", &error);
                 return Err(error);
             }
@@ -453,13 +548,41 @@ pub fn reconcile(
                 let base_url = &settings.capability_base_url;
                 let quotes = quotes.clone();
                 let target_date = trading_date.as_str();
+                let task_app = app.clone();
                 scope.spawn(move || {
-                    if let Ok(quote) = fetch_quote(client, api_key, base_url, &position.symbol) {
-                        if quote_is_fresh(&quote, target_date) {
-                            if let Ok(mut values) = quotes.lock() {
-                                values.push(quote);
+                    let started_at = std::time::Instant::now();
+                    let symbol = position.symbol.clone();
+                    match fetch_quote(client, api_key, base_url, &symbol) {
+                        Ok(quote) => {
+                            let fresh = quote_is_fresh(&quote, target_date);
+                            emit_scheduler_log(
+                                &task_app,
+                                "cap-quote",
+                                QUOTE_TOOL_ID,
+                                "MKT.L1.RT",
+                                json!({"symbol":symbol}),
+                                200,
+                                started_at.elapsed().as_millis(),
+                                Some(json!({"symbol":quote.symbol,"price":quote.price,"asOf":quote.as_of,"source":quote.source,"fresh":fresh,"cost":quote.cost})),
+                                None,
+                            );
+                            if fresh {
+                                if let Ok(mut values) = quotes.lock() {
+                                    values.push(quote);
+                                }
                             }
                         }
+                        Err(error) => emit_scheduler_log(
+                            &task_app,
+                            "cap-quote",
+                            QUOTE_TOOL_ID,
+                            "MKT.L1.RT",
+                            json!({"symbol":symbol}),
+                            502,
+                            started_at.elapsed().as_millis(),
+                            None,
+                            Some(&error),
+                        ),
                     }
                 });
             }
