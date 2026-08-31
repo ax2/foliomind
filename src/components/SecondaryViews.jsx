@@ -27,6 +27,8 @@ const errorMessage = (error) => friendlySettingsMessage(error);
 const portfolioFormDefaults = { symbol: "", name: "", market: "", quantity: "", averageCost: "", takeProfitPrice: "", stopLossPrice: "", planThesis: "", planHorizon: "" };
 const planActionLabels = { created: "建立计划", adjusted: "调整参数", executed: "确认执行", reopened: "重新跟踪", archived: "归档计划" };
 const MARKET_COLUMNS_STORAGE_KEY = "foliomind.market-columns.v1";
+const MARKET_VIEWS_STORAGE_KEY = "foliomind.market-views.v1";
+const CUSTOM_MARKET_VIEW_ID = "custom";
 const MARKET_COLUMN_DEFINITIONS = Object.freeze([
   { id: "price", label: "最新价" },
   { id: "change", label: "涨跌幅" },
@@ -38,15 +40,50 @@ const MARKET_COLUMN_DEFINITIONS = Object.freeze([
   { id: "asOf", label: "数据时间" },
 ]);
 const DEFAULT_MARKET_COLUMNS = Object.freeze(["price", "change", "pe", "pb"]);
+const DEFAULT_MARKET_VIEWS = Object.freeze([
+  { id: "valuation", name: "核心估值", columns: ["price", "change", "pe", "pb"] },
+  { id: "trading", name: "交易盘面", columns: ["price", "change", "volume", "turnoverRate", "asOf"] },
+  { id: "full", name: "完整字段", columns: MARKET_COLUMN_DEFINITIONS.map((column) => column.id) },
+]);
+
+function normalizeMarketColumns(columns) {
+  const allowed = new Set(MARKET_COLUMN_DEFINITIONS.map((column) => column.id));
+  const result = Array.isArray(columns) ? [...new Set(columns.filter((column) => allowed.has(column)))] : [];
+  return result.length ? result : [...DEFAULT_MARKET_COLUMNS];
+}
 
 function loadMarketColumns() {
   if (typeof window === "undefined") return [...DEFAULT_MARKET_COLUMNS];
   try {
     const stored = JSON.parse(window.localStorage.getItem(MARKET_COLUMNS_STORAGE_KEY) || "null");
-    const allowed = new Set(MARKET_COLUMN_DEFINITIONS.map((column) => column.id));
-    const columns = Array.isArray(stored) ? stored.filter((column) => allowed.has(column)) : [];
-    return columns.length ? [...new Set(columns)] : [...DEFAULT_MARKET_COLUMNS];
+    return normalizeMarketColumns(stored);
   } catch { return [...DEFAULT_MARKET_COLUMNS]; }
+}
+
+function loadMarketViews() {
+  if (typeof window === "undefined") return [...DEFAULT_MARKET_VIEWS];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(MARKET_VIEWS_STORAGE_KEY) || "null");
+    if (!Array.isArray(stored)) return [...DEFAULT_MARKET_VIEWS];
+    const allowed = new Set(MARKET_COLUMN_DEFINITIONS.map((column) => column.id));
+    const custom = stored.map((view) => {
+      const columns = Array.isArray(view?.columns) ? [...new Set(view.columns.filter((column) => allowed.has(column)))] : [];
+      return { id: String(view?.id || ""), name: String(view?.name || "").trim().slice(0, 32), columns };
+    }).filter((view) => view.id.startsWith("custom-") && view.name && view.columns.length);
+    const unique = new Map(custom.map((view) => [view.id, view]));
+    return [...DEFAULT_MARKET_VIEWS, ...unique.values()].slice(0, 13);
+  } catch { return [...DEFAULT_MARKET_VIEWS]; }
+}
+
+function columnsMatch(left, right) {
+  return normalizeMarketColumns(left).join("|") === normalizeMarketColumns(right).join("|");
+}
+
+function createMarketViewId() {
+  const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+  return `custom-${Date.now().toString(36)}-${suffix}`;
 }
 
 function marketColumnValue(item, quote, column) {
@@ -191,22 +228,78 @@ export function MarketView() {
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const [marketColumns, setMarketColumns] = useState(loadMarketColumns);
+  const [marketViews, setMarketViews] = useState(loadMarketViews);
+  const [activeMarketViewId, setActiveMarketViewId] = useState(() => {
+    const columns = loadMarketColumns();
+    return loadMarketViews().find((view) => columnsMatch(view.columns, columns))?.id || CUSTOM_MARKET_VIEW_ID;
+  });
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [viewSaveOpen, setViewSaveOpen] = useState(false);
+  const [viewName, setViewName] = useState("");
+  const [viewNotice, setViewNotice] = useState("");
   const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
   useEffect(() => {
     try { window.localStorage.setItem(MARKET_COLUMNS_STORAGE_KEY, JSON.stringify(marketColumns)); } catch { /* Storage may be disabled. */ }
   }, [marketColumns]);
+  useEffect(() => {
+    try {
+      const customViews = marketViews.filter((view) => view.id.startsWith("custom-")).slice(0, 10);
+      window.localStorage.setItem(MARKET_VIEWS_STORAGE_KEY, JSON.stringify(customViews));
+    } catch { /* Storage may be disabled. */ }
+  }, [marketViews]);
   const visibleColumns = MARKET_COLUMN_DEFINITIONS.filter((column) => marketColumns.includes(column.id));
-  const toggleMarketColumn = (columnId) => setMarketColumns((current) => {
-    if (current.includes(columnId)) return current.length === 1 ? current : current.filter((id) => id !== columnId);
-    return [...current, columnId];
-  });
+  const setColumnsAndView = (columns) => {
+    const next = normalizeMarketColumns(columns);
+    setMarketColumns(next);
+    setActiveMarketViewId(marketViews.find((view) => columnsMatch(view.columns, next))?.id || CUSTOM_MARKET_VIEW_ID);
+  };
+  const toggleMarketColumn = (columnId) => {
+    const next = marketColumns.includes(columnId)
+      ? marketColumns.length === 1 ? marketColumns : marketColumns.filter((id) => id !== columnId)
+      : [...marketColumns, columnId];
+    setColumnsAndView(next);
+  };
+  const selectMarketView = (viewId) => {
+    const selected = marketViews.find((view) => view.id === viewId);
+    if (!selected) return;
+    setActiveMarketViewId(selected.id);
+    setMarketColumns([...selected.columns]);
+    setViewNotice("");
+  };
+  const saveMarketView = (event) => {
+    event.preventDefault();
+    const name = viewName.trim().slice(0, 32);
+    if (!name) { setViewNotice("请输入视图名称"); return; }
+    const existing = marketViews.find((view) => view.id.startsWith("custom-") && view.name === name);
+    if (!existing && marketViews.filter((view) => view.id.startsWith("custom-")).length >= 10) {
+      setViewNotice("最多保存 10 个自定义视图，请删除不用的视图后再试");
+      return;
+    }
+    const id = existing?.id || createMarketViewId();
+    const nextView = { id, name, columns: [...marketColumns] };
+    setMarketViews((current) => existing ? current.map((view) => view.id === id ? nextView : view) : [...current, nextView]);
+    setActiveMarketViewId(id);
+    setViewName("");
+    setViewSaveOpen(false);
+    setViewNotice(`已保存“${name}”视图`);
+  };
+  const deleteMarketView = () => {
+    const selected = marketViews.find((view) => view.id === activeMarketViewId);
+    if (!selected?.id.startsWith("custom-")) return;
+    const fallback = DEFAULT_MARKET_VIEWS[0];
+    setMarketViews((current) => current.filter((view) => view.id !== selected.id));
+    setActiveMarketViewId(fallback.id);
+    setMarketColumns([...fallback.columns]);
+    setViewNotice(`已删除“${selected.name}”视图`);
+  };
   const returnedQuotes = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price));
   const anomalies = useMemo(() => detectMarketAnomalies(watchlist, liveQuotes), [watchlist, liveQuotes]);
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedQuotes.length, totalCount: watchlist.length });
   const retry = () => { void refreshLiveData(); };
   const openSettings = () => setActiveView("settings");
-  return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><div className="market-header-actions"><div className="market-column-menu"><button className="secondary-button" type="button" aria-expanded={columnsOpen} aria-haspopup="true" onClick={() => setColumnsOpen((value) => !value)}><List size={16} />列设置</button>{columnsOpen && <div className="market-column-popover" role="group" aria-label="自选行情列设置"><strong>自选行情列</strong><small>只显示已返回的真实字段；空字段保持“—”。</small>{MARKET_COLUMN_DEFINITIONS.map((column) => <label key={column.id}><input type="checkbox" checked={marketColumns.includes(column.id)} disabled={marketColumns.includes(column.id) && marketColumns.length === 1} onChange={() => toggleMarketColumn(column.id)} />{column.label}</label>)}<button type="button" className="notification-link" onClick={() => setMarketColumns([...DEFAULT_MARKET_COLUMNS])}>恢复默认列</button></div>}</div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></div></header>
+  return <div className="secondary-page"><header><div><h1>市场行情</h1><p>跨市场指数、自选与异动概览</p></div><div className="market-header-actions"><div className="market-view-controls" aria-label="行情视图"><label><span>视图</span><select aria-label="行情视图" value={activeMarketViewId} onChange={(event) => selectMarketView(event.target.value)}>{activeMarketViewId === CUSTOM_MARKET_VIEW_ID && <option value={CUSTOM_MARKET_VIEW_ID}>临时视图</option>}{marketViews.map((view) => <option value={view.id} key={view.id}>{view.name}</option>)}</select></label><button className="secondary-button" type="button" onClick={() => { setViewSaveOpen(true); setViewNotice(""); }}>保存视图</button>{activeMarketViewId.startsWith("custom-") && <button className="icon-button" type="button" aria-label="删除当前行情视图" onClick={deleteMarketView}>删除</button>}</div><div className="market-column-menu"><button className="secondary-button" type="button" aria-expanded={columnsOpen} aria-haspopup="true" onClick={() => setColumnsOpen((value) => !value)}><List size={16} />列设置</button>{columnsOpen && <div className="market-column-popover" role="group" aria-label="自选行情列设置"><strong>自选行情列</strong><small>只显示已返回的真实字段；空字段保持“—”。</small>{MARKET_COLUMN_DEFINITIONS.map((column) => <label key={column.id}><input type="checkbox" checked={marketColumns.includes(column.id)} disabled={marketColumns.includes(column.id) && marketColumns.length === 1} onChange={() => toggleMarketColumn(column.id)} />{column.label}</label>)}<button type="button" className="notification-link" onClick={() => setColumnsAndView(DEFAULT_MARKET_COLUMNS)}>恢复默认列</button></div>}</div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></div></header>
+    {viewNotice && <p className="market-view-notice" role="status">{viewNotice}</p>}
+    {viewSaveOpen && <div className="market-view-save-popover" role="dialog" aria-label="保存行情视图"><form onSubmit={saveMarketView}><label>视图名称<input autoFocus maxLength={32} value={viewName} onChange={(event) => { setViewName(event.target.value); setViewNotice(""); }} placeholder="例如 我的交易盘面" /></label><div><button type="button" className="secondary-button" onClick={() => setViewSaveOpen(false)}>取消</button><button type="submit" className="primary-action">保存</button></div></form></div>}
     {returnedQuotes.length > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedQuotes.length} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     <div className="index-board">{returnedQuotes.length > 0 ? returnedQuotes.map((item) => { const quote = liveQuotes[item.symbol]; const freshness = quoteFreshness(quote.asOf); return <article key={item.symbol}><span>{item.name} <small>{item.symbol}</small></span><strong>{formatPrice(quote.price)}</strong><small className={quote.change >= 0 ? "up" : "down"}>{formatPercent(quote.change)}</small><em className={`quote-source quote-source-${freshness.state}`}>{quote.source || "数据服务"} · {formatQuoteFreshness(quote.asOf)}</em></article>; }) : <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} />}</div>
     {returnedQuotes.length > 0 ? <section className="anomaly-radar" aria-label="异动雷达"><div className="anomaly-radar-heading"><div><h2>异动雷达</h2><p>基于当前已返回的真实行情，自动识别价格与量能异常。</p></div><span>{anomalies.length ? `${anomalies.length} 条` : "暂无异动"}</span></div>{anomalies.length ? <div className="anomaly-list">{anomalies.map((anomaly) => <article className={`anomaly-card ${anomaly.severity}`} key={anomaly.id}><div className="anomaly-card-main"><strong>{anomaly.name}</strong><small>{anomaly.symbol} · {anomaly.market || "自选"}</small></div><div className="anomaly-card-metric"><b>{anomalyLabel(anomaly)}</b><small>{anomaly.type === "volume" ? `阈值 ${anomaly.threshold.toFixed(2)} 倍` : `阈值 ±${anomaly.threshold.toFixed(1)}%`}</small></div><div className="anomaly-card-meta"><span>{anomaly.severity === "critical" ? "高关注" : "需关注"}</span><small>{anomaly.source} · {formatQuoteFreshness(anomaly.asOf)}</small></div></article>)}</div> : <div className="anomaly-empty"><strong>当前没有符合条件的异动</strong><p>只使用已返回的涨跌幅和量比；字段缺失或数据不足时保持空态。</p></div>}<p className="security-note">异动阈值：涨跌幅绝对值 ≥ 4%，量比 ≥ 2.5 倍。仅作信息提示，不构成投资建议。</p></section> : null}

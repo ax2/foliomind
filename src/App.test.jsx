@@ -103,6 +103,38 @@ describe("FolioMind core flows", () => {
     expect(JSON.parse(window.localStorage.getItem("foliomind.market-columns.v1"))).not.toContain("pe");
   });
 
+  it("saves and restores named market views without changing the data contract", () => {
+    window.localStorage.removeItem("foliomind.market-columns.v1");
+    window.localStorage.removeItem("foliomind.market-views.v1");
+    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
+    render(<MarketView />);
+    fireEvent.click(screen.getByRole("button", { name: "列设置" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "市盈率" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存视图" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "视图名称" }), { target: { value: "我的交易盘面" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(screen.getByText("已保存“我的交易盘面”视图", { selector: ".market-view-notice" })).toBeInTheDocument();
+    const selector = screen.getByRole("combobox", { name: "行情视图" });
+    expect(selector.value).toMatch(/^custom-/);
+    fireEvent.change(selector, { target: { value: "valuation" } });
+    expect(screen.getByText("市盈率", { selector: ".table-head span" })).toBeInTheDocument();
+    fireEvent.change(selector, { target: { value: selector.options[selector.options.length - 1].value } });
+    expect(screen.queryByText("市盈率", { selector: ".table-head span" })).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("foliomind.market-views.v1"))).toHaveLength(1);
+  });
+
+  it("ignores malformed named market views and keeps built-in presets available", () => {
+    window.localStorage.removeItem("foliomind.market-columns.v1");
+    window.localStorage.setItem("foliomind.market-views.v1", JSON.stringify([
+      { id: "custom-invalid", name: "坏视图", columns: ["unknown-field"] },
+      { id: "custom-valid", name: "合法视图", columns: ["price"] },
+    ]));
+    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
+    render(<MarketView />);
+    const options = screen.getByRole("combobox", { name: "行情视图" }).querySelectorAll("option");
+    expect([...options].map((option) => option.textContent)).toEqual(["核心估值", "交易盘面", "完整字段", "合法视图"]);
+  });
+
   it("retries the events request after the background quote refresh settles", async () => {
     const refreshEvents = vi.fn().mockResolvedValue(false);
     useLabStore.setState({

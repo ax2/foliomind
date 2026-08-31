@@ -27,6 +27,7 @@ check("用户状态并发控制", userState.includes("revision") && userStateTra
 check("CAP 能力工作台", developerPanel.includes("调用测试") && developerPanel.includes("参数 Schema") && developerPanel.includes("返回字段") && developerPanel.includes("刷新能力目录") && localHost.includes("BUILTIN_CAPABILITY_CATALOG") && styles.includes("min(1320px"), "开发面板必须提供大尺寸能力目录、稳定 schema 和真实调用测试");
 check("成本单位隔离", localHost.includes("qverisUnits") && localHost.includes("modelUnits") && developerPanel.includes("多单位"), "CAP 与模型网关费用必须按调用类型保留独立计费单位，未知费用不得估算");
 check("自选列视图", marketViews.includes("MARKET_COLUMN_DEFINITIONS") && marketViews.includes("MARKET_COLUMNS_STORAGE_KEY") && marketViews.includes("恢复默认列") && styles.includes("--market-table-columns"), "市场页应支持非敏感、可恢复的自选行情列视图，并保持动态表格对齐");
+check("命名行情视图", marketViews.includes("MARKET_VIEWS_STORAGE_KEY") && marketViews.includes("DEFAULT_MARKET_VIEWS") && marketViews.includes("CUSTOM_MARKET_VIEW_ID") && marketViews.includes(">= 10") && marketViews.includes("临时视图"), "命名行情视图只保存列偏好，手动修改进入临时视图并有数量上限");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
