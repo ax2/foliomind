@@ -2072,7 +2072,7 @@ textarea:focus-visible {
 .developer-capability-detail b { color: #8a96a6; font-weight: 500; }
 .developer-capability-detail code { overflow-wrap: anywhere; color: #536981; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .developer-capability-detail span { overflow-wrap: anywhere; }
-.developer-capability-action { display: flex !important; align-items: center; gap: 8px; grid-template-columns: none !important; }
+.developer-capability-action { display: flex !important; align-items: center; flex-wrap: wrap; gap: 8px; grid-template-columns: none !important; }
 .developer-capability-action .secondary-button { flex: 0 0 auto; padding: 5px 8px; font-size: 10px; }
 .developer-capability-success, .developer-capability-error { margin: 0; font-size: 10px; }
 .developer-capability-success { color: #2b8c5d; }

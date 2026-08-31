@@ -1065,3 +1065,13 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 4. 样式在桌面与 390px 窄屏内收敛，按钮具备可访问名称和键盘焦点，不产生页面级横向溢出。
 
 验收：人为触发渲染异常时不出现白屏，恢复界面不包含异常正文；重试可恢复临时错误，重载动作可用；单元测试、架构审查、构建和桌面/Web 浏览器回归通过。
+
+### 11.49 Stage 3Z CAP 到 Skill Tool 的契约导出（本轮增量）
+
+让开发者可以直接把已验证 CAP 的稳定契约交给未来 Skill，而不复制实现细节或暴露凭据。
+
+1. 能力工作台在每个 CAP 详情中提供“复制 Tool Schema”，导出 OpenAI-compatible function tool JSON，并在 `x-foliomind` 中保留 provider、tool_id 和 capability 元数据。
+2. 导出的参数从本地稳定 schema 转换为 JSON Schema；带 `?` 的参数为可选，其余参数进入 `required`，并统一设置 `additionalProperties=false`。
+3. 复制只写入系统剪贴板，不写入用户状态、调用日志或 API Key；复制成功给出短暂状态反馈，剪贴板不可用时显示可恢复提示。
+
+验收：8 项已验证 CAP 均可导出合法、可解析的 function tool schema；必填/可选参数和稳定 tool ID 保持正确；Web/桌面按钮可用且不改变真实数据调用；前端测试、构建和架构审查通过。
