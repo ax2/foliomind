@@ -118,11 +118,6 @@ pub fn show(app: &AppHandle) -> DesktopLifecycleStatus {
     app.state::<DesktopLifecycle>().status()
 }
 
-pub fn reconcile(app: &AppHandle) -> DesktopLifecycleStatus {
-    request_reconcile(app);
-    app.state::<DesktopLifecycle>().status()
-}
-
 pub fn quit(app: &AppHandle) {
     app.state::<DesktopLifecycle>().request_exit();
     app.exit(0);
