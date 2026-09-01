@@ -9,10 +9,19 @@ const host = vi.hoisted(() => ({
   updateDeveloperVariables: vi.fn().mockResolvedValue({ variables: { toolCacheEnabled: false, requestTimeoutMs: 120000, maxConcurrentDataRequests: 1, logLevel: "info" } }),
 }));
 vi.mock("../lib/localHost.js", () => ({ ...host, isLocalWebRuntime: () => true }));
-import { capabilityToolSchema, DeveloperPanel } from "./DeveloperPanel.jsx";
+import { capabilityToolSchema, DeveloperPanel, desktopCostSummary, normalizeCost } from "./DeveloperPanel.jsx";
 
 describe("DeveloperPanel", () => {
   afterEach(() => cleanup());
+  it("normalizes numeric native costs and keeps units separate", () => {
+    expect(normalizeCost(0.25, "credits")).toEqual({ amount: 0.25, unit: "credits" });
+    expect(normalizeCost({ amount: 0.012, unit: "USD" })).toEqual({ amount: 0.012, unit: "USD" });
+    expect(desktopCostSummary([
+      { kind: "qveris", cost: 0.25, costUnit: "credits" },
+      { type: "model", cost: { amount: 0.012, unit: "USD" } },
+      { kind: "qveris" },
+    ])).toMatchObject({ qverisCalls: 2, qverisCost: 0.25, qverisCostKnown: 1, qverisUnits: ["credits"], modelCalls: 1, modelCost: 0.012, modelCostKnown: 1, modelUnits: ["USD"] });
+  });
   it("exports a stable function-tool schema with required parameters", () => {
     expect(capabilityToolSchema({ kind: "series", toolId: "qveris_finance.mkt_bars_eod", capability: "MKT.BARS.EOD", description: "历史日线", parameters: { symbol: "string", start_date: "string", end_date: "string?" } })).toMatchObject({
       type: "function",

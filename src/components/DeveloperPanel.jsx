@@ -8,9 +8,18 @@ import { queryTradingCalendar } from "../lib/integrations.js";
 function formatTime(value) {
   try { return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return "--:--:--"; }
 }
+export function normalizeCost(value, unitHint = "credits") {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const amount = Number(value.amount ?? value.value ?? value.cost ?? value.credits ?? value.chargedCredits);
+    if (!Number.isFinite(amount) || amount < 0) return null;
+    return { amount, unit: String((value.unit ?? value.currency ?? value.costUnit ?? value.cost_unit ?? unitHint) || "credits") };
+  }
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? { amount, unit: String(unitHint || "credits") } : null;
+}
 function formatCost(cost) {
-  const amount = Number(cost?.amount);
-  return Number.isFinite(amount) ? `${amount.toFixed(amount >= 1 ? 2 : 4)} ${cost?.unit || "credits"}` : "未返回";
+  const normalized = normalizeCost(cost);
+  return normalized ? `${normalized.amount.toFixed(normalized.amount >= 1 ? 2 : 4)} ${normalized.unit}` : "未返回";
 }
 function debugText(value) {
   if (!value) return "未返回";
@@ -46,13 +55,13 @@ export function capabilityToolSchema(capability) {
   };
 }
 
-function desktopCostSummary(logs) {
+export function desktopCostSummary(logs) {
   const entries = Array.isArray(logs) ? logs : [];
   const summarize = (kind) => {
     const selected = entries.filter((entry) => entry.kind === kind || entry.type === kind);
-    const known = selected.filter((entry) => Number.isFinite(Number(entry.cost?.amount)));
-    const units = [...new Set(known.map((entry) => entry.cost?.unit || "credits"))];
-    return { calls: selected.length, cost: known.reduce((total, entry) => total + Number(entry.cost.amount), 0), costKnown: known.length, units };
+    const costs = selected.map((entry) => normalizeCost(entry.cost ?? entry.response?.cost, entry.costUnit ?? entry.cost_unit)).filter(Boolean);
+    const units = [...new Set(costs.map((cost) => cost.unit))];
+    return { calls: selected.length, cost: costs.reduce((total, cost) => total + cost.amount, 0), costKnown: costs.length, units };
   };
   const cap = summarize("qveris");
   const model = summarize("model");

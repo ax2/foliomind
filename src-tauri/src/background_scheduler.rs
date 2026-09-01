@@ -273,6 +273,13 @@ fn fetch_quote(
 }
 
 fn quote_is_fresh(quote: &Quote, trading_date: &str) -> bool {
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(&quote.as_of) {
+        return parsed
+            .with_timezone(&Shanghai)
+            .format("%Y-%m-%d")
+            .to_string()
+            == trading_date;
+    }
     quote.as_of.get(0..10) == Some(trading_date)
 }
 
@@ -820,6 +827,14 @@ mod tests {
             123.0
         );
         assert!(!quote_is_fresh(&quote, "2026-09-01"));
+        let utc_boundary = Quote {
+            symbol: "600519".into(),
+            price: 123.0,
+            as_of: "2026-08-31T16:30:00Z".into(),
+            source: "provider-a".into(),
+            cost: None,
+        };
+        assert!(quote_is_fresh(&utc_boundary, "2026-09-01"));
         assert_eq!(
             at("2026-08-31T07:35:00Z"),
             Shanghai
