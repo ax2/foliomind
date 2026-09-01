@@ -188,6 +188,19 @@ describe("FolioMind core flows", () => {
     expect(table).not.toHaveTextContent("下跌标的");
   });
 
+  it("keeps a flat real quote visually neutral in the watchlist", () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "FLAT", name: "平盘标的", market: "沪深" }],
+      selectedSymbol: "FLAT",
+      liveQuotes: { FLAT: { price: 10, change: 0 } },
+    });
+    const { container } = render(<WatchlistSidebar />);
+    const quote = container.querySelector(".watch-row .quote");
+    expect(quote).not.toHaveClass("up");
+    expect(quote).not.toHaveClass("down");
+  });
+
   it("saves and restores named market views without changing the data contract", () => {
     window.localStorage.removeItem("foliomind.market-columns.v1");
     window.localStorage.removeItem("foliomind.market-views.v1");
