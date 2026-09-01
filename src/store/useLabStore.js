@@ -28,11 +28,34 @@ let persistenceQueue = Promise.resolve();
 let lastPersistedState = null;
 let lastLocalSnapshot = null;
 let liveRequestGeneration = 0;
+let liveRequestController = null;
 const selectedQuoteGenerations = new Map();
+const selectedQuoteControllers = new Map();
 let detailsRequestGeneration = 0;
+let detailsRequestController = null;
 let seriesRequestGeneration = 0;
+let seriesRequestController = null;
 let eventsRequestGeneration = 0;
+let eventsRequestController = null;
 const anomalyAttributionGenerations = new Map();
+
+function abortController(controller) {
+  if (!controller || controller.signal.aborted) return;
+  controller.abort("superseded");
+}
+
+function abortPendingDataRequests() {
+  abortController(liveRequestController);
+  liveRequestController = null;
+  for (const controller of selectedQuoteControllers.values()) abortController(controller);
+  selectedQuoteControllers.clear();
+  abortController(detailsRequestController);
+  detailsRequestController = null;
+  abortController(seriesRequestController);
+  seriesRequestController = null;
+  abortController(eventsRequestController);
+  eventsRequestController = null;
+}
 
 function persistenceState(snapshot) {
   return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule });
@@ -433,7 +456,9 @@ async function mapWithConcurrency(items, limit, worker) {
 async function askFinancialData(prompt, kind, symbol, range, options) {
   if (isLocalWebRuntime() || isDesktopRuntime()) {
     try {
-      const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol), range }, { timeoutMs: options?.settleTimeoutMs || 90_000 });
+      const requestOptions = { timeoutMs: options?.settleTimeoutMs || 90_000 };
+      if (options?.signal) requestOptions.signal = options.signal;
+      const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol), range }, requestOptions);
       return { text: JSON.stringify(cached.data ?? cached), mode: cached.mode || "pi-local-host", audits: cached.audits || [{ operation: "cached-call", outcome: "success" }], cacheHit: cached.cacheHit === true };
     } catch (error) {
       if (error?.code !== "TOOL_CACHE_MISS") {
@@ -452,12 +477,16 @@ function liveQuotePrompt(item) {
 
 async function fetchLiveQuote(item, options = {}) {
   const prompt = liveQuotePrompt(item);
-  const reply = await askFinancialData(prompt, "quote", item.symbol, "", { settleTimeoutMs: options.settleTimeoutMs || 60_000 });
+  const requestOptions = { settleTimeoutMs: options.settleTimeoutMs || 60_000 };
+  if (options.signal) requestOptions.signal = options.signal;
+  const reply = await askFinancialData(prompt, "quote", item.symbol, "", requestOptions);
   let quotes = liveQuotesFromReply(reply.text, [item.symbol]);
   // A stale cached selection may return an empty envelope. Rediscover once so
   // the fast path remains self-healing without making every request slow.
   if (!Object.keys(quotes).length && reply.cacheHit) {
-    const rediscovered = await askPi(prompt, { settleTimeoutMs: options.settleTimeoutMs || 60_000 });
+    const rediscoverOptions = { settleTimeoutMs: options.settleTimeoutMs || 60_000 };
+    if (options.signal) rediscoverOptions.signal = options.signal;
+    const rediscovered = await askPi(prompt, rediscoverOptions);
     quotes = liveQuotesFromReply(rediscovered.text, [item.symbol]);
   }
   if (!Object.keys(quotes).length) throw new Error("未返回可识别的真实行情");
@@ -527,6 +556,7 @@ export const useLabStore = create((set, get) => ({
   setIntegrationStatus: (integrationStatus) => set((state) => {
     const changed = dataChannelChanged(state.integrationStatus, integrationStatus);
     if (changed) {
+      abortPendingDataRequests();
       liveRequestGeneration += 1;
       selectedQuoteGenerations.clear();
       detailsRequestGeneration += 1;
@@ -541,6 +571,8 @@ export const useLabStore = create((set, get) => ({
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !state.watchlist.length || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling") return false;
     const requestGeneration = ++liveRequestGeneration;
+    const requestController = new AbortController();
+    liveRequestController = requestController;
     set({ liveDataLoading: true, liveDataError: "" });
     const errors = [];
     let received = 0;
@@ -549,7 +581,7 @@ export const useLabStore = create((set, get) => ({
       await mapWithConcurrency(state.watchlist, concurrency, async (item) => {
         try {
           if (requestGeneration !== liveRequestGeneration) return false;
-          const { quotes } = await fetchLiveQuote(item);
+          const { quotes } = await fetchLiveQuote(item, { signal: requestController.signal });
           if (requestGeneration !== liveRequestGeneration) return false;
           received += 1;
           let delivered = [];
@@ -579,6 +611,8 @@ export const useLabStore = create((set, get) => ({
     } catch (error) {
       set({ liveDataLoading: false, liveDataError: friendlyDataMessage(error) });
       return false;
+    } finally {
+      if (liveRequestController === requestController) liveRequestController = null;
     }
   },
   refreshSelectedQuote: async (symbol) => {
@@ -588,9 +622,11 @@ export const useLabStore = create((set, get) => ({
     if (!configured || !item || state.selectedQuoteLoading?.[symbol] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const requestGeneration = (selectedQuoteGenerations.get(symbol) || 0) + 1;
     selectedQuoteGenerations.set(symbol, requestGeneration);
+    const requestController = new AbortController();
+    selectedQuoteControllers.set(symbol, requestController);
     set((current) => ({ selectedQuoteLoading: { ...current.selectedQuoteLoading, [symbol]: true }, liveDataError: current.liveDataLoading ? current.liveDataError : "" }));
     try {
-      const { quotes } = await fetchLiveQuote(item);
+      const { quotes } = await fetchLiveQuote(item, { signal: requestController.signal });
       if (requestGeneration !== selectedQuoteGenerations.get(symbol)) return false;
       let delivered = [];
       let portfolioChanged = false;
@@ -607,6 +643,8 @@ export const useLabStore = create((set, get) => ({
       if (requestGeneration !== selectedQuoteGenerations.get(symbol)) return false;
       set((current) => ({ selectedQuoteLoading: { ...current.selectedQuoteLoading, [symbol]: false }, liveDataError: current.liveDataLoading ? current.liveDataError : friendlyDataMessage(error) }));
       return false;
+    } finally {
+      if (selectedQuoteControllers.get(symbol) === requestController) selectedQuoteControllers.delete(symbol);
     }
   },
   retryLiveData: async () => {
@@ -656,13 +694,15 @@ export const useLabStore = create((set, get) => ({
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !item || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling" || state.quoteDetailsLoading[symbol] || state.quoteDetailsLoaded[symbol]) return false;
     const requestGeneration = ++detailsRequestGeneration;
+    const requestController = new AbortController();
+    detailsRequestController = requestController;
     set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
     try {
       const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`;
-      const reply = await askFinancialData(prompt, "details", item.symbol, "", { settleTimeoutMs: 90_000 });
+      const reply = await askFinancialData(prompt, "details", item.symbol, "", { settleTimeoutMs: 90_000, signal: requestController.signal });
       if (requestGeneration !== detailsRequestGeneration) return false;
       let details = detailedQuoteFromReply(reply.text);
-      if (!details && reply.cacheHit) details = detailedQuoteFromReply((await askPi(prompt, { settleTimeoutMs: 90_000 })).text);
+      if (!details && reply.cacheHit) details = detailedQuoteFromReply((await askPi(prompt, { settleTimeoutMs: 90_000, signal: requestController.signal })).text);
       if (!details) throw new Error("数据服务暂未返回可识别的行情详情");
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], ...details.quote, reportPeriod: details.reportPeriod } }, quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
       return true;
@@ -670,6 +710,8 @@ export const useLabStore = create((set, get) => ({
       if (requestGeneration !== detailsRequestGeneration) return false;
       set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: friendlyDataMessage(error) } }));
       return false;
+    } finally {
+      if (detailsRequestController === requestController) detailsRequestController = null;
     }
   },
   retryQuoteDetails: async (symbol) => {
@@ -683,11 +725,13 @@ export const useLabStore = create((set, get) => ({
     const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
     if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
     const requestGeneration = ++seriesRequestGeneration;
+    const requestController = new AbortController();
+    seriesRequestController = requestController;
     set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
     const rangeRequest = { 分时: "今天的1分钟或5分钟分时", "5日": "最近5个交易日日线", 日K: "最近90个交易日日线", 周K: "最近52周周线", 月K: "最近60个月月线", 季K: "最近20个季度线", 年K: "最近10年年线" }[range] || range;
     try {
       const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`;
-      const reply = await askFinancialData(prompt, "series", item.symbol, rangeRequest, { settleTimeoutMs: 60_000 });
+      const reply = await askFinancialData(prompt, "series", item.symbol, rangeRequest, { settleTimeoutMs: 60_000, signal: requestController.signal });
       if (requestGeneration !== seriesRequestGeneration) return false;
       const series = seriesFromReply(reply.text);
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
@@ -696,6 +740,8 @@ export const useLabStore = create((set, get) => ({
       if (requestGeneration !== seriesRequestGeneration) return false;
       set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: friendlyDataMessage(error) } } }));
       return false;
+    } finally {
+      if (seriesRequestController === requestController) seriesRequestController = null;
     }
   },
   retryQuoteSeries: async (symbol, range) => {
@@ -707,6 +753,8 @@ export const useLabStore = create((set, get) => ({
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !state.watchlist.length || state.eventDataLoading || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const requestGeneration = ++eventsRequestGeneration;
+    const requestController = new AbortController();
+    eventsRequestController = requestController;
     const total = state.watchlist.length;
     set({ eventDataLoading: true, eventDataError: "", eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: total });
     const errors = [];
@@ -717,7 +765,7 @@ export const useLabStore = create((set, get) => ({
         try {
           if (requestGeneration !== eventsRequestGeneration) return false;
           const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）未来 90 天内已排期的公司事件，包括分红、拆股、股东会和财报相关日期。只返回真实数据，不要公告全文，不要编造。严格只返回一个 JSON 对象，不要 Markdown：{"events":[{"date":"YYYY-MM-DD或ISO时间","type":"事件类型","title":"事件标题","detail":"事件说明","source":"数据来源","url":"可选链接"}]}。没有真实事件返回空数组。`;
-          const reply = await askFinancialData(prompt, "core_event", item.symbol, "", { settleTimeoutMs: 60_000 });
+          const reply = await askFinancialData(prompt, "core_event", item.symbol, "", { settleTimeoutMs: 60_000, signal: requestController.signal });
           if (requestGeneration !== eventsRequestGeneration) return false;
           const itemEvents = eventsFromReply(reply.text).map((event, index) => ({ ...event, id: `${item.symbol}-${event.date || "undated"}-${index}`, symbol: item.symbol, name: item.name, market: item.market, capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" }));
           rows.push(...itemEvents);
@@ -745,6 +793,8 @@ export const useLabStore = create((set, get) => ({
       if (requestGeneration !== eventsRequestGeneration) return false;
       set({ events: [], eventDataLoading: false, eventDataLoaded: true, eventDataReceivedCount: received, eventDataTotalCount: total, eventDataError: friendlyDataMessage(error), eventDataLastRefreshAt: nowIso() });
       return false;
+    } finally {
+      if (eventsRequestController === requestController) eventsRequestController = null;
     }
   },
   retryEvents: async () => {

@@ -157,7 +157,7 @@ describe("lab store streaming lifecycle", () => {
     });
 
     await expect(useLabStore.getState().refreshSelectedQuote("600519")).resolves.toBe(true);
-    expect(runtime.queryCachedData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519.SH", range: "" }, { timeoutMs: 60_000 });
+    expect(runtime.queryCachedData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519.SH", range: "" }, expect.objectContaining({ timeoutMs: 60_000, signal: expect.any(AbortSignal) }));
     expect(useLabStore.getState().liveQuotes).toMatchObject({ "600519": { price: 1297.4 }, AAPL: { price: 200 } });
     expect(useLabStore.getState().liveDataLoading).toBe(false);
   });

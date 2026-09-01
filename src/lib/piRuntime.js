@@ -75,11 +75,13 @@ function updateStreamingText(blocks, frame) {
   return [...blocks.entries()].sort(([left], [right]) => left - right).map(([, text]) => text).join("");
 }
 
-export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS, onProgress } = {}) {
+export async function askPi(message, { settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS, onProgress, signal } = {}) {
   const prompt = normalizedPrompt(message);
   if (!isDesktopRuntime()) {
     if (!isLocalWebRuntime()) return { text: DEMO_REPLY, mode: "browser-demo" };
-    const result = await localHostRequest("/api/runtime/prompt", { method: "POST", timeoutMs: settleTimeoutMs + 5_000, body: JSON.stringify({ message: prompt, timeoutMs: settleTimeoutMs }) });
+    const options = { method: "POST", timeoutMs: settleTimeoutMs + 5_000, body: JSON.stringify({ message: prompt, timeoutMs: settleTimeoutMs }) };
+    if (signal) options.signal = signal;
+    const result = await localHostRequest("/api/runtime/prompt", options);
     if (result.text) onProgress?.({ text: result.text });
     return { text: result.text || "本地 Pi 已完成本轮分析。", mode: "pi-local-host", audits: result.audits || [] };
   }

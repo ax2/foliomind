@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearLocalHostSession, localHostRequest } from "./localHost.js";
+import { clearLocalHostSession, localHostRequest, LOCAL_HOST_ABORTED } from "./localHost.js";
 
 const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
@@ -38,5 +38,18 @@ describe("local Web Host client", () => {
   it("surfaces a clear error when the local Host is offline", async () => {
     fetch.mockRejectedValue(new TypeError("connection refused"));
     await expect(localHostRequest("/api/integration/status")).rejects.toMatchObject({ code: "LOCAL_HOST_UNAVAILABLE" });
+  });
+
+  it("propagates caller cancellation without misreporting a timeout", async () => {
+    window.sessionStorage.setItem("foliomind.local-host-token", "fh_test");
+    const controller = new AbortController();
+    fetch.mockImplementation((_url, options) => new Promise((_resolve, reject) => {
+      const abort = () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); };
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener("abort", abort, { once: true });
+    }));
+    const request = localHostRequest("/api/data/query", { signal: controller.signal });
+    controller.abort("superseded");
+    await expect(request).rejects.toMatchObject({ code: LOCAL_HOST_ABORTED, message: "本次本地数据请求已取消" });
   });
 });

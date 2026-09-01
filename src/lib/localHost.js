@@ -18,6 +18,8 @@ function localHostError(message, cause) {
   return error;
 }
 
+export const LOCAL_HOST_ABORTED = "LOCAL_HOST_ABORTED";
+
 function readSessionToken() {
   if (sessionToken) return sessionToken;
   try { sessionToken = window.sessionStorage.getItem("foliomind.local-host-token"); } catch { /* Storage may be disabled. */ }
@@ -32,6 +34,9 @@ function writeSessionToken(value) {
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 8_000);
+  const onAbort = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) onAbort();
+  else options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     const response = await fetch(url, { ...options, signal: controller.signal, headers: { Accept: "application/json", ...(options.headers || {}) } });
     const body = await response.json().catch(() => ({}));
@@ -44,12 +49,18 @@ async function fetchJson(url, options = {}) {
     }
     return body;
   } catch (error) {
+    if (error?.name === "AbortError" && options.signal?.aborted) {
+      const aborted = localHostError("本次本地数据请求已取消", error);
+      aborted.code = LOCAL_HOST_ABORTED;
+      throw aborted;
+    }
     if (error?.name === "AbortError") throw localHostError("本地调试 Host 响应超时，请确认 npm run web:dev 正在运行", error);
     if (error?.code === LOCAL_HOST_UNAVAILABLE) throw error;
     if (error instanceof TypeError) throw localHostError("无法连接本地调试 Host，请先运行 npm run web:dev", error);
     throw error;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -74,7 +85,7 @@ export async function localHostRequest(path, { retry = true, ...options } = {}) 
   try {
     return await fetchJson(`${LOCAL_HOST_BASE_URL}${path}`, { ...options, headers });
   } catch (error) {
-    if (retry && error?.status === 401) {
+    if (retry && error?.status === 401 && !options.signal?.aborted) {
       sessionToken = null;
       try { window.sessionStorage.removeItem("foliomind.local-host-token"); } catch { /* Ignore storage failures. */ }
       return localHostRequest(path, { ...options, retry: false });
