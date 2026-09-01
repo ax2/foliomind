@@ -2102,6 +2102,9 @@ textarea:focus-visible {
 .developer-capability-detail b { color: #8a96a6; font-weight: 500; }
 .developer-capability-detail code { overflow-wrap: anywhere; color: #536981; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .developer-capability-detail span { overflow-wrap: anywhere; }
+.developer-capability-parameters { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: start; gap: 7px; }
+.developer-capability-parameters textarea { min-height: 88px; max-height: 190px; width: 100%; resize: vertical; border: 1px solid #cfd9e7; border-radius: 5px; padding: 7px; background: #fbfcfe; color: #2b3b50; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.developer-capability-parameters textarea:focus { border-color: #5d8fc8; outline: 2px solid rgb(93 143 200 / 18%); }
 .developer-capability-action { display: flex !important; align-items: center; flex-wrap: wrap; gap: 8px; grid-template-columns: none !important; }
 .developer-capability-action .secondary-button { flex: 0 0 auto; padding: 5px 8px; font-size: 10px; }
 .developer-capability-success, .developer-capability-empty, .developer-capability-error { margin: 0; font-size: 10px; }
@@ -2131,4 +2134,4 @@ textarea:focus-visible {
 .anomaly-attribution-asof { color: #8393a6; font-size: 10px; }
 .anomaly-attribution-error { margin-top: 7px; color: #ad5048; font-size: 11px; }
 .anomaly-attribution-loading { margin: 7px 0 0; color: #73869c; font-size: 11px; line-height: 1.5; }
-@media (max-width: 600px) { .developer-panel { right: 10px; bottom: 9px; width: calc(100vw - 20px); } .developer-grid { grid-template-columns: 1fr; } .developer-panel-content { max-height: 82vh; padding: 14px; } .developer-capability-toolbar { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 600px) { .developer-panel { right: 10px; bottom: 9px; width: calc(100vw - 20px); } .developer-grid { grid-template-columns: 1fr; } .developer-panel-content { max-height: 82vh; padding: 14px; } .developer-capability-toolbar { align-items: flex-start; flex-direction: column; } .developer-capability-parameters { grid-template-columns: 1fr; gap: 4px; } }

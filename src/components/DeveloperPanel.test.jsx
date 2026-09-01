@@ -76,6 +76,23 @@ describe("DeveloperPanel", () => {
     await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "600519", period: 14 } }));
   });
 
+  it("allows discovered CAP parameters to be edited and rejects invalid JSON locally", async () => {
+    host.testCapability.mockClear();
+    render(<DeveloperPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
+    fireEvent.click(screen.getByRole("button", { name: "加载完整目录" }));
+    expect(await screen.findByText("RSI")).toBeInTheDocument();
+    const parameters = screen.getByRole("textbox", { name: "RSI 测试参数" });
+    fireEvent.change(parameters, { target: { value: '{"symbol":"AAPL","period":7}' } });
+    fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
+    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "AAPL", period: 7 } }));
+
+    fireEvent.change(parameters, { target: { value: "{" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
+    expect(await screen.findByText("测试参数需为有效 JSON 对象")).toBeInTheDocument();
+    expect(host.testCapability).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a truthful empty state when a quote test returns no usable price", async () => {
     host.testCapability.mockResolvedValueOnce({ toolId: "qveris_finance.mkt_l1_rt", capability: "MKT.L1.RT", data: { quotes: [] } });
     render(<DeveloperPanel />);
