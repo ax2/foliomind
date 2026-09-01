@@ -49,6 +49,7 @@ check("涨跌方向缺失值中性化", stockWorkspace.includes("changeToneClass
 check("研究筛选排序", marketViews.includes("sortResearchItems(filtered, liveQuotes, sortKey, sortDirection)") && research.includes("missing values always stay last") && research.includes("RESEARCH_SORT_OPTIONS") && prd.includes("Stage 3AN 研究筛选排序"), "研究页应提供稳定的真实数值排序，并将缺失字段置于末尾");
 check("组合分布真实权重", marketViews.includes("portfolioAllocationRows(positions, liveQuotes)") && portfolio.includes("portfolioAllocationRows") && portfolio.includes("row.hasQuote") && prd.includes("Stage 3AO 组合分布真实权重") && styles.includes("allocation-track"), "组合分布只能使用真实市值权重，并明确排除未计价持仓");
 check("组合价格正值门禁", portfolio.includes("finitePositiveValue(quote?.price)") && portfolio.includes("number > 0") && prd.includes("Stage 3AQ 组合价格正值门禁"), "组合市值、盈亏和提醒不得消费零值或负数现价");
+check("市场表格详情快捷打开", marketViews.includes("market-table-row") && marketViews.includes("openMarketSymbol") && marketViews.includes("selectSymbol(symbol)") && prd.includes("Stage 3AR 市场表格详情快捷打开") && styles.includes("market-table-row:focus-visible"), "市场自选表格标的必须支持鼠标和键盘打开详情，并复用现有选择状态");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

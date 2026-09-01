@@ -165,6 +165,23 @@ describe("FolioMind core flows", () => {
     expect(row).toHaveTextContent("8.2");
   });
 
+  it("opens a market table symbol with mouse and keyboard", () => {
+    useLabStore.setState({ activeView: "market", selectedSymbol: "", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4 } } });
+    const { container } = render(<MarketView />);
+    const row = container.querySelector(".market-table-row");
+    expect(row).toHaveAttribute("role", "button");
+    fireEvent.keyDown(row, { key: "ArrowDown" });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "market", selectedSymbol: "" });
+    fireEvent.click(row);
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+    useLabStore.setState({ activeView: "market", selectedSymbol: "" });
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+    useLabStore.setState({ activeView: "market", selectedSymbol: "" });
+    fireEvent.keyDown(row, { key: " " });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+  });
+
   it("does not classify missing changes as advancing in the research filter", () => {
     useLabStore.setState({
       activeView: "research",
