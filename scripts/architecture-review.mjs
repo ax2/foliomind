@@ -38,6 +38,8 @@ check("渲染故障恢复", app.includes("AppErrorBoundary") && errorBoundary.in
 check("事件双重提醒", eventReminders.includes("EVENT_REMINDER_WINDOW_DAYS") && eventReminders.includes("collectEventReminders") && eventReminders.includes("eventReminderPhase") && marketViews.includes("事件提醒") && prd.includes("Stage 3AB 事件日历双重提醒"), "真实事件需按北京时间提供提前窗口/当天提醒，并以 eventKey + reminderPhase 幂等去重");
 check("数据与模型访问解耦", dataStatus.includes("hasRealDataAccess") && dataStatus.includes("hasModelAccess") && app.includes("credentialConfigured) return undefined") && prd.includes("Stage 3AD 数据访问与模型访问解耦"), "CAP 数据页面只需 API Key；对话和 AI 解读仍要求已选模型");
 check("桌面固定 CAP 通道", nativeMain.includes("qveris_data_query") && capabilityData.includes("pub fn query") && capabilityData.includes("tools/execute?tool_id=") && capabilityData.includes("connect_timeout") && prd.includes("Stage 3AE 桌面固定 CAP 数据通道"), "桌面 CAP 查询必须走白名单、短超时和统一审计契约");
+check("设置连接诊断", marketViews.includes("测试数据连接") && marketViews.includes("queryCapabilityData") && marketViews.includes("connectionTestState") && prd.includes("Stage 3AH 设置页真实数据连接诊断") && readme.includes("测试已保存的数据连接"), "设置页必须提供不依赖模型的真实 CAP 探针，并展示可恢复的来源、时间和耗时");
+check("跨链路忙碌状态", copilotPanel.includes("liveDataLoading") && copilotPanel.includes("正在更新行情，完成后可发起分析") && copilotPanel.includes("等待行情更新") && prd.includes("Stage 3AI 跨链路忙碌状态可见性"), "共享资源互斥时对话不能静默拒绝，必须给出可访问的等待状态并保留草稿");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

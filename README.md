@@ -35,6 +35,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - Run-scoped 数据执行桥，只向 Pi 暴露 Search、Inspect、Call 三阶段能力。
 - 内置金融研究 Skill；行情页面默认直连 QVeris CAP 的 `qveris_finance` 能力（`MKT.L1.RT`、`REF.COMPANY_PROFILE`、`FUNDAMENTALS.DERIVED_RATIOS`、`MKT.BARS.EOD`），本地保存稳定的 tool schema，缓存失效时才回退 Search → Inspect → Call。QVeris 适配器可替换为兼容的自托管服务。
 - 设置页可将数据服务 API Key 保存到系统凭据库、同步动态模型目录并选择 Pi 默认模型。
+- 设置页可在保存 API Key 后直接测试已保存的数据连接；探针只调用真实 quote CAP，不要求模型，并显示来源、数据时间和耗时。
 - 设置页可检查 GitHub 最新公开版本并直达发布页；安装包仍提供 SHA-256 校验，自动更新待平台签名密钥接入后启用。
 - 设置页支持导出/导入本地 JSON 备份，迁移自选、盯盘、消息与持仓；API Key、模型配置、缓存和运行日志不会进入备份。
 - 内置兼容 OpenAI API 的模型网关配置；Pi 只访问带短期令牌的本机回环代理，不接触长期 API Key。
@@ -136,10 +137,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.79`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.80`）。它会先完成格式、严格 Clippy、测试以及 Windows NSIS/MSI 和 macOS Apple Silicon DMG 构建；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.79 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.80 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

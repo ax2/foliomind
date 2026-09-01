@@ -1790,6 +1790,10 @@ textarea:focus-visible {
 .settings-card input:disabled, .settings-card select:disabled { background: #f7f8fa; color: #8b929c; cursor: not-allowed; }
 .settings-inline, .settings-actions { display: flex; align-items: center; gap: 9px; }
 .settings-inline input { flex: 1; }
+.connection-test-row { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.connection-test-status { min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.connection-test-status.success { color: #16734b; }
+.connection-test-status.error { color: #a33b32; }
 .settings-card button { border: 0; border-radius: 7px; padding: 9px 13px; background: var(--blue); color: #fff; cursor: pointer; font-size: 11px; white-space: nowrap; }
 .settings-card button:disabled { opacity: .48; cursor: not-allowed; }
 .settings-card .secondary-button { border: 1px solid #d9dde4; background: #fff; color: #59616d; }
@@ -2011,6 +2015,10 @@ textarea:focus-visible {
   .settings-inline input {
     flex: none;
     width: 100%;
+  }
+  .connection-test-row {
+    align-items: stretch;
+    flex-direction: column;
   }
   .copilot-heading {
     padding-inline: 16px;

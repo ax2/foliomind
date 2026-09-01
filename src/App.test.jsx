@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
+import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { EventsView, MarketView, NotificationsView } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
@@ -9,6 +10,7 @@ const originalCancelMessage = useLabStore.getState().cancelMessage;
 const integrationMocks = vi.hoisted(() => ({
   applyIntegrationSettings: vi.fn(),
   loadIntegrationStatus: vi.fn(),
+  queryCapabilityData: vi.fn(),
 }));
 
 vi.mock("lightweight-charts", () => ({
@@ -26,12 +28,14 @@ vi.mock("./lib/integrations.js", async (importOriginal) => ({
   ...await importOriginal(),
   applyIntegrationSettings: integrationMocks.applyIntegrationSettings,
   loadIntegrationStatus: integrationMocks.loadIntegrationStatus,
+  queryCapabilityData: integrationMocks.queryCapabilityData,
 }));
 
 afterEach(cleanup);
 
 beforeEach(() => {
   integrationMocks.applyIntegrationSettings.mockReset();
+  integrationMocks.queryCapabilityData.mockReset();
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
     settings: {
@@ -91,6 +95,15 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "最新行情" }));
     expect(screen.getByRole("textbox", { name: "分析问题" })).toHaveValue("查询当前标的的最新真实行情、数据截至时间和来源。");
     expect(screen.queryByRole("menu", { name: "快捷指令" })).not.toBeInTheDocument();
+  });
+
+  it("explains why chat waits while the real quote batch is refreshing", () => {
+    useLabStore.setState({ liveDataLoading: true });
+    render(<CopilotPanel standalone />);
+    const composer = screen.getByRole("textbox", { name: "分析问题" });
+    expect(composer).toBeDisabled();
+    expect(composer).toHaveAttribute("placeholder", "正在更新行情，完成后可发起分析…");
+    expect(screen.getByRole("button", { name: "等待行情更新" })).toBeDisabled();
   });
 
   it("organizes the watchlist by group and keeps empty real quotes honest", () => {
@@ -351,6 +364,58 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("未配置")).toBeInTheDocument();
   });
 
+  it("tests the saved data connection through a real CAP without requiring a model", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      keyPrefix: "cap_demo…",
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        dataChannel: "qveris-cap",
+        dataProvider: "qveris_finance",
+        modelId: "",
+        models: [],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    integrationMocks.queryCapabilityData.mockResolvedValue({
+      data: { quotes: [{ symbol: "600519", price: 1297.4, source: "真实 CAP", timestamp: "2026-08-31T08:00:00Z" }] },
+      source: "qveris_finance",
+      mode: "qveris-cap",
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const testButton = await screen.findByRole("button", { name: "测试数据连接" });
+    expect(testButton).toBeEnabled();
+    fireEvent.click(testButton);
+    expect(await screen.findByText(/连接成功 · 600519 已返回真实行情/)).toBeInTheDocument();
+    expect(integrationMocks.queryCapabilityData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519" });
+  });
+
+  it("does not treat an empty CAP response as a successful connection", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "",
+        models: [],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    integrationMocks.queryCapabilityData.mockResolvedValue({ data: { quotes: [] }, mode: "qveris-cap" });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const testButton = await screen.findByRole("button", { name: "测试数据连接" });
+    fireEvent.click(testButton);
+    expect(await screen.findByText("暂时没有可用数据，系统会稍后再查", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(/连接成功 ·/)).not.toBeInTheDocument();
+  });
+
   it("does not show preview quotes while the local Host status is loading", async () => {
     integrationMocks.loadIntegrationStatus.mockResolvedValue({
       credentialConfigured: true,
@@ -587,7 +652,7 @@ describe("FolioMind core flows", () => {
     expect(await screen.findByText("桌面端")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "保存并应用" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("设置暂时无法保存，请稍后重试");
+    expect(await screen.findByText("设置暂时无法保存，请稍后重试", { exact: true })).toBeInTheDocument();
     await waitFor(() => expect(useLabStore.getState().runtimeConfiguring).toBe(false));
     expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled();
   });

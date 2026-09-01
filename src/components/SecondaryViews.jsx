@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarDots, CaretLeft, CaretRight, CheckCircle, DownloadSimple, Funnel, Info, List, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
-import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
+import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics } from "../lib/portfolio.js";
-import { friendlySettingsMessage } from "../lib/friendlyMessages.js";
+import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
 import packageJson from "../../package.json";
@@ -627,6 +627,8 @@ export function SettingsView() {
   const [updateError, setUpdateError] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
   const [desktopLifecycle, setDesktopLifecycle] = useState(null);
+  const [connectionTestState, setConnectionTestState] = useState("idle");
+  const [connectionTestMessage, setConnectionTestMessage] = useState("");
   const backupInput = useRef(null);
   const loadRequest = useRef(0);
 
@@ -684,8 +686,8 @@ export function SettingsView() {
     }
     finally { setBusy(false); }
   };
-  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); const next = { ...status, credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next); }, "数据服务密钥已保存");
-  const clearKey = () => run(async () => { await clearQVerisCredential(); const next = { ...status, credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next); }, "数据服务密钥已清除");
+  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); const next = { ...status, credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next); setConnectionTestState("idle"); setConnectionTestMessage(""); }, "数据服务密钥已保存");
+  const clearKey = () => run(async () => { await clearQVerisCredential(); const next = { ...status, credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next); setConnectionTestState("idle"); setConnectionTestMessage(""); }, "数据服务密钥已清除");
   const syncModels = () => run(async () => { const value = await syncQVerisModels(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); return value; }, "模型目录已同步");
   const saveAll = async () => {
     if (!beginRuntimeConfiguration()) {
@@ -711,6 +713,41 @@ export function SettingsView() {
   const localDevHost = status.environment === "local-host";
   const environmentLabel = loadState === "loading" ? "正在加载" : loadState === "error" ? "加载失败" : status.demo ? "浏览器预览" : localDevHost ? "本地开发 Host" : "桌面端";
   const credentialLabel = loadState === "loading" ? "读取中" : loadState === "error" ? "状态未知" : status.credentialConfigured ? `已配置 · ${status.keyPrefix || "前缀未知"}` : "未配置";
+  const savedCapabilityEndpoint = normalizeEndpoint(status.settings?.capabilityBaseUrl);
+  const currentCapabilityEndpoint = normalizeEndpoint(form.capabilityBaseUrl);
+  const capabilityEndpointChanged = savedCapabilityEndpoint !== currentCapabilityEndpoint;
+  const testDataConnection = async () => {
+    if (connectionTestState === "loading") return;
+    if (!status.credentialConfigured || status.demo) {
+      setConnectionTestState("error");
+      setConnectionTestMessage("请先在本地 Host 或桌面端保存数据服务 API Key");
+      return;
+    }
+    if (capabilityEndpointChanged) {
+      setConnectionTestState("error");
+      setConnectionTestMessage("数据能力地址已修改，请先保存并应用后再测试");
+      return;
+    }
+    const symbol = String(watchlist[0]?.symbol || "600519");
+    setConnectionTestState("loading");
+    setConnectionTestMessage("");
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    try {
+      const result = await queryCapabilityData({ kind: "quote", symbol });
+      const payload = result?.data ?? result;
+      const quote = Array.isArray(payload?.quotes) ? payload.quotes.find((item) => String(item?.symbol || item?.code || symbol).replace(/\.(?:SH|SS|SZ)$/i, "") === symbol.replace(/\.(?:SH|SS|SZ)$/i, "")) || payload.quotes[0] : payload?.quote || payload;
+      const price = Number(quote?.price ?? quote?.lastPrice ?? quote?.last_price);
+      if (!Number.isFinite(price) || price <= 0) throw new Error("数据渠道未返回可识别的真实行情");
+      const elapsed = Math.max(0, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt));
+      const source = String(result?.source || quote?.source || "数据服务");
+      const asOf = quote?.asOf || quote?.as_of || quote?.timestamp || "数据时间未知";
+      setConnectionTestState("success");
+      setConnectionTestMessage(`连接成功 · ${symbol} 已返回真实行情 · ${source} · ${formatQuoteFreshness(asOf)} · ${elapsed}ms`);
+    } catch (error) {
+      setConnectionTestState("error");
+      setConnectionTestMessage(friendlyDataMessage(error, "数据连接暂未返回可用行情，请检查 API Key 或稍后重试"));
+    }
+  };
   const currentVersion = packageJson.version;
   const checkForUpdates = async () => {
     setUpdateState("loading"); setUpdateError("");
@@ -755,7 +792,7 @@ export function SettingsView() {
   return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy || runtimeConfiguring}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>
     {loadError && <div className="settings-notice error" role="alert"><span>{loadError}</span><button className="secondary-button" onClick={() => { void loadSettings(); }}>重试加载</button></div>}
     <section className="settings-card"><div className="settings-card-title"><div><strong>数据与模型凭证</strong><small>{localDevHost ? "本地开发 Host 将密钥保存到用户配置目录（权限 0600）；浏览器不保存长期密钥。" : "密钥只保存在系统凭据库。FolioMind 是独立开源项目，不代表任何数据服务商。"}</small></div><span className={loadState === "ready" && status.credentialConfigured ? "status-pill ok" : "status-pill"}>{credentialLabel}</span></div><div className="settings-inline"><input type="password" autoComplete="new-password" value={apiKey} disabled={formDisabled} onChange={(event) => setApiKey(event.target.value)} placeholder="粘贴数据服务 API Key" aria-label="数据服务 API Key" /><button disabled={formDisabled || !apiKey.trim()} onClick={saveKey}>保存密钥</button>{status.credentialConfigured && <button className="secondary-button" disabled={formDisabled} onClick={clearKey}>清除</button>}</div></section>
-    <section className="settings-card"><div className="settings-card-title"><div><strong>金融数据能力</strong><small>默认直连 QVeris CAP 的 qveris_finance 能力目录；首次固化后按稳定 tool schema 调用，避免每次重新搜索。</small></div><span className="status-pill ok">CAP</span></div><label>数据能力 API<input value={form.capabilityBaseUrl} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, capabilityBaseUrl: event.target.value }))} aria-label="数据能力 API" /></label><div className="settings-inline-note">Provider：{form.dataProvider || "qveris_finance"} · 渠道：{form.dataChannel || "qveris-cap"}</div></section>
+    <section className="settings-card"><div className="settings-card-title"><div><strong>金融数据能力</strong><small>默认直连 QVeris CAP 的 qveris_finance 能力目录；首次固化后按稳定 tool schema 调用，避免每次重新搜索。</small></div><span className="status-pill ok">CAP</span></div><label>数据能力 API<input value={form.capabilityBaseUrl} disabled={formDisabled} onChange={(event) => { setForm((value) => ({ ...value, capabilityBaseUrl: event.target.value })); setConnectionTestState("idle"); setConnectionTestMessage(""); }} aria-label="数据能力 API" /></label><div className="settings-inline-note">Provider：{form.dataProvider || "qveris_finance"} · 渠道：{form.dataChannel || "qveris-cap"}</div><div className="connection-test-row"><button type="button" className="secondary-button" disabled={formDisabled || !status.credentialConfigured || status.demo || capabilityEndpointChanged || connectionTestState === "loading"} onClick={() => { void testDataConnection(); }}>{connectionTestState === "loading" ? "测试中…" : "测试数据连接"}</button><span className={`connection-test-status ${connectionTestState}`} role="status">{connectionTestMessage || (capabilityEndpointChanged ? "保存并应用新地址后可测试" : status.credentialConfigured ? "使用当前自选的第一个标的进行真实 CAP 测试" : "保存 API Key 后可测试真实数据")}</span></div></section>
     <section className="settings-card"><div className="settings-card-title"><div><strong>Pi 模型 · 模型网关</strong><small>通过运行时短期令牌访问本机回环代理，长期 API Key 不会交给 Pi。</small></div><button className="secondary-button" disabled={formDisabled || !status.credentialConfigured} onClick={syncModels}>同步模型</button></div><label>Gateway Base URL<input value={form.modelGatewayBaseUrl} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, modelGatewayBaseUrl: event.target.value }))} aria-label="Gateway Base URL" /></label><label>默认模型<select value={form.modelId} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, modelId: event.target.value }))} aria-label="默认模型"><option value="">请先同步模型目录</option>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></label><div className="settings-actions"><span>{analysisActive ? "请等待当前分析结束后再应用设置" : modelStatus}</span><button disabled={formDisabled || analysisActive || status.demo || gatewayChanged || !selectedModelAvailable} onClick={() => { void saveAll(); }}>{busy || runtimeConfiguring ? "处理中…" : "保存并应用"}</button></div></section>
     <section className="settings-card"><div className="settings-card-title"><div><strong>桌面驻留</strong><small>{isDesktopRuntime() ? "关闭主窗口后 FolioMind 会隐藏到系统托盘并继续核对已启用的自动复盘；请从托盘菜单显式退出。" : "桌面版支持关闭窗口后驻留系统托盘；Web 本地调试页面关闭后不会继续运行。"}</small></div><span className={desktopLifecycle?.residentMode ? "status-pill ok" : "status-pill"}>{desktopLifecycle?.residentMode ? desktopLifecycle.hiddenToTray ? "托盘运行中" : "已启用" : "桌面版可用"}</span></div>{isDesktopRuntime() && <div className="settings-actions"><span>托盘菜单可显示窗口、立即检查盘后复盘或完全退出。</span><button className="secondary-button" onClick={() => { void reconcileDesktopNow().then(setDesktopLifecycle); }}>立即检查</button></div>}</section>
     <section className="settings-card update-card"><div className="settings-card-title"><div><strong>应用更新</strong><small>当前版本 {currentVersion} · 从 FolioMind 官方 GitHub 发布页检查公开版本。</small></div><button className="secondary-button" disabled={updateState === "loading"} onClick={() => { void checkForUpdates(); }}>{updateLabel}</button></div><div className="update-status" aria-live="polite"><span>{updateMessage}</span>{latestRelease && compareVersions(latestRelease.version, currentVersion) > 0 && <a href={latestRelease.url || RELEASES_PAGE_URL} target="_blank" rel="noopener noreferrer">查看新版本</a>}{!latestRelease && <a href={RELEASES_PAGE_URL} target="_blank" rel="noopener noreferrer">打开发布页</a>}</div><small className="update-note">安装包更新仍需从发布页下载安装；正式自动更新还需要平台签名密钥。</small></section>
