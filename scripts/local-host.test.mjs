@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, upstreamWithRetry } from "./local-host.mjs";
+import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -146,6 +146,31 @@ test("serializes runtime prompts and releases only the owning request", () => {
   assert.equal(gate.acquire(second), true);
   gate.abort(new Error("cancelled"));
   assert.equal(second.signal.aborted, true);
+});
+
+test("lets one shared CAP waiter cancel without aborting other waiters", async () => {
+  let resolveRequest;
+  const upstreamController = new AbortController();
+  const entry = {
+    controller: upstreamController,
+    subscribers: 0,
+    settled: false,
+    promise: new Promise((resolve) => { resolveRequest = resolve; }),
+  };
+  const firstController = new AbortController();
+  const secondController = new AbortController();
+  const first = subscribeToSharedRequest(entry, firstController.signal);
+  const second = subscribeToSharedRequest(entry, secondController.signal);
+
+  firstController.abort();
+  await assert.rejects(first, (error) => error?.name === "AbortError");
+  assert.equal(entry.subscribers, 1);
+  assert.equal(upstreamController.signal.aborted, false);
+
+  entry.settled = true;
+  resolveRequest({ price: 1297.4 });
+  await assert.doesNotReject(second);
+  assert.equal(entry.subscribers, 0);
 });
 
 test("retries a transient network failure and does not retry an already-aborted request", async () => {

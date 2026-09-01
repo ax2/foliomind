@@ -62,6 +62,47 @@ const directDataCache = new Map();
 const directDataInFlight = new Map();
 let directDataCacheGeneration = 0;
 
+function abortReason(signal) {
+  return signal?.reason || Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" });
+}
+
+/**
+ * Share one upstream CAP request without coupling cancellation to its first
+ * caller. Each waiter can stop waiting independently; the upstream request
+ * is cancelled only after every waiter has gone away.
+ */
+export function subscribeToSharedRequest(entry, signal) {
+  entry.subscribers += 1;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const release = () => {
+      if (settled) return;
+      settled = true;
+      entry.subscribers = Math.max(0, entry.subscribers - 1);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      release();
+      if (!entry.settled && entry.subscribers === 0) entry.controller.abort(abortReason(signal));
+      reject(abortReason(signal));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    entry.promise.then((value) => {
+      if (settled) return;
+      release();
+      resolve(value);
+    }, (error) => {
+      if (settled) return;
+      release();
+      reject(error);
+    });
+  });
+}
+
 /** Keep one prompt request associated with one AbortController at a time. */
 export function createRuntimeGate() {
   let active = null;
@@ -371,7 +412,7 @@ async function queryDirectCapability(input, settings, key, signal) {
     const inFlight = directDataInFlight.get(cacheKeyValue);
     if (inFlight) {
       try {
-        const normalized = await inFlight;
+        const normalized = await subscribeToSharedRequest(inFlight, signal);
         logInvocation({ type: "cap", operation: "cap-inflight-hit", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: 0 });
         return { selected, normalized: structuredClone(normalized), memoryCacheHit: true };
       } catch (error) {
@@ -382,21 +423,28 @@ async function queryDirectCapability(input, settings, key, signal) {
     const startedAt = Date.now();
     const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(selected.toolId)}`;
     let upstreamResult;
+    const controller = new AbortController();
     const request = (async () => {
-      upstreamResult = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, signal, 1);
+      upstreamResult = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, controller.signal, 1);
       return normalizeCapabilityResult(callKind, input, upstreamResult);
     })();
-    directDataInFlight.set(cacheKeyValue, request);
+    const entry = { promise: request, controller, subscribers: 0, settled: false };
+    request.then(() => {
+      entry.settled = true;
+      if (directDataInFlight.get(cacheKeyValue) === entry) directDataInFlight.delete(cacheKeyValue);
+    }, () => {
+      entry.settled = true;
+      if (directDataInFlight.get(cacheKeyValue) === entry) directDataInFlight.delete(cacheKeyValue);
+    });
+    directDataInFlight.set(cacheKeyValue, entry);
     try {
-      const normalized = await request;
+      const normalized = await subscribeToSharedRequest(entry, signal);
       if (ttl > 0 && cacheGeneration === directDataCacheGeneration) directDataCache.set(cacheKeyValue, { createdAt: Date.now(), normalized: structuredClone(normalized) });
       logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: false, durationMs: Date.now() - startedAt, params: parameters, response: normalized, cost: costFrom(upstreamResult) });
       return { selected, normalized, memoryCacheHit: false };
     } catch (error) {
       logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: false, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: parameters });
       throw error;
-    } finally {
-      if (directDataInFlight.get(cacheKeyValue) === request) directDataInFlight.delete(cacheKeyValue);
     }
   };
   const settled = await Promise.allSettled(selections.map(call));

@@ -70,6 +70,7 @@ check("Local Host 启动故障可恢复状态", integrations.includes("localHost
 check("Local Host 用户状态单一事实源", userStateClient.includes("isLocalWebRuntime()") && userStateClient.includes("localHostRequest(\"/api/user-state\")") && !userStateClient.includes("Keep browser preview usable when Host is offline") && prd.includes("Stage 3BB Local Host 用户状态单一事实源"), "localhost 用户状态必须以 Host 为唯一事实源，离线不得回退浏览器存储");
 check("用户状态加载失败可恢复", labStore.includes("userStateLoading") && labStore.includes("userStateError") && labStore.includes("userStateLoaded: false") && labStore.includes("mergeUserStateChanges(base, local, remote)") && prd.includes("Stage 3BC 用户状态加载失败可恢复与早期编辑保护"), "用户状态失败不得继续触发后台任务，重试和慢速响应需保留可恢复性");
 check("搜索标的真实详情闭环", labStore.includes("function dataItemForSymbol") && labStore.includes("dataItemForSymbol(state, symbol)") && stockWorkspace.includes("watchlist.find((item) => item.symbol === symbol) ?? stocks[symbol]") && prd.includes("Stage 3BD 搜索标的详情与真实行情闭环"), "非自选搜索标的详情动作必须仍能发起真实请求，静态目录数据不得冒充行情");
+check("共享 CAP 请求独立取消", localHost.includes("subscribeToSharedRequest") && localHost.includes("entry.subscribers") && localHost.includes("entry.controller.abort") && prd.includes("Stage 3BE 共享 CAP 请求的独立取消"), "同一 CAP 请求的单个调用方取消不得中止仍在等待的其它调用方");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
