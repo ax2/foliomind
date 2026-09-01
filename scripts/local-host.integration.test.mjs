@@ -146,3 +146,27 @@ test("Local Host serializes prompt requests, aborts the owner, and releases runt
   assert.equal(after.payload.state.runtimeState, "stopped");
   assert.equal(after.payload.state.activeRequest, false);
 });
+
+test("does not fall back to Search after an authentication failure", async (context) => {
+  const calls = [];
+  const upstream = createServer((request, response) => {
+    calls.push(new URL(request.url, "http://127.0.0.1").pathname);
+    response.writeHead(401, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "invalid_api_key" } }));
+  });
+  const capabilityBaseUrl = await listen(upstream);
+  context.after(() => new Promise((resolve) => upstream.close(resolve)));
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-fallback-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_fallback_test_123456" } });
+  await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl, dataProvider: "qveris_finance", dataChannel: "qveris-cap" } } });
+  const result = await hostRequest(host, "/api/data/query", { method: "POST", body: { input: { kind: "quote", symbol: "600519" } } });
+
+  assert.equal(result.response.status, 401);
+  assert.deepEqual(calls, ["/tools/execute"]);
+  const overview = await hostRequest(host, "/api/dev/overview");
+  assert.equal(overview.payload.logs.some((entry) => entry.operation === "cap-fallback"), false);
+});

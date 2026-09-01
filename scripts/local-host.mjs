@@ -601,6 +601,20 @@ export function shouldInvalidateToolCache(error) {
   const code = String(error?.code || error?.upstreamCode || "").toLowerCase();
   return /(tool|capability)[ _-]?(not[ _-]?found|invalid|expired|removed|unavailable)/.test(code);
 }
+
+/**
+ * Only fall back to a solidified Search tool when the fixed CAP itself is
+ * unavailable. Authentication, throttling, timeouts and upstream outages
+ * should surface directly instead of paying for a second doomed request.
+ */
+export function shouldFallbackToCachedTool(error) {
+  if (shouldInvalidateToolCache(error)) return true;
+  const status = Number(error?.status);
+  if (Number.isFinite(status)) return !isRetryableUpstreamStatus(status) && ![401, 403].includes(status);
+  // Normalization/schema failures have no HTTP status and may be recoverable
+  // through a previously verified tool selection.
+  return true;
+}
 export function isRetryableUpstreamStatus(status) {
   return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
 }
@@ -927,7 +941,7 @@ async function route(req, body) {
     } catch (directError) {
       if (controller.signal.aborted) throw directError;
       if (isAbortError(directError)) throw directError;
-      if (kind === "trading_calendar") throw directError;
+      if (kind === "trading_calendar" || !shouldFallbackToCachedTool(directError)) throw directError;
       logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
       const result = await queryCachedData(input, settings, key, controller.signal);
       return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] };

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
+import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -89,6 +89,16 @@ test("keeps direct CAP and cached-tool audit semantics distinct", () => {
   assert.equal(capabilityAuditOperation({ dataCacheHit: true }), "cached-call");
   assert.equal(capabilityAuditOperation({ dataCacheHit: false }), "cap-call");
   assert.equal(capabilityAuditOperation({}), "cap-call");
+});
+
+test("only falls back to cached tools for capability failures", () => {
+  assert.equal(shouldFallbackToCachedTool({ status: 404 }), true);
+  assert.equal(shouldFallbackToCachedTool({ status: 400, upstreamCode: "tool_not_found" }), true);
+  assert.equal(shouldFallbackToCachedTool({ status: 401 }), false);
+  assert.equal(shouldFallbackToCachedTool({ status: 403 }), false);
+  assert.equal(shouldFallbackToCachedTool({ status: 429 }), false);
+  assert.equal(shouldFallbackToCachedTool({ status: 503 }), false);
+  assert.equal(shouldFallbackToCachedTool(new Error("CAP 未返回可识别的实时行情")), true);
 });
 
 test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {
