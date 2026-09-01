@@ -50,7 +50,10 @@ function readBrowserState() {
 export async function loadUserState() {
   if (isDesktopRuntime()) return normalizeUserState(await desktopInvoke("user_state_load"));
   if (isLocalWebRuntime()) {
-    try { return normalizeUserState(await localHostRequest("/api/user-state")); } catch { /* Keep browser preview usable when Host is offline. */ }
+    // Local Web is a debugging view of the Host, not a second browser-only
+    // data store. Falling back to localStorage while the Host is offline can
+    // show stale state and later overwrite the canonical Host state.
+    return normalizeUserState(await localHostRequest("/api/user-state"));
   }
   const state = readBrowserState();
   return state ? normalizeUserState(state) : null;

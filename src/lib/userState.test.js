@@ -1,7 +1,39 @@
-import { describe, expect, it } from "vitest";
-import { mergeUserStateChanges, normalizeUserState, parseUserStateBackup, serializeUserStateBackup, userStateBackupData, UserStateMergeConflictError } from "./userState.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const localHost = vi.hoisted(() => ({ isLocalWebRuntime: vi.fn(() => false), localHostRequest: vi.fn() }));
+vi.mock("./localHost.js", () => localHost);
+
+import { loadUserState, mergeUserStateChanges, normalizeUserState, parseUserStateBackup, serializeUserStateBackup, userStateBackupData, UserStateMergeConflictError } from "./userState.js";
 
 describe("user state backups", () => {
+  beforeEach(() => {
+    delete window.__TAURI_INTERNALS__;
+    localHost.isLocalWebRuntime.mockReset().mockReturnValue(false);
+    localHost.localHostRequest.mockReset();
+  });
+
+  afterEach(() => {
+    delete window.__TAURI_INTERNALS__;
+  });
+
+  it("does not fall back to browser storage when the Local Host is offline", async () => {
+    localHost.isLocalWebRuntime.mockReturnValue(true);
+    const error = new Error("无法连接本地调试 Host");
+    error.code = "LOCAL_HOST_UNAVAILABLE";
+    localHost.localHostRequest.mockRejectedValue(error);
+    window.localStorage.setItem("foliomind.user-state.v1", JSON.stringify({ watchlist: [{ symbol: "AAPL", name: "Apple" }] }));
+
+    await expect(loadUserState()).rejects.toBe(error);
+    expect(localHost.localHostRequest).toHaveBeenCalledWith("/api/user-state");
+  });
+
+  it("reads the canonical state from a healthy Local Host", async () => {
+    localHost.isLocalWebRuntime.mockReturnValue(true);
+    localHost.localHostRequest.mockResolvedValue({ revision: 3, watchlist: [{ symbol: "AAPL", name: "Apple" }] });
+
+    await expect(loadUserState()).resolves.toMatchObject({ revision: 3, watchlist: [{ symbol: "AAPL", name: "Apple" }] });
+  });
+
   it("exports portable data while excluding runtime configuration", () => {
     const raw = serializeUserStateBackup({
       watchlist: [{ symbol: " aapl ", name: "Apple", market: "NASDAQ", category: "科技", secret: "drop" }],
