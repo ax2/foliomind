@@ -62,7 +62,20 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
         return Err("CAP 查询需要有效的证券代码".into());
     }
     let today = Utc::now().date_naive();
-    let days = if kind == "series" { 90 } else { 30 };
+    let days = if kind == "series" {
+        match input.range.as_deref() {
+            Some("分时") => 1,
+            Some("5日") => 7,
+            Some("日K") => 90,
+            Some("周K") => 365,
+            Some("月K") => 1_800,
+            Some("季K") => 2_400,
+            Some("年K") => 3_650,
+            _ => 90,
+        }
+    } else {
+        30
+    };
     let start = today - ChronoDuration::days(days);
     if matches!(kind, "series" | "core_event" | "capital_flow" | "sentiment") {
         return Ok(json!({
