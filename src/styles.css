@@ -1237,6 +1237,18 @@ textarea:focus-visible {
   display: grid;
   gap: 6px;
 }
+.index-board-item {
+  cursor: pointer;
+  transition: background-color .15s ease;
+}
+.index-board-item:hover {
+  background: #f8fbff;
+}
+.index-board-item:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
 .index-board article + article {
   border-left: 1px solid var(--line);
 }

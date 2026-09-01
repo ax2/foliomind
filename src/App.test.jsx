@@ -165,6 +165,32 @@ describe("FolioMind core flows", () => {
     expect(row).toHaveTextContent("8.2");
   });
 
+  it("keeps a market overview quote neutral when change is missing and opens its detail", () => {
+    useLabStore.setState({
+      activeView: "market",
+      selectedSymbol: "",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }],
+      liveQuotes: { "600519": { price: 1297.4, asOf: "2026-08-31T08:00:00Z" } },
+    });
+    const { container } = render(<MarketView />);
+    const card = container.querySelector(".index-board-item");
+    expect(card).toHaveAttribute("role", "button");
+    expect(card).not.toHaveClass("up");
+    expect(card).not.toHaveClass("down");
+    expect(card).toHaveTextContent("—");
+    fireEvent.keyDown(card, { key: "Tab" });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "market", selectedSymbol: "" });
+    fireEvent.click(card);
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+    useLabStore.setState({ activeView: "market", selectedSymbol: "" });
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+    useLabStore.setState({ activeView: "market", selectedSymbol: "" });
+    fireEvent.keyDown(card, { key: " " });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+  });
+
   it("opens a market table symbol with mouse and keyboard", () => {
     useLabStore.setState({ activeView: "market", selectedSymbol: "", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4 } } });
     const { container } = render(<MarketView />);
