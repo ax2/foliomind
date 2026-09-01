@@ -205,6 +205,23 @@ describe("FolioMind core flows", () => {
     expect(table).not.toHaveTextContent("下跌标的");
   });
 
+  it("opens a research result with mouse and keyboard", () => {
+    useLabStore.setState({ activeView: "research", selectedSymbol: "", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } } });
+    const { container } = render(<ResearchView />);
+    const row = container.querySelector(".research-row");
+    expect(row).toHaveAttribute("role", "button");
+    fireEvent.keyDown(row, { key: "Escape" });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "research", selectedSymbol: "" });
+    fireEvent.click(row);
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+    useLabStore.setState({ activeView: "research", selectedSymbol: "" });
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+    useLabStore.setState({ activeView: "research", selectedSymbol: "" });
+    fireEvent.keyDown(row, { key: " " });
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+  });
+
   it("keeps a flat real quote visually neutral in the watchlist", () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },

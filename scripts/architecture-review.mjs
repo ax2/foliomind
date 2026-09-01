@@ -50,6 +50,7 @@ check("研究筛选排序", marketViews.includes("sortResearchItems(filtered, li
 check("组合分布真实权重", marketViews.includes("portfolioAllocationRows(positions, liveQuotes)") && portfolio.includes("portfolioAllocationRows") && portfolio.includes("row.hasQuote") && prd.includes("Stage 3AO 组合分布真实权重") && styles.includes("allocation-track"), "组合分布只能使用真实市值权重，并明确排除未计价持仓");
 check("组合价格正值门禁", portfolio.includes("finitePositiveValue(quote?.price)") && portfolio.includes("number > 0") && prd.includes("Stage 3AQ 组合价格正值门禁"), "组合市值、盈亏和提醒不得消费零值或负数现价");
 check("市场表格详情快捷打开", marketViews.includes("market-table-row") && marketViews.includes("openMarketSymbol") && marketViews.includes("selectSymbol(symbol)") && prd.includes("Stage 3AR 市场表格详情快捷打开") && styles.includes("market-table-row:focus-visible"), "市场自选表格标的必须支持鼠标和键盘打开详情，并复用现有选择状态");
+check("研究结果详情快捷打开", marketViews.includes("research-row") && marketViews.includes("openResearchSymbol") && marketViews.includes("selectSymbol(symbol)") && prd.includes("Stage 3AS 研究结果详情快捷打开") && styles.includes("research-row:focus-visible"), "研究筛选结果必须支持鼠标和键盘打开详情，并复用现有选择状态");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
