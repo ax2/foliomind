@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
-import { EventsView, MarketView, NotificationsView } from "./components/SecondaryViews.jsx";
+import { EventsView, MarketView, NotificationsView, ResearchView } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
@@ -163,6 +163,29 @@ describe("FolioMind core flows", () => {
     expect(row).toHaveTextContent("+1.25%");
     expect(row).toHaveTextContent("27.6");
     expect(row).toHaveTextContent("8.2");
+  });
+
+  it("does not classify missing changes as advancing in the research filter", () => {
+    useLabStore.setState({
+      activeView: "research",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [
+        { symbol: "UP", name: "上涨标的", market: "沪深" },
+        { symbol: "MISSING", name: "待更新", market: "沪深" },
+        { symbol: "DOWN", name: "下跌标的", market: "沪深" },
+      ],
+      liveQuotes: {
+        UP: { price: 10, change: 2.1 },
+        MISSING: { price: 20 },
+        DOWN: { price: 30, change: -1.4 },
+      },
+    });
+    render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: "上涨" }));
+    const table = screen.getByRole("region", { name: "真实行情筛选结果" });
+    expect(table).toHaveTextContent("上涨标的");
+    expect(table).not.toHaveTextContent("待更新");
+    expect(table).not.toHaveTextContent("下跌标的");
   });
 
   it("saves and restores named market views without changing the data contract", () => {

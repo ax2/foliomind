@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAmount, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -14,6 +14,14 @@ describe("quote formatting", () => {
     expect(formatQuoteField("turnoverRate", 0.28)).toBe("0.28%");
     expect(formatQuoteField("grossMargin", 0.8895)).toBe("88.95%");
     expect(formatQuoteField("roe", 33.65)).toBe("33.65%");
+  });
+
+  it("keeps missing and flat changes visually neutral", () => {
+    expect(changeToneClass(1.2)).toBe("up");
+    expect(changeToneClass(-1.2)).toBe("down");
+    expect(changeToneClass(0)).toBe("");
+    expect(changeToneClass(undefined)).toBe("");
+    expect(changeToneClass("not-a-number")).toBe("");
   });
 
   it("marks old refresh timestamps as potentially stale", () => {

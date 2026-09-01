@@ -1,7 +1,7 @@
 import { ArrowsClockwise, BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { stocks } from "../data/market.js";
-import { formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "../lib/quoteFormatting.js";
+import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "../lib/quoteFormatting.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
@@ -120,7 +120,7 @@ export function StockWorkspace() {
         <button className="data-health-action" disabled={healthState === "loading"} onClick={() => { if (realDataMode) void refreshLiveData(); else setActiveView("settings"); }}><ArrowsClockwise size={14} />{realDataMode ? healthState === "loading" ? "更新中…" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button><button className="data-health-evidence" type="button" onClick={() => setEvidenceOpen(true)}>来源与证据</button>
       </section>
       <section className="quote-overview">
-        <div className={change == null || change >= 0 ? "primary-price up" : "primary-price down"}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small className={hasQuote ? `quote-source quote-source-${freshness.state}` : ""}>{hasQuote ? `数据源 · ${quote.source || "真实数据"} · ${formatQuoteFreshness(quote.asOf)}` : realDataMode ? liveDataLoading ? "正在查询真实行情" : "暂无已查询数据 · 点击实时数据获取" : "配置模型后显示真实行情"}</small></div>
+        <div className={`primary-price ${changeToneClass(change)}`}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small className={hasQuote ? `quote-source quote-source-${freshness.state}` : ""}>{hasQuote ? `数据源 · ${quote.source || "真实数据"} · ${formatQuoteFreshness(quote.asOf)}` : realDataMode ? liveDataLoading ? "正在查询真实行情" : "暂无已查询数据 · 点击实时数据获取" : "配置模型后显示真实行情"}</small></div>
         <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.[key])}</dd></dl>)}</div>
       </section>
       <section className="chart-section">

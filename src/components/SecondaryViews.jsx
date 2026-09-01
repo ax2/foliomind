@@ -3,7 +3,7 @@ import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarD
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
-import { formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
+import { changeToneClass, formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
@@ -90,7 +90,7 @@ function createMarketViewId() {
 function marketColumnValue(item, quote, column) {
   const number = (value) => Number.isFinite(Number(value)) ? formatPrice(Number(value)) : "—";
   if (column === "price") return { value: number(quote?.price) };
-  if (column === "change") return { value: Number.isFinite(Number(quote?.change)) ? formatPercent(quote.change) : "—", className: Number.isFinite(Number(quote?.change)) ? quote.change >= 0 ? "up" : "down" : "" };
+  if (column === "change") return { value: Number.isFinite(Number(quote?.change)) ? formatPercent(quote.change) : "—", className: changeToneClass(quote?.change) };
   if (column === "volume") return { value: number(quote?.volume) };
   if (column === "turnover") return { value: number(quote?.turnover) };
   if (column === "turnoverRate") return { value: Number.isFinite(Number(quote?.turnoverRate)) ? formatPercent(quote.turnoverRate) : "—" };
@@ -350,7 +350,7 @@ export function ResearchView() {
     const quote = liveQuotes[item.symbol];
     const change = Number(quote?.change);
     const matchesQuery = !normalizedQuery || `${item.name} ${item.symbol} ${item.market} ${item.category}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery);
-    const matchesDirection = direction === "all" || (direction === "up" && change >= 0) || (direction === "down" && change < 0);
+    const matchesDirection = direction === "all" || (direction === "up" && Number.isFinite(change) && change > 0) || (direction === "down" && Number.isFinite(change) && change < 0);
     return matchesQuery && matchesDirection && (!onlyPriced || Number.isFinite(quote?.price));
   });
   const returnedCount = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price)).length;

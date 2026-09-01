@@ -43,6 +43,7 @@ check("跨链路忙碌状态", copilotPanel.includes("liveDataLoading") && copil
 check("CAP 测试结果真实性", developerPanel.includes("capabilityTestOutcome") && developerPanel.includes("可识别的真实行情") && developerPanel.includes("上游没有返回可展示数据") && prd.includes("Stage 3AJ CAP 测试结果真实性"), "能力测试必须区分可用响应、合法空结果和显式失败，不能仅凭 HTTP 2xx 报成功");
 check("动态 CAP 参数试验台", developerPanel.includes("测试参数（JSON）") && developerPanel.includes("JSON.parse") && developerPanel.includes("不能是数组或空值") && developerPanel.includes("searchId") && prd.includes("Stage 3AK 动态 CAP 参数试验台") && styles.includes("developer-capability-parameters"), "动态能力必须支持受控 JSON 参数编辑、本地校验和绑定 Search ID 的真实测试");
 check("市场表格真实字段映射", marketViews.includes("marketColumnValue(item, quote, column.id)") && prd.includes("Stage 3AL 市场行情表格真实字段映射") && marketViews.includes("我的自选"), "市场自选表格必须将列定义映射为字段 ID，真实行情不得因展示层类型错误全部降级为空值");
+check("涨跌方向缺失值中性化", stockWorkspace.includes("changeToneClass(change)") && marketViews.includes("changeToneClass(quote?.change)") && prd.includes("Stage 3AM 涨跌方向缺失值中性化"), "缺失或非法涨跌幅不得默认显示上涨/下跌颜色或进入方向筛选");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

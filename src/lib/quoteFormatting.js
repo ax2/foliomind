@@ -41,6 +41,13 @@ export function formatPercent(value) {
   return Number.isFinite(number) ? `${number >= 0 ? "+" : ""}${number.toFixed(2)}%` : "—";
 }
 
+/** Resolve a directional tone without treating missing data as up or down. */
+export function changeToneClass(value) {
+  const number = numberValue(value);
+  if (!Number.isFinite(number)) return "";
+  return number > 0 ? "up" : number < 0 ? "down" : "";
+}
+
 export function formatRefreshTime(value, now = Date.now()) {
   const timestamp = Date.parse(String(value ?? ""));
   if (!Number.isFinite(timestamp)) return "尚未更新";
