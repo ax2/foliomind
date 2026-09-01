@@ -2,14 +2,47 @@ import { useEffect, useMemo, useRef } from "react";
 import { AreaSeries, CandlestickSeries, LineSeries, createChart } from "lightweight-charts";
 import { DataState } from "./DataState.jsx";
 
-function normalizeSeries(series) {
-  return (Array.isArray(series) ? series : []).map((point) => {
-    const value = Number(point?.close ?? point?.price ?? point?.value);
-    const rawTime = point?.time ?? point?.timestamp ?? point?.date;
-    const date = typeof rawTime === "string" && !/^\d{4}-\d{2}-\d{2}$/.test(rawTime) ? new Date(rawTime) : null;
-    const time = date && Number.isFinite(date.getTime()) ? Math.floor(date.getTime() / 1000) : rawTime;
-    return { time, value, open: Number(point?.open), high: Number(point?.high), low: Number(point?.low), close: Number(point?.close ?? point?.value ?? point?.price) };
-  }).filter((point) => point.time != null && Number.isFinite(point.value));
+function chartTime(rawTime) {
+  if (typeof rawTime === "number" && Number.isFinite(rawTime)) return rawTime > 10_000_000_000 ? Math.floor(rawTime / 1000) : Math.floor(rawTime);
+  const text = String(rawTime ?? "").trim();
+  if (!text) return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const number = Number(text);
+    return Number.isFinite(number) ? (number > 10_000_000_000 ? Math.floor(number / 1000) : Math.floor(number)) : null;
+  }
+  const timestamp = Date.parse(text);
+  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : null;
+}
+
+function numericOrNaN(rawValue) {
+  if (rawValue == null || rawValue === "") return Number.NaN;
+  const value = Number(rawValue);
+  return Number.isFinite(value) ? value : Number.NaN;
+}
+
+/**
+ * Normalize provider series before handing them to lightweight-charts.
+ * Providers occasionally return points out of order or repeat a timestamp;
+ * lightweight-charts requires strictly ascending, unique times and otherwise
+ * throws during render. The last point for a duplicated timestamp wins so a
+ * later provider correction is not silently discarded.
+ */
+export function normalizeSeries(series) {
+  const byTime = new Map();
+  (Array.isArray(series) ? series : []).forEach((point) => {
+    const time = chartTime(point?.time ?? point?.timestamp ?? point?.date);
+    const value = numericOrNaN(point?.close ?? point?.price ?? point?.value);
+    if (time == null || !Number.isFinite(value)) return;
+    byTime.set(time, {
+      time,
+      value,
+      open: numericOrNaN(point?.open),
+      high: numericOrNaN(point?.high),
+      low: numericOrNaN(point?.low),
+      close: numericOrNaN(point?.close ?? point?.value ?? point?.price),
+    });
+  });
+  return [...byTime.values()].sort((left, right) => left.time - right.time);
 }
 
 export function MarketChart({ series = [], range = "分时", loading = false, error = "", onRetry, showGrid = true, showMovingAverage = false }) {

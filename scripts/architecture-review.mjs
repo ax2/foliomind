@@ -55,6 +55,7 @@ check("研究结果详情快捷打开", marketViews.includes("research-row") && 
 check("事件卡详情快捷打开", marketViews.includes("event-calendar-footer") && marketViews.includes("openEventSymbol") && marketViews.includes("查看标的") && prd.includes("Stage 3AT 事件卡详情快捷打开") && styles.includes("event-calendar-footer"), "事件日历卡片必须支持进入对应标的详情，并保持来源链接和事件数据边界");
 check("全局命令面板", app.includes("<CommandPalette />") && commandPalette.includes("event.ctrlKey") && commandPalette.includes("event.metaKey") && commandPalette.includes("快速搜索") && commandPalette.includes("selectSymbol(entry.id)") && prd.includes("Stage 3AU 全局命令面板") && styles.includes(".command-palette"), "应用必须提供跨平台 Ctrl/Cmd+K 全局搜索，并复用页面与标的选择状态");
 check("市场概览卡快捷打开与方向中性", marketViews.includes("index-board-item") && marketViews.includes("changeToneClass(quote.change)") && marketViews.includes("打开${item.name}详情") && prd.includes("Stage 3AV 市场概览卡快捷打开与方向中性") && styles.includes(".index-board-item:focus-visible"), "市场概览卡必须复用标的导航，缺失涨跌幅保持中性并具备键盘焦点");
+check("图表序列稳定化", marketChart.includes("function chartTime") && marketChart.includes("function numericOrNaN") && marketChart.includes("const byTime = new Map()") && marketChart.includes("sort((left, right) => left.time - right.time)") && prd.includes("Stage 3AW 行情序列稳定化与图表恢复"), "行情序列交给图表前必须统一时间、过滤无效值、去重并严格升序，异常响应不得导致渲染故障");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
