@@ -74,6 +74,11 @@ function finite(value) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
+function finitePositiveValue(value) {
+  const number = finite(value);
+  return number != null && number > 0 ? number : null;
+}
+
 function finitePositive(value) {
   const number = finite(value);
   return number != null && number > 0 ? number : null;
@@ -84,7 +89,7 @@ function finitePositive(value) {
  * Missing quotes never produce an alert and never clear a previous edge state.
  */
 export function portfolioAlertChecks(position, quote) {
-  const currentPrice = finite(quote?.price);
+  const currentPrice = finitePositiveValue(quote?.price);
   const checks = [
     { type: "take-profit", label: "止盈", field: "takeProfitPrice", stateField: "takeProfitTriggered", reached: (price, target) => price >= target, severity: "warning" },
     { type: "stop-loss", label: "止损", field: "stopLossPrice", stateField: "stopLossTriggered", reached: (price, target) => price <= target, severity: "critical" },
@@ -113,7 +118,7 @@ export function portfolioAlertChecks(position, quote) {
  * distance or reward/risk ratio.
  */
 export function portfolioPlanProgress(position, quote) {
-  const currentPrice = finite(quote?.price);
+  const currentPrice = finitePositiveValue(quote?.price);
   const takeProfitPrice = finitePositive(position?.takeProfitPrice);
   const stopLossPrice = finitePositive(position?.stopLossPrice);
   const hasPlan = Boolean(planText(position?.planThesis) || planHorizon(position?.planHorizon) || takeProfitPrice != null || stopLossPrice != null);
@@ -132,7 +137,7 @@ export function portfolioPlanProgress(position, quote) {
 export function portfolioMetrics(positions, liveQuotes) {
   const rows = (Array.isArray(positions) ? positions : []).map((position) => {
     const quote = liveQuotes?.[position.symbol];
-    const currentPrice = finite(quote?.price);
+    const currentPrice = finitePositiveValue(quote?.price);
     const costValue = position.quantity * position.averageCost;
     const marketValue = currentPrice == null ? null : position.quantity * currentPrice;
     const pnl = marketValue == null ? null : marketValue - costValue;

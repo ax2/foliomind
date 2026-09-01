@@ -37,6 +37,13 @@ describe("portfolio metrics", () => {
     expect(result.rows[1]).toMatchObject({ marketValue: null, pnl: null, weight: null, hasQuote: false });
   });
 
+  it("rejects zero and negative prices as invalid real quotes", () => {
+    const positions = [{ id: "p1", symbol: "AAPL", name: "Apple", quantity: 2, averageCost: 100 }];
+    expect(portfolioMetrics(positions, { AAPL: { price: 0 } }).rows[0]).toMatchObject({ currentPrice: null, marketValue: null, hasQuote: false });
+    expect(portfolioMetrics(positions, { AAPL: { price: -10 } }).rows[0]).toMatchObject({ currentPrice: null, marketValue: null, hasQuote: false });
+    expect(portfolioAlertChecks({ ...positions[0], takeProfitPrice: 125, stopLossPrice: 80 }, { price: 0 }).alerts).toHaveLength(0);
+  });
+
   it("builds allocation rows from real market values and excludes unpriced positions", () => {
     const positions = [
       { id: "p1", symbol: "AAPL", name: "Apple", quantity: 2, averageCost: 100 },
