@@ -2,6 +2,7 @@ import { DownloadSimple, DotsThree, Plus, UploadSimple, X } from "@phosphor-icon
 import { useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
+import { hasRealDataAccess } from "../lib/dataStatus.js";
 import { useLabStore } from "../store/useLabStore.js";
 
 async function readTextFile(file) {
@@ -36,7 +37,7 @@ export function WatchlistSidebar() {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const fileInput = useRef(null);
-  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const realDataMode = hasRealDataAccess(integrationStatus);
   const previewMode = integrationStatus?.demo === true;
   const groups = useMemo(() => [...new Set(watchlist.map((item) => normalizeWatchlistItem(item).group))], [watchlist]);
   const selectedAddGroup = newGroupMode ? newGroupName.trim() : groupChoice || groups[0] || "自选";

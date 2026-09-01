@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { DATA_STATES, liveDataStateCopy, resolveLiveDataState } from "./dataStatus.js";
+import { DATA_STATES, hasModelAccess, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "./dataStatus.js";
 
 describe("live data status", () => {
+  it("treats the CAP credential and model selection as independent access gates", () => {
+    expect(hasRealDataAccess({ credentialConfigured: true, settings: { modelId: "" } })).toBe(true);
+    expect(hasModelAccess({ credentialConfigured: true, settings: { modelId: "" } })).toBe(false);
+    expect(hasRealDataAccess({ credentialConfigured: false, settings: { modelId: "model-a" } })).toBe(false);
+    expect(hasModelAccess({ credentialConfigured: true, settings: { modelId: "model-a" } })).toBe(true);
+  });
+
   it.each([
     [{ configured: false }, DATA_STATES.NO_CREDENTIAL],
     [{ configured: true, loading: true }, DATA_STATES.LOADING],

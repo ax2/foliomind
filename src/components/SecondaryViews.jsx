@@ -6,7 +6,7 @@ import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultI
 import { formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics } from "../lib/portfolio.js";
 import { friendlySettingsMessage } from "../lib/friendlyMessages.js";
-import { DATA_STATES, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
+import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
 import packageJson from "../../package.json";
 import { checkLatestRelease, compareVersions, RELEASES_PAGE_URL } from "../lib/updateCheck.js";
@@ -133,7 +133,7 @@ export function PortfolioView() {
   const [form, setForm] = useState(portfolioFormDefaults);
   const metrics = useMemo(() => portfolioMetrics(positions, liveQuotes), [positions, liveQuotes]);
   const risk = useMemo(() => portfolioRiskMetrics(positions, liveQuotes), [positions, liveQuotes]);
-  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const realDataMode = hasRealDataAccess(integrationStatus);
   const portfolioDataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: metrics.pricedCount, totalCount: metrics.totalCount });
   const money = (value) => value == null ? "—" : formatPrice(value);
   const generateReview = async () => {
@@ -258,7 +258,7 @@ export function MarketView() {
   const [viewSaveOpen, setViewSaveOpen] = useState(false);
   const [viewName, setViewName] = useState("");
   const [viewNotice, setViewNotice] = useState("");
-  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const realDataMode = hasRealDataAccess(integrationStatus);
   useEffect(() => {
     try { window.localStorage.setItem(MARKET_COLUMNS_STORAGE_KEY, JSON.stringify(marketColumns)); } catch { /* Storage may be disabled. */ }
   }, [marketColumns]);
@@ -341,7 +341,7 @@ export function ResearchView() {
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("all");
   const [onlyPriced, setOnlyPriced] = useState(false);
-  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const realDataMode = hasRealDataAccess(integrationStatus);
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const filtered = watchlist.filter((item) => {
     const quote = liveQuotes[item.symbol];
@@ -396,7 +396,7 @@ export function MonitorView() {
   const monitorBusy = useLabStore((state) => state.monitorBusy);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
-  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const realDataMode = hasRealDataAccess(integrationStatus);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(() => ({ scope: "symbol", symbol: watchlist[0]?.symbol || "600519", conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300 }));
   useEffect(() => { if (form.scope === "symbol" && !watchlist.some((item) => item.symbol === form.symbol) && watchlist[0]) setForm((value) => ({ ...value, symbol: watchlist[0].symbol })); }, [watchlist, form.scope, form.symbol]);
@@ -461,7 +461,7 @@ export function EventsView() {
   const [viewMode, setViewMode] = useState("list");
   const [monthCursor, setMonthCursor] = useState(() => monthCursorFromKey(monthKey()));
   const [selectedDate, setSelectedDate] = useState(() => eventDateKey(new Date().toISOString()));
-  const realDataMode = Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+  const realDataMode = hasRealDataAccess(integrationStatus);
   useEffect(() => {
     if (!eventDataLoaded && !eventDataLoading && !liveDataLoading) void refreshEvents();
   }, [eventDataLoaded, eventDataLoading, liveDataLoading, refreshEvents]);

@@ -6,6 +6,7 @@ import { getDeveloperVariable, isLocalWebRuntime, queryCachedData } from "../lib
 import { loadIntegrationStatus, queryTradingCalendar } from "../lib/integrations.js";
 import { loadUserState, mergeUserStateChanges, normalizeUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
+import { hasModelAccess, hasRealDataAccess } from "../lib/dataStatus.js";
 import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
@@ -529,7 +530,7 @@ export const useLabStore = create((set, get) => ({
   }),
   refreshLiveData: async () => {
     const state = get();
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !state.watchlist.length || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling") return false;
     const requestGeneration = ++liveRequestGeneration;
     set({ liveDataLoading: true, liveDataError: "" });
@@ -575,7 +576,7 @@ export const useLabStore = create((set, get) => ({
   refreshSelectedQuote: async (symbol) => {
     const state = get();
     const item = state.watchlist.find((candidate) => candidate.symbol === symbol);
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !item || state.selectedQuoteLoading?.[symbol] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const requestGeneration = (selectedQuoteGenerations.get(symbol) || 0) + 1;
     selectedQuoteGenerations.set(symbol, requestGeneration);
@@ -609,7 +610,7 @@ export const useLabStore = create((set, get) => ({
     const id = String(anomaly?.id || "").trim();
     const symbol = String(anomaly?.symbol || "").trim();
     const state = get();
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasModelAccess(state.integrationStatus);
     if (!id || !symbol || !configured || state.anomalyAttributionLoading[id] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const requestGeneration = (anomalyAttributionGenerations.get(id) || 0) + 1;
     anomalyAttributionGenerations.set(id, requestGeneration);
@@ -644,7 +645,7 @@ export const useLabStore = create((set, get) => ({
   refreshQuoteDetails: async (symbol) => {
     const state = get();
     const item = state.watchlist.find((entry) => entry.symbol === symbol);
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !item || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling" || state.quoteDetailsLoading[symbol] || state.quoteDetailsLoaded[symbol]) return false;
     const requestGeneration = ++detailsRequestGeneration;
     set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
@@ -670,7 +671,7 @@ export const useLabStore = create((set, get) => ({
   refreshQuoteSeries: async (symbol, range) => {
     const state = get();
     const item = state.watchlist.find((entry) => entry.symbol === symbol);
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasRealDataAccess(state.integrationStatus);
     const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
     if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
     const requestGeneration = ++seriesRequestGeneration;
@@ -695,7 +696,7 @@ export const useLabStore = create((set, get) => ({
   },
   refreshEvents: async () => {
     const state = get();
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !state.watchlist.length || state.eventDataLoading || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const requestGeneration = ++eventsRequestGeneration;
     const total = state.watchlist.length;
@@ -1011,7 +1012,7 @@ export const useLabStore = create((set, get) => ({
   runDueMonitorChecks: async () => {
     const state = get();
     const hostRuntime = isDesktopRuntime() || isLocalWebRuntime();
-    const configured = Boolean(state.integrationStatus?.credentialConfigured && state.integrationStatus?.settings?.modelId);
+    const configured = hasRealDataAccess(state.integrationStatus);
     if (!hostRuntime || !state.userStateLoaded || !configured || state.monitorBusy) return false;
     const now = Date.now();
     const due = state.rules.find((rule) => {

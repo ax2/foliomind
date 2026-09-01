@@ -61,6 +61,25 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveDataError).toBe("");
   });
 
+  it("can refresh CAP market data with an API key before a model is selected", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: { quotes: [{ symbol: "600519", price: 1297.4, changePercent: 0.39, asOf: "2026-08-28 15:17:32", source: "真实 CAP" }] },
+      mode: "qveris-cap",
+      cacheHit: true,
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(runtime.queryCachedData).toHaveBeenCalledOnce();
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, source: "真实 CAP" });
+  });
+
   it("builds an auditable anomaly explanation from real CAP evidence", async () => {
     const anomaly = { id: "600519-price", symbol: "600519", name: "贵州茅台", type: "price", value: 8.2, threshold: 4, asOf: "2026-08-31", source: "真实行情源" };
     useLabStore.setState({

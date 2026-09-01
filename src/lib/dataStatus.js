@@ -7,6 +7,19 @@ export const DATA_STATES = Object.freeze({
   SUCCESS: "success",
 });
 
+/**
+ * CAP data and model chat are separate capabilities. A saved credential is
+ * sufficient for real market pages; a model selection is only required when
+ * the user starts an Agent conversation.
+ */
+export function hasRealDataAccess(integrationStatus) {
+  return Boolean(integrationStatus?.credentialConfigured);
+}
+
+export function hasModelAccess(integrationStatus) {
+  return Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
+}
+
 export function resolveLiveDataState({ configured, loading, error, receivedCount = 0, totalCount = 0 }) {
   if (!configured) return DATA_STATES.NO_CREDENTIAL;
   if (loading) return DATA_STATES.LOADING;
@@ -20,7 +33,7 @@ export function liveDataStateCopy(state, { receivedCount = 0, totalCount = 0 } =
   const coverage = totalCount > 0 ? `${receivedCount}/${totalCount} 个标的` : "当前范围";
   if (state === DATA_STATES.NO_CREDENTIAL) return {
     title: "连接真实数据后开始",
-    description: "请先在设置中保存 API Key、同步模型并应用；页面不会使用示例行情填充。",
+    description: "请先在设置中保存 API Key 并应用；如需使用 Agent 对话，再同步并选择模型。页面不会使用示例行情填充。",
     action: "settings",
   };
   if (state === DATA_STATES.LOADING) return {

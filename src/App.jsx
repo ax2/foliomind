@@ -62,7 +62,7 @@ export function App() {
     return () => { disposed = true; unlisten(); };
   }, [userStateLoaded, hydrateUserState]);
   useEffect(() => {
-    if (!userStateLoaded || !integrationStatus?.credentialConfigured || !integrationStatus.settings?.modelId) return undefined;
+    if (!userStateLoaded || !integrationStatus?.credentialConfigured) return undefined;
     if (typeof window === "undefined" || typeof document === "undefined") return undefined;
     const isVisible = () => document.visibilityState !== "hidden";
     const refreshWhenVisible = () => {
