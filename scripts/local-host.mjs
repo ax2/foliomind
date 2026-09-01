@@ -107,6 +107,47 @@ export function isAbortError(error) {
   return error?.name === "AbortError" || error?.code === "ABORT_ERR";
 }
 
+/**
+ * Link a route/request lifetime to the controller used for an upstream call.
+ * A browser tab can disappear after the request body has been sent; without
+ * this link the Host would keep paying for a CAP/model request whose result can
+ * no longer be delivered. The child controller remains independently
+ * cancellable (for timeout or configuration changes).
+ */
+export function linkAbortSignal(parentSignal, controller) {
+  if (!parentSignal || !controller) return () => {};
+  const abort = () => {
+    if (controller.signal.aborted) return;
+    const reason = parentSignal.reason instanceof Error
+      ? parentSignal.reason
+      : Object.assign(new Error("请求已取消"), { name: "AbortError", code: "ABORT_ERR" });
+    controller.abort(reason);
+  };
+  if (parentSignal.aborted) abort();
+  else parentSignal.addEventListener("abort", abort, { once: true });
+  return () => parentSignal.removeEventListener("abort", abort);
+}
+
+export function createAbortScope(parentSignal, timeoutMs) {
+  const controller = new AbortController();
+  const unlink = linkAbortSignal(parentSignal, controller);
+  const timeout = Number(timeoutMs) > 0
+    ? setTimeout(() => controller.abort(new Error("timeout")), Number(timeoutMs))
+    : null;
+  return {
+    controller,
+    signal: controller.signal,
+    close() {
+      if (timeout) clearTimeout(timeout);
+      unlink();
+    },
+  };
+}
+
+function clientDisconnectedError() {
+  return Object.assign(new Error("client disconnected"), { name: "AbortError", code: "CLIENT_DISCONNECTED" });
+}
+
 export function abortInFlightRequests(requests, reason = "aborted") {
   const error = reason instanceof Error ? reason : Object.assign(new Error(String(reason || "aborted")), { name: "AbortError", code: "ABORT_ERR" });
   if (!error.name) error.name = "AbortError";
@@ -888,7 +929,7 @@ async function promptAgent(message, settings, key, signal) {
   }
 }
 
-async function route(req, body) {
+async function route(req, body, requestSignal) {
   const method = req.method; const path = new URL(req.url, `http://${HOST}`).pathname;
   if (method === "GET" && path === "/api/health") return { ok: true, service: "foliomind-dev-host", mode: "standalone" };
   if (method === "GET" && path === "/api/session") return { token, service: "foliomind-dev-host", mode: "standalone" };
@@ -899,9 +940,12 @@ async function route(req, body) {
   if (method === "POST" && path === "/api/integration/models/sync") {
     const input = body.input || {}; const key = await readKey(); if (!key) throw new Error("QVeris credential is not configured");
     const settings = { ...(await readJson(settingsFile, defaultSettings)), capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || DEFAULT_DATA_PROVIDER) };
-    settings.models = normalizeModels((await upstream(endpoint(settings.modelGatewayBaseUrl, "models"), { headers: { authorization: `Bearer ${key}` } })).data);
-    settings.modelId = settings.models.some((item) => item.id === settings.modelId) ? settings.modelId : settings.models[0]?.id || "";
-    await atomicJson(settingsFile, settings); await clearToolCache(); return settings;
+    const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
+    try {
+      settings.models = normalizeModels((await upstream(endpoint(settings.modelGatewayBaseUrl, "models"), { headers: { authorization: `Bearer ${key}` } }, scope.signal)).data);
+      settings.modelId = settings.models.some((item) => item.id === settings.modelId) ? settings.modelId : settings.models[0]?.id || "";
+      await atomicJson(settingsFile, settings); await clearToolCache(); return settings;
+    } finally { scope.close(); }
   }
   if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const previous = await readJson(settingsFile, defaultSettings); const settings = { ...previous, capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || previous.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || previous.dataProvider || DEFAULT_DATA_PROVIDER), models: Array.isArray(input.models) ? input.models : previous.models || [] }; await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
   if (method === "GET" && path === "/api/dev/overview") {
@@ -916,27 +960,28 @@ async function route(req, body) {
   if (method === "POST" && path === "/api/dev/capabilities/discover") {
     const key = await readKey(); if (!key) return { available: false, errorMessage: "请先在设置中配置 API Key" };
     const settings = await readJson(settingsFile, defaultSettings);
-    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
-    try { return await discoverCapabilityDirectory(body.input || {}, settings, key, controller.signal); }
+    const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
+    try { return await discoverCapabilityDirectory(body.input || {}, settings, key, scope.signal); }
     catch (error) {
+      if (requestSignal?.aborted) throw error;
       // Keep expected upstream throttling/service failures inside the Host
       // contract so the browser does not surface a noisy failed-resource error.
       return { available: false, query: String(body.input?.query || `provider:${settings?.dataProvider || DEFAULT_DATA_PROVIDER}`), errorMessage: Number(error?.status) === 429 ? "能力目录当前请求较多，请稍后重试" : "能力目录暂时无法加载，请稍后重试" };
     }
-    finally { clearTimeout(timeout); }
+    finally { scope.close(); }
   }
   if (method === "POST" && path === "/api/dev/capabilities/test") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
     if (input.toolId || input.searchId) {
-      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
-      try { return await testDiscoveredCapability(input, settings, key, controller.signal); }
-      finally { clearTimeout(timeout); }
+      const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
+      try { return await testDiscoveredCapability(input, settings, key, scope.signal); }
+      finally { scope.close(); }
     }
     if (!BUILTIN_CAPABILITY_CATALOG[String(input.kind || "")] || (String(input.kind || "") !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("能力测试需要有效的 kind 和查询参数");
-    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
-    try { return await queryDirectCapability(input, settings, key, controller.signal); }
-    finally { clearTimeout(timeout); }
+    const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
+    try { return await queryDirectCapability(input, settings, key, scope.signal); }
+    finally { scope.close(); }
   }
   if (method === "DELETE" && path === "/api/dev/logs") { devLogs.length = 0; return { cleared: true }; }
   if (method === "PATCH" && path === "/api/dev/variables") {
@@ -952,19 +997,19 @@ async function route(req, body) {
     const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
     const kind = String(input.kind || "");
     if (!["quote", "details", "series", "core_event", "capital_flow", "sentiment", "trading_calendar"].includes(kind) || (kind !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("数据查询参数无效");
-    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new Error("timeout")), devVariables.requestTimeoutMs);
+    const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
     try {
-      const result = await queryDirectCapability(input, settings, key, controller.signal);
+      const result = await queryDirectCapability(input, settings, key, scope.signal);
       return { ...result, audits: [{ operation: "cap-call", outcome: "success", toolId: result.toolId, capability: result.capability }] };
     } catch (directError) {
-      if (controller.signal.aborted) throw directError;
+      if (scope.signal.aborted) throw directError;
       if (isAbortError(directError)) throw directError;
       if (!shouldFallbackForDataKind(kind, directError)) throw directError;
       logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
-      const result = await queryCachedData(input, settings, key, controller.signal);
+      const result = await queryCachedData(input, settings, key, scope.signal);
       return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] };
     }
-    finally { clearTimeout(timeout); }
+    finally { scope.close(); }
   }
   if (method === "GET" && path === "/api/user-state") return normalizeUserState(await readJson(stateFile, defaultState));
   if (method === "POST" && path === "/api/user-state") {
@@ -984,6 +1029,7 @@ async function route(req, body) {
       throw error;
     }
     runtimeState = "running";
+    const unlink = linkAbortSignal(requestSignal, controller);
     let timeout;
     try {
       const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
@@ -994,6 +1040,7 @@ async function route(req, body) {
     }
     finally {
       if (timeout) clearTimeout(timeout);
+      unlink();
       if (runtimeGate.current() === controller) {
         runtimeGate.release(controller);
         // A completed (or failed) request must release the runtime lock so the
@@ -1011,15 +1058,31 @@ export function startLocalHost({ port = PORT } = {}) {
     if (req.method === "OPTIONS") { res.writeHead(204, jsonHeaders(origin)); res.end(); return; }
     const startedAt = Date.now();
     const path = new URL(req.url, `http://${HOST}`).pathname;
+    const requestController = new AbortController();
+    let responseStarted = false;
+    const abortForDisconnect = () => {
+      if (!requestController.signal.aborted) requestController.abort(clientDisconnectedError());
+    };
+    req.once("aborted", abortForDisconnect);
+    res.once("close", () => { if (!responseStarted) abortForDisconnect(); });
     try {
       const body = ["POST", "PUT", "PATCH"].includes(req.method) ? await bodyOf(req) : {};
-      const result = await route(req, body);
+      const result = await route(req, body, requestController.signal);
+      if (requestController.signal.aborted) return;
       logInvocation({ type: "http", method: req.method, path, status: 200, durationMs: Date.now() - startedAt });
+      responseStarted = true;
       res.writeHead(200, jsonHeaders(origin)); res.end(JSON.stringify(result));
     } catch (error) {
+      if (requestController.signal.aborted) {
+        logInvocation({ type: "http", method: req.method, path, status: 499, durationMs: Date.now() - startedAt, detail: "客户端已断开，请求已取消", reason: "client-disconnected" });
+        return;
+      }
       const status = Number(error.status) || (String(error.message).includes("route") ? 404 : 400);
       logInvocation({ type: "http", method: req.method, path, status, durationMs: Date.now() - startedAt, detail: error.message });
+      responseStarted = true;
       res.writeHead(status, jsonHeaders(origin)); res.end(JSON.stringify({ error: error.message || "本地 Host 请求失败", code: error.code || undefined }));
+    } finally {
+      req.removeListener("aborted", abortForDisconnect);
     }
   });
   server.on("error", (error) => {

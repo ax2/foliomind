@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -145,6 +145,40 @@ test("Local Host serializes prompt requests, aborts the owner, and releases runt
   const after = await hostRequest(host, "/api/dev/overview");
   assert.equal(after.payload.state.runtimeState, "stopped");
   assert.equal(after.payload.state.activeRequest, false);
+});
+
+test("客户端断开时取消上游 CAP request", async (context) => {
+  let upstreamStartedResolve;
+  let upstreamClosedResolve;
+  const upstreamStarted = new Promise((resolve) => { upstreamStartedResolve = resolve; });
+  const upstreamClosed = new Promise((resolve) => { upstreamClosedResolve = resolve; });
+  const upstream = createServer((request, response) => {
+    if (new URL(request.url, "http://127.0.0.1").pathname !== "/tools/execute") { response.writeHead(404).end(); return; }
+    upstreamStartedResolve();
+    request.once("close", upstreamClosedResolve);
+    // Keep the response open until the Host propagates the disconnect. This
+    // proves the cancellation reaches the billable upstream request.
+  });
+  const capabilityBaseUrl = await listen(upstream);
+  context.after(() => new Promise((resolve) => upstream.close(resolve)));
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-disconnect-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+  await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_disconnect_test_123456" } });
+  await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl } } });
+
+  const body = JSON.stringify({ input: { kind: "quote", symbol: "600519" } });
+  const client = httpRequest(`${host.baseUrl}/api/data/query`, { method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), "x-foliomind-host": host.token } });
+  client.on("error", () => {}); // destroy() intentionally produces ECONNRESET on the client.
+  client.end(body);
+  await upstreamStarted;
+  client.destroy();
+  await Promise.race([upstreamClosed, new Promise((_, reject) => setTimeout(() => reject(new Error("上游请求未在期限内取消")), 3_000))]);
+
+  const overview = await hostRequest(host, "/api/dev/overview");
+  assert.equal(overview.payload.logs.some((entry) => entry.status === 499 && entry.reason === "client-disconnected"), true);
+  assert.equal(overview.payload.state.activeRequest, false);
 });
 
 test("does not fall back to Search after an authentication failure", async (context) => {

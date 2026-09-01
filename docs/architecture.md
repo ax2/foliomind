@@ -79,8 +79,10 @@ WebView (untrusted presentation)
             ├─ Per-conversation audit stream
             └─ Pi child process (restricted environment)
                  └─ qveris-bridge extension
-                      └─ loopback executor (run-scoped capability)
+                 └─ loopback executor (run-scoped capability)
 ```
+
+standalone Local Host 为每个 HTTP 请求绑定独立的客户端生命周期控制器。若浏览器在 CAP、模型或能力目录请求完成前断开连接，Host 会向所属上游控制器传播取消信号，停止不再可交付的网络工作，并以受控的 499/`client-disconnected` 诊断记录结束；已完成的响应不会在关闭连接后再次写入。共享 CAP 请求仍由订阅者计数决定是否中止：单个页面离开不会影响其它等待者，所有等待者离开后才取消上游。该路径不写成功审计、不进入重试或固化工具回退，也不会改变用户状态和缓存代次。
 
 Rust Host 清理继承环境，不向 Pi 传递任何 `QVERIS_*`、OAuth 或控制面 token。未知工具结果不会在崩溃恢复后自动重放。
 

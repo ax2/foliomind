@@ -77,6 +77,7 @@ check("CAP 缓存命中语义", localHost.includes("const dataCacheHit = allData
 check("CAP 回退错误分类", localHost.includes("shouldFallbackToCachedTool") && localHost.includes("if (Number.isFinite(status)) return false") && localHost.includes("shouldFallbackForDataKind(kind, directError)") && prd.includes("Stage 3BI CAP 回退错误分类与成本护栏"), "认证、限流、参数错误、超时和服务端故障不得触发额外 Search；仅能力失效或结构不可用时允许回退固化工具");
 check("对话 CAP 回退错误分类", localHost.includes("shouldFallbackForDataKind") && localHost.includes("direct-capability-failed") && localHost.includes("!shouldFallbackForDataKind(input?.kind, error)") && prd.includes("Stage 3BJ 对话 CAP 回退错误分类"), "模型 foliomind_data 与 HTTP 数据路由必须共享回退门禁，避免认证或暂时故障追加 Search");
 check("跨市场交易日门禁", marketCalendar.includes("marketcodes_for_positions") && marketCalendar.includes("无法根据") && backgroundScheduler.includes("all_markets_trading") && labStore.includes("marketCodesForPositions") && prd.includes("Stage 3BK 跨市场交易日门禁"), "自动复盘必须按持仓交易所核对真实日历；不支持或无法判定的市场应 fail closed，不得默认为上交所");
+check("Local Host 断开回收", localHost.includes("linkAbortSignal") && localHost.includes("clientDisconnectedError") && localHost.includes("status: 499") && hostIntegrationTest.includes("客户端断开") && prd.includes("Stage 3BL Local Host 客户端断开回收"), "客户端断开必须取消所属上游请求、阻止关闭连接后的写入并保留受控诊断，不得继续消耗网络和费用");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

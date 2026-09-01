@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
+import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -235,6 +235,22 @@ test("aborts and removes in-flight requests when the cache is reset", () => {
   assert.equal(requests.size, 0);
   assert.equal(controller.signal.aborted, true);
   assert.equal(isAbortError(controller.signal.reason), true);
+});
+
+test("links a disconnected route to its upstream controller without losing child cancellation", () => {
+  const parent = new AbortController();
+  const child = new AbortController();
+  const unlink = linkAbortSignal(parent.signal, child);
+  parent.abort(new Error("client disconnected"));
+  assert.equal(child.signal.aborted, true);
+  assert.equal(child.signal.reason.message, "client disconnected");
+  unlink();
+
+  const secondParent = new AbortController();
+  const scope = createAbortScope(secondParent.signal, 0);
+  secondParent.abort("route closed");
+  assert.equal(scope.signal.aborted, true);
+  scope.close();
 });
 
 test("retries a transient network failure and does not retry an already-aborted request", async () => {
