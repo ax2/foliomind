@@ -149,6 +149,22 @@ describe("FolioMind core flows", () => {
     expect(JSON.parse(window.localStorage.getItem("foliomind.market-columns.v1"))).not.toContain("pe");
   });
 
+  it("renders returned real quotes in the market table", () => {
+    window.localStorage.removeItem("foliomind.market-columns.v1");
+    useLabStore.setState({
+      activeView: "market",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }],
+      liveQuotes: { "600519": { price: 1297.4, change: 1.25, pe: 27.6, pb: 8.2, asOf: "2026-08-31T08:00:00Z" } },
+    });
+    const { container } = render(<MarketView />);
+    const row = container.querySelector(".market-table .table-row");
+    expect(row).toHaveTextContent("1,297.40");
+    expect(row).toHaveTextContent("+1.25%");
+    expect(row).toHaveTextContent("27.6");
+    expect(row).toHaveTextContent("8.2");
+  });
+
   it("saves and restores named market views without changing the data contract", () => {
     window.localStorage.removeItem("foliomind.market-columns.v1");
     window.localStorage.removeItem("foliomind.market-views.v1");
