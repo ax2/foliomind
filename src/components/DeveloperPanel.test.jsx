@@ -67,4 +67,15 @@ describe("DeveloperPanel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
     await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "600519", period: 14 } }));
   });
+
+  it("filters the capability workbench by stable ids and shows a recoverable empty state", async () => {
+    render(<DeveloperPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
+    const filter = await screen.findByRole("textbox", { name: "筛选能力" });
+    fireEvent.change(filter, { target: { value: "MKT.L1.RT" } });
+    expect(screen.getByText("MKT.L1.RT")).toBeInTheDocument();
+    expect(screen.queryByText("REF.COMPANY_PROFILE")).not.toBeInTheDocument();
+    fireEvent.change(filter, { target: { value: "不存在的能力" } });
+    expect(screen.getByText(/没有匹配的能力/)).toBeInTheDocument();
+  });
 });
