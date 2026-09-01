@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { adaptParameters, BUILTIN_CAPABILITY_CATALOG, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
+import { abortInFlightRequests, adaptParameters, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -171,6 +171,35 @@ test("lets one shared CAP waiter cancel without aborting other waiters", async (
   resolveRequest({ price: 1297.4 });
   await assert.doesNotReject(second);
   assert.equal(entry.subscribers, 0);
+});
+
+test("commits a shared CAP result even when the first waiter cancels", async () => {
+  let resolveRequest;
+  const cache = new Map();
+  const entry = { controller: new AbortController(), subscribers: 0, settled: false, promise: new Promise((resolve) => { resolveRequest = resolve; }) };
+  const firstController = new AbortController();
+  const secondController = new AbortController();
+  const first = subscribeToSharedRequest(entry, firstController.signal);
+  const second = subscribeToSharedRequest(entry, secondController.signal);
+  firstController.abort();
+  await assert.rejects(first, (error) => isAbortError(error));
+  const value = { quotes: [{ price: 1297.4 }] };
+  cacheSharedResult(cache, "quote-key", value, { ttl: 15_000, cacheGeneration: 2, currentGeneration: 2, createdAt: 123 });
+  entry.settled = true;
+  resolveRequest(value);
+  await assert.deepEqual(await second, value);
+  assert.deepEqual(cache.get("quote-key"), { createdAt: 123, normalized: value });
+});
+
+test("aborts and removes in-flight requests when the cache is reset", () => {
+  const requests = new Map();
+  const controller = new AbortController();
+  const entry = { controller, settled: false };
+  requests.set("quote-key", entry);
+  abortInFlightRequests(requests, "configuration-changed");
+  assert.equal(requests.size, 0);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(isAbortError(controller.signal.reason), true);
 });
 
 test("retries a transient network failure and does not retry an already-aborted request", async () => {

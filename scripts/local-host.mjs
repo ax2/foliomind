@@ -103,6 +103,25 @@ export function subscribeToSharedRequest(entry, signal) {
   });
 }
 
+export function isAbortError(error) {
+  return error?.name === "AbortError" || error?.code === "ABORT_ERR";
+}
+
+export function abortInFlightRequests(requests, reason = "aborted") {
+  const error = reason instanceof Error ? reason : Object.assign(new Error(String(reason || "aborted")), { name: "AbortError", code: "ABORT_ERR" });
+  if (!error.name) error.name = "AbortError";
+  if (!error.code) error.code = "ABORT_ERR";
+  for (const entry of requests.values()) {
+    if (!entry?.settled && entry.controller && !entry.controller.signal.aborted) entry.controller.abort(error);
+  }
+  requests.clear();
+}
+
+export function cacheSharedResult(cache, key, normalized, { ttl = 0, cacheGeneration = 0, currentGeneration = 0, createdAt = Date.now() } = {}) {
+  if (ttl > 0 && cacheGeneration === currentGeneration) cache.set(key, { createdAt, normalized: structuredClone(normalized) });
+  return normalized;
+}
+
 /** Keep one prompt request associated with one AbortController at a time. */
 export function createRuntimeGate() {
   let active = null;
@@ -183,7 +202,7 @@ function safeSettings(settings) {
 }
 async function readToolCache() { return await readJson(toolCacheFile, {}); }
 async function writeToolCache(value) { await atomicJson(toolCacheFile, value); }
-async function clearToolCache() { directDataCacheGeneration += 1; directDataCache.clear(); directDataInFlight.clear(); try { await unlink(toolCacheFile); } catch { /* idempotent */ } }
+async function clearToolCache() { directDataCacheGeneration += 1; directDataCache.clear(); abortInFlightRequests(directDataInFlight, "configuration-changed"); try { await unlink(toolCacheFile); } catch { /* idempotent */ } }
 function cacheKey(kind, settings) {
   return [kind, settings?.dataChannel || "qveris-cap", settings?.dataProvider || DEFAULT_DATA_PROVIDER, settings?.capabilityBaseUrl || DEFAULT_CAPABILITY, settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY, settings?.modelId || ""].join("|");
 }
@@ -426,7 +445,11 @@ async function queryDirectCapability(input, settings, key, signal) {
     const controller = new AbortController();
     const request = (async () => {
       upstreamResult = await upstreamWithRetry(url, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ parameters, session_id: runId, max_response_size: 20480, respond_with: "full" }) }, controller.signal, 1);
-      return normalizeCapabilityResult(callKind, input, upstreamResult);
+      const normalized = normalizeCapabilityResult(callKind, input, upstreamResult);
+      // Cache ownership belongs to the shared request, not its first waiter.
+      // If that waiter navigates away, another subscriber can still commit the
+      // real result and prevent the next page refresh from paying upstream again.
+      return cacheSharedResult(directDataCache, cacheKeyValue, normalized, { ttl, cacheGeneration, currentGeneration: directDataCacheGeneration });
     })();
     const entry = { promise: request, controller, subscribers: 0, settled: false };
     request.then(() => {
@@ -439,11 +462,10 @@ async function queryDirectCapability(input, settings, key, signal) {
     directDataInFlight.set(cacheKeyValue, entry);
     try {
       const normalized = await subscribeToSharedRequest(entry, signal);
-      if (ttl > 0 && cacheGeneration === directDataCacheGeneration) directDataCache.set(cacheKeyValue, { createdAt: Date.now(), normalized: structuredClone(normalized) });
       logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: false, durationMs: Date.now() - startedAt, params: parameters, response: normalized, cost: costFrom(upstreamResult) });
       return { selected, normalized, memoryCacheHit: false };
     } catch (error) {
-      logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: false, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: parameters });
+      if (!isAbortError(error)) logInvocation({ type: "cap", operation: "cap-call", method: "POST", path: url, kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: Number(error.status) || 502, cacheHit: false, durationMs: Date.now() - startedAt, detail: error.message, reason: error.message, params: parameters });
       throw error;
     }
   };
@@ -891,6 +913,7 @@ async function route(req, body) {
       return { ...result, audits: [{ operation: "cap-call", outcome: "success", toolId: result.toolId, capability: result.capability }] };
     } catch (directError) {
       if (controller.signal.aborted) throw directError;
+      if (isAbortError(directError)) throw directError;
       if (kind === "trading_calendar") throw directError;
       logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
       const result = await queryCachedData(input, settings, key, controller.signal);
