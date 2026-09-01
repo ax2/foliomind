@@ -16,6 +16,7 @@ const piRuntime = await load("src/lib/piRuntime.js");
 const localHostClient = await load("src/lib/localHost.js");
 const integrations = await load("src/lib/integrations.js");
 const userStateClient = await load("src/lib/userState.js");
+const labStore = await load("src/store/useLabStore.js");
 const commandPalette = await load("src/components/CommandPalette.jsx");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -67,6 +68,7 @@ check("过期行情统计门禁", marketBreadth.includes("quoteFreshness") && ma
 check("数据请求取消与资源回收", localHostClient.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && marketStore.includes("abortPendingDataRequests") && marketStore.includes("new AbortController()") && piRuntime.includes("signal") && prd.includes("Stage 3AZ 数据请求取消与资源回收"), "渠道切换时应取消 Local Host 数据请求并保留代次保护，主动取消不得误报超时");
 check("Local Host 启动故障可恢复状态", integrations.includes("localHostRequest(\"/api/integration/status\")") && integrations.includes("environment: \"local-host\"") && !integrations.includes("catch { return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true;"), "集成状态读取必须传播 Host 故障，不能伪装成浏览器预览");
 check("Local Host 用户状态单一事实源", userStateClient.includes("isLocalWebRuntime()") && userStateClient.includes("localHostRequest(\"/api/user-state\")") && !userStateClient.includes("Keep browser preview usable when Host is offline") && prd.includes("Stage 3BB Local Host 用户状态单一事实源"), "localhost 用户状态必须以 Host 为唯一事实源，离线不得回退浏览器存储");
+check("用户状态加载失败可恢复", labStore.includes("userStateLoading") && labStore.includes("userStateError") && labStore.includes("userStateLoaded: false") && labStore.includes("mergeUserStateChanges(base, local, remote)") && prd.includes("Stage 3BC 用户状态加载失败可恢复与早期编辑保护"), "用户状态失败不得继续触发后台任务，重试和慢速响应需保留可恢复性");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

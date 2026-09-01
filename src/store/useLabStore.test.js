@@ -1,25 +1,52 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn(), queryCachedData: vi.fn(), queryTradingCalendar: vi.fn() }));
+const persistence = vi.hoisted(() => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
 vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true, queryCachedData: runtime.queryCachedData }));
-vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
+vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: persistence.loadUserState, saveUserState: persistence.saveUserState }));
 vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
 
 import { initialLabState, useLabStore } from "./useLabStore.js";
 
 describe("lab store streaming lifecycle", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     runtime.askPi.mockReset();
     runtime.abortPi.mockReset();
     runtime.queryCachedData.mockReset();
     runtime.queryTradingCalendar.mockReset();
+    persistence.loadUserState.mockReset().mockResolvedValue(null);
+    persistence.saveUserState.mockReset().mockResolvedValue(true);
     runtime.queryTradingCalendar.mockResolvedValue({ queriedDate: "2026-09-01", isTradingDay: true, source: "cn_financial_pro", toolId: "cn_financial_pro.trade_dates.v1" });
     useLabStore.setState({
       ...initialLabState,
       messages: initialLabState.messages.map((message) => ({ ...message })),
     });
+    await useLabStore.getState().hydrateUserState();
+  });
+
+  it("keeps user state unloaded and exposes a retry after a Host read failure", async () => {
+    const error = new Error("Host unavailable");
+    persistence.loadUserState.mockRejectedValueOnce(error).mockResolvedValueOnce({ revision: 8, watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
+
+    await expect(useLabStore.getState().hydrateUserState()).resolves.toBe(false);
+    expect(useLabStore.getState()).toMatchObject({ userStateLoaded: false, userStateLoading: false, userStateError: "本地数据暂时无法读取；请检查本地 Host 后重试" });
+
+    await expect(useLabStore.getState().hydrateUserState()).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ userStateLoaded: true, userStateLoading: false, userStateError: "", watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
+  });
+
+  it("preserves edits made while a slow Host snapshot is loading", async () => {
+    let release;
+    persistence.loadUserState.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const hydration = useLabStore.getState().hydrateUserState();
+    expect(useLabStore.getState().hydrateUserState()).toBe(hydration);
+    useLabStore.setState({ watchlist: [{ symbol: "LOCAL", name: "本地编辑", market: "自定义" }] });
+    release({ revision: 9, watchlist: [{ symbol: "REMOTE", name: "远端状态", market: "自定义" }] });
+
+    await expect(hydration).resolves.toBe(true);
+    expect(useLabStore.getState().watchlist.map((item) => item.symbol)).toEqual(expect.arrayContaining(["LOCAL", "REMOTE"]));
   });
 
   it("updates one assistant placeholder in place until the final answer", async () => {

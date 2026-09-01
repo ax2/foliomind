@@ -21,6 +21,8 @@ export function App() {
   const hydrateIntegrationStatus = useLabStore((state) => state.hydrateIntegrationStatus);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
   const userStateLoaded = useLabStore((state) => state.userStateLoaded);
+  const userStateLoading = useLabStore((state) => state.userStateLoading);
+  const userStateError = useLabStore((state) => state.userStateError);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
@@ -98,6 +100,7 @@ export function App() {
   const showGlobalNotice = settingsNotice && activeView !== "settings";
   return <AppErrorBoundary><div className={`app-shell view-${activeView}`}>
     <ActivityRail />
+    {userStateError && <div className="global-notice error" role="alert" aria-live="assertive"><span>{userStateLoading ? "正在重新读取本地数据…" : userStateError}</span><button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取本地数据"}</button></div>}
     {showGlobalNotice && <div className={`global-notice ${settingsNotice.type === "error" ? "error" : "success"}`} role={settingsNotice.type === "error" ? "alert" : "status"} aria-live={settingsNotice.type === "error" ? "assertive" : "polite"}><span>{settingsNotice.text}</span><button onClick={clearSettingsNotice} aria-label="关闭通知">关闭</button></div>}
     {renderView()}
     <CommandPalette />

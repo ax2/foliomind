@@ -7,6 +7,7 @@ import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
+const originalHydrateUserState = useLabStore.getState().hydrateUserState;
 const integrationMocks = vi.hoisted(() => ({
   applyIntegrationSettings: vi.fn(),
   loadIntegrationStatus: vi.fn(),
@@ -31,6 +32,13 @@ vi.mock("./lib/integrations.js", async (importOriginal) => ({
   queryCapabilityData: integrationMocks.queryCapabilityData,
 }));
 
+// App flow tests exercise the browser preview. Local Host behavior is covered
+// by the dedicated user-state and Local Host integration suites.
+vi.mock("./lib/localHost.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  isLocalWebRuntime: () => false,
+}));
+
 afterEach(cleanup);
 
 beforeEach(() => {
@@ -52,10 +60,21 @@ beforeEach(() => {
     messages: initialLabState.messages.map((message) => ({ ...message })),
     rules: initialLabState.rules.map((rule) => ({ ...rule })),
     cancelMessage: originalCancelMessage,
+    hydrateUserState: originalHydrateUserState,
   });
 });
 
 describe("FolioMind core flows", () => {
+  it("shows a recoverable notice when canonical user state cannot be read", async () => {
+    const retryHydration = vi.fn().mockResolvedValue(true);
+    useLabStore.setState({ userStateLoaded: false, userStateError: "本地数据暂时无法读取；请检查本地 Host 后重试", userStateLoading: false, hydrateUserState: retryHydration });
+
+    render(<App />);
+    expect(screen.getByRole("alert")).toHaveTextContent("本地数据暂时无法读取");
+    fireEvent.click(screen.getByRole("button", { name: "重新读取本地数据" }));
+    expect(retryHydration).toHaveBeenCalled();
+  });
+
   it("switches watchlist symbols and chart ranges", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /宁德时代/ }));

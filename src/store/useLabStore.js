@@ -25,6 +25,7 @@ const MAX_LIVE_QUOTE_CONCURRENCY = 4;
 const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) => normalizeWatchlistItem({ ...item, group: group.label }))).slice(0, 8);
 let persistenceQueue = Promise.resolve();
+let userStateHydrationPromise = null;
 let lastPersistedState = null;
 let lastLocalSnapshot = null;
 let liveRequestGeneration = 0;
@@ -60,6 +61,7 @@ function abortPendingDataRequests() {
 function persistenceState(snapshot) {
   return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule });
 }
+const samePersistenceState = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 function persistSnapshot(snapshot) {
   persistenceQueue = persistenceQueue.catch(() => {}).then(async () => {
     const local = persistenceState(snapshot);
@@ -528,7 +530,7 @@ async function executeMonitorForItem(rule, item) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -819,14 +821,35 @@ export const useLabStore = create((set, get) => ({
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
   setChartRange: (chartRange) => set({ chartRange }),
   toggleSkill: (id) => set((state) => ({ skillItems: state.skillItems.map((item) => item.id === id ? { ...item, installed: !item.installed } : item) })),
-  hydrateUserState: async () => {
-    try {
-      const persisted = await loadUserState();
-      if (persisted && typeof persisted === "object") {
-        lastPersistedState = normalizeUserState(persisted); lastLocalSnapshot = lastPersistedState;
-        set((state) => ({ watchlist: Array.isArray(persisted.watchlist) && persisted.watchlist.length ? persisted.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: Array.isArray(persisted.monitorRules) && persisted.monitorRules.length ? persisted.monitorRules.map(normalizeRule) : state.rules, notifications: Array.isArray(persisted.notifications) ? persisted.notifications : state.notifications, portfolioPositions: Array.isArray(persisted.portfolioPositions) ? persisted.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : state.portfolioPositions, portfolioReviews: Array.isArray(persisted.portfolioReviews) ? persisted.portfolioReviews.slice(0, 90) : state.portfolioReviews, briefingSchedule: normalizeBriefingSchedule(persisted.briefingSchedule), monitorHistory: Array.isArray(persisted.monitorHistory) ? persisted.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : state.monitorHistory, userStateLoaded: true }));
-      } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true }); void persistSnapshot(get()); }
-    } catch (error) { set({ userStateLoaded: true, settingsNotice: { type: "error", text: "本地数据暂时无法读取，稍后可重试" } }); }
+  hydrateUserState: () => {
+    if (userStateHydrationPromise) return userStateHydrationPromise;
+    userStateHydrationPromise = (async () => {
+      set({ userStateLoading: true, userStateError: "" });
+      try {
+        const persisted = await loadUserState();
+        if (persisted && typeof persisted === "object") {
+          const remote = normalizeUserState(persisted);
+          // A user can interact with the shell before a slow Host responds. Treat
+          // the built-in state as the three-way merge base so those early edits
+          // are not silently replaced by the remote snapshot.
+          const base = persistenceState(initialLabState);
+          const local = persistenceState(get());
+          const localChanged = !samePersistenceState(local, base);
+          const hydrated = localChanged ? mergeUserStateChanges(base, local, remote) : remote;
+          lastPersistedState = remote;
+          lastLocalSnapshot = localChanged ? base : remote;
+          set((state) => ({ watchlist: hydrated.watchlist.length ? hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), userStateLoaded: true, userStateLoading: false, userStateError: "" }));
+          if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
+        } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true, userStateLoading: false, userStateError: "" }); await persistSnapshot(get()); }
+        return true;
+      } catch {
+        const message = "本地数据暂时无法读取；请检查本地 Host 后重试";
+        set({ userStateLoading: false, userStateError: message, userStateLoaded: false });
+        return false;
+      }
+    })();
+    userStateHydrationPromise = userStateHydrationPromise.finally(() => { userStateHydrationPromise = null; });
+    return userStateHydrationPromise;
   },
   replaceUserState: async (snapshot) => {
     const current = get();
