@@ -4,7 +4,7 @@ import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
-import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics } from "../lib/portfolio.js";
+import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, portfolioAllocationRows, portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
@@ -134,6 +134,7 @@ export function PortfolioView() {
   const [reviewNotice, setReviewNotice] = useState("");
   const [form, setForm] = useState(portfolioFormDefaults);
   const metrics = useMemo(() => portfolioMetrics(positions, liveQuotes), [positions, liveQuotes]);
+  const allocationRows = useMemo(() => portfolioAllocationRows(positions, liveQuotes), [positions, liveQuotes]);
   const risk = useMemo(() => portfolioRiskMetrics(positions, liveQuotes), [positions, liveQuotes]);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const portfolioDataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: metrics.pricedCount, totalCount: metrics.totalCount });
@@ -199,6 +200,7 @@ export function PortfolioView() {
       <article className={`portfolio-card ${metrics.totalPnl == null ? "" : metrics.totalPnl >= 0 ? "positive" : "negative"}`}><span>未实现盈亏</span><strong>{money(metrics.totalPnl)}</strong><small>{metrics.totalPnlPercent == null ? "等待真实行情" : formatPercent(metrics.totalPnlPercent)}</small></article>
       <article className="portfolio-card"><span>行情覆盖</span><strong>{metrics.totalCount ? `${metrics.pricedCount}/${metrics.totalCount}` : "—"}</strong><small>{realDataMode ? "自动定时更新" : "配置数据模型后更新"}</small></article>
     </section>
+    <section className="allocation-overview" aria-label="组合分布"><div className="allocation-overview-heading"><div><h2>组合分布</h2><small>按已返回的真实市值计算，未计价持仓不会被估算。</small></div><span>{allocationRows.length}/{metrics.totalCount} 个持仓已计价</span></div>{allocationRows.length === 0 ? <p className="risk-empty">获取至少一笔持仓的真实现价后，这里会显示市值占比。</p> : <div className="allocation-list">{allocationRows.map((row) => <div className="allocation-row" key={row.id}><div className="allocation-row-heading"><span><strong>{row.name}</strong><small>{row.symbol}</small></span><b>{formatPercent(row.weight)}</b></div><div className="allocation-track" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.max(0, row.weight))}%` }} /></div><small className="allocation-value">{money(row.marketValue)} 市值</small></div>)}</div>}{allocationRows.length < metrics.totalCount ? <p className="allocation-note">另有 {metrics.totalCount - allocationRows.length} 个持仓暂未返回真实现价，未纳入分布比例。</p> : null}</section>
     <section className="risk-overview" aria-label="组合风险洞察">
       <div className="risk-overview-heading"><div><h2>风险洞察</h2><small>只基于已返回的真实行情；数据不足时不生成风险评分。</small></div><ShieldCheck size={22} /></div>
       {positions.length === 0 ? <p className="risk-empty">添加持仓并获取真实行情后，这里会显示集中度与数据覆盖情况。</p> : <><div className="risk-metrics"><article><span>最大持仓</span><strong>{risk.topPosition?.name || "—"}</strong><small>{risk.topWeight == null ? "等待真实行情" : `${formatPercent(risk.topWeight)} 组合占比`}</small></article><article><span>行情覆盖</span><strong>{risk.pricedCoverage == null ? "—" : formatPercent(risk.pricedCoverage)}</strong><small>{metrics.pricedCount}/{metrics.totalCount} 个持仓</small></article><article><span>未计价成本</span><strong>{risk.missingCostWeight == null ? "—" : formatPercent(risk.missingCostWeight)}</strong><small>{risk.missingCostWeight == null ? "等待真实行情" : "暂未纳入市值计算"}</small></article></div><div className="risk-signal-list">{risk.signals.length ? risk.signals.map((signal) => <article className={`risk-signal ${signal.level}`} key={`${signal.level}-${signal.title}`}><span>{signal.level === "critical" ? <Warning size={17} /> : signal.level === "warning" ? <Warning size={17} /> : <Info size={17} />}</span><div><strong>{signal.title}</strong><p>{signal.detail}</p></div></article>) : <p className="risk-empty">当前没有可确认的风险信号；补齐历史行情后才会计算波动率与相关性。</p>}</div></>}

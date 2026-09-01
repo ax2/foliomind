@@ -146,6 +146,22 @@ export function portfolioMetrics(positions, liveQuotes) {
   };
 }
 
+/** Return stable, display-ready allocation rows derived only from real market values. */
+export function portfolioAllocationRows(positions, liveQuotes) {
+  return portfolioMetrics(positions, liveQuotes).rows
+    .filter((row) => row.hasQuote && Number.isFinite(row.weight))
+    .map((row, index) => ({
+      id: row.id || `${row.symbol}-${index}`,
+      symbol: row.symbol,
+      name: row.name,
+      marketValue: row.marketValue,
+      weight: row.weight,
+      index,
+    }))
+    .sort((left, right) => (right.weight - left.weight) || left.index - right.index)
+    .map(({ index, ...row }) => row);
+}
+
 function csvCell(value) {
   const text = value == null ? "" : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;

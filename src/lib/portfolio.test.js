@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioAlertChecks, portfolioMetrics, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
+import { normalizePortfolioPosition, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -35,6 +35,16 @@ describe("portfolio metrics", () => {
     expect(result.totalPnl).toBe(50);
     expect(result.rows[0]).toMatchObject({ marketValue: 250, pnl: 50, pnlPercent: 25, weight: 100 });
     expect(result.rows[1]).toMatchObject({ marketValue: null, pnl: null, weight: null, hasQuote: false });
+  });
+
+  it("builds allocation rows from real market values and excludes unpriced positions", () => {
+    const positions = [
+      { id: "p1", symbol: "AAPL", name: "Apple", quantity: 2, averageCost: 100 },
+      { id: "p2", symbol: "MSFT", name: "Microsoft", quantity: 1, averageCost: 200 },
+    ];
+    const rows = portfolioAllocationRows(positions, { AAPL: { price: 200 }, MSFT: {} });
+    expect(rows).toMatchObject([{ symbol: "AAPL", marketValue: 400, weight: 100 }]);
+    expect(rows).toHaveLength(1);
   });
 
   it("emits explainable concentration and coverage signals", () => {
