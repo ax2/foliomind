@@ -10,6 +10,7 @@ const [packageJson, cargoToml, tauriConfig, app, errorBoundary, stockWorkspace, 
 ]);
 const research = await load("src/lib/research.js");
 const portfolio = await load("src/lib/portfolio.js");
+const commandPalette = await load("src/components/CommandPalette.jsx");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
@@ -52,6 +53,7 @@ check("组合价格正值门禁", portfolio.includes("finitePositiveValue(quote?
 check("市场表格详情快捷打开", marketViews.includes("market-table-row") && marketViews.includes("openMarketSymbol") && marketViews.includes("selectSymbol(symbol)") && prd.includes("Stage 3AR 市场表格详情快捷打开") && styles.includes("market-table-row:focus-visible"), "市场自选表格标的必须支持鼠标和键盘打开详情，并复用现有选择状态");
 check("研究结果详情快捷打开", marketViews.includes("research-row") && marketViews.includes("openResearchSymbol") && marketViews.includes("selectSymbol(symbol)") && prd.includes("Stage 3AS 研究结果详情快捷打开") && styles.includes("research-row:focus-visible"), "研究筛选结果必须支持鼠标和键盘打开详情，并复用现有选择状态");
 check("事件卡详情快捷打开", marketViews.includes("event-calendar-footer") && marketViews.includes("openEventSymbol") && marketViews.includes("查看标的") && prd.includes("Stage 3AT 事件卡详情快捷打开") && styles.includes("event-calendar-footer"), "事件日历卡片必须支持进入对应标的详情，并保持来源链接和事件数据边界");
+check("全局命令面板", app.includes("<CommandPalette />") && commandPalette.includes("event.ctrlKey") && commandPalette.includes("event.metaKey") && commandPalette.includes("快速搜索") && commandPalette.includes("selectSymbol(entry.id)") && prd.includes("Stage 3AU 全局命令面板") && styles.includes(".command-palette"), "应用必须提供跨平台 Ctrl/Cmd+K 全局搜索，并复用页面与标的选择状态");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

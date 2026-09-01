@@ -1582,6 +1582,22 @@ textarea:focus-visible {
 .page-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgb(19 28 42 / 32%); pointer-events: none; }
 .modal-card { width: min(430px, 100%); display: grid; gap: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: #fff; box-shadow: 0 20px 70px rgb(13 31 56 / 20%); pointer-events: auto; }
+.command-palette-backdrop { position: fixed; inset: 0; z-index: 28; display: flex; justify-content: center; align-items: start; padding: 12vh 20px 20px; background: rgb(19 28 42 / 28%); }
+.command-palette { width: min(620px, 100%); overflow: hidden; border: 1px solid #d9e2ef; border-radius: 14px; background: #fff; box-shadow: 0 24px 80px rgb(19 37 62 / 24%); }
+.command-palette-search { display: flex; align-items: center; gap: 10px; min-height: 58px; padding: 0 16px; border-bottom: 1px solid var(--line); color: #7b8ca2; }
+.command-palette-search input { flex: 1; min-width: 0; border: 0; outline: none; color: #1d2a3b; font-size: 15px; }
+.command-palette-search input::placeholder { color: #a5b0bf; }
+.command-palette-search kbd { border: 1px solid #dfe5ec; border-radius: 5px; padding: 3px 6px; color: #8a96a4; font-size: 10px; }
+.command-palette-hint { display: flex; gap: 14px; padding: 9px 16px; color: #8b98a8; font-size: 10px; }
+.command-palette-hint span { display: inline-flex; align-items: center; gap: 4px; }
+.command-palette-results { max-height: min(52vh, 430px); overflow-y: auto; padding: 0 8px 8px; }
+.command-palette-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; border: 0; border-radius: 8px; padding: 8px 10px; background: transparent; color: #405168; text-align: left; cursor: pointer; }
+.command-palette-item:hover, .command-palette-item.active { background: #eef5ff; color: #1f5fae; }
+.command-palette-item-main { display: grid; gap: 3px; min-width: 0; }
+.command-palette-item-main strong { color: #293a50; font-size: 12px; }
+.command-palette-item-main small { overflow: hidden; color: #8794a4; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.command-palette-item-kind { flex: 0 0 auto; color: #9aa7b7; font-size: 10px; }
+.command-palette-empty { margin: 18px 10px 20px; color: #8794a4; font-size: 11px; text-align: center; }
 .watch-suggestions { display: grid; gap: 4px; margin-top: -6px; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: #fbfcfe; }
 .watch-suggestions button { display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: 6px; padding: 8px 9px; background: transparent; text-align: left; cursor: pointer; }
 .watch-suggestions button:hover { background: var(--blue-soft); }

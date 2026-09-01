@@ -11,6 +11,7 @@ import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
 import { listenForBackgroundReviewCompleted, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
+import { CommandPalette } from "./components/CommandPalette.jsx";
 
 export function App() {
   const activeView = useLabStore((state) => state.activeView);
@@ -99,6 +100,7 @@ export function App() {
     <ActivityRail />
     {showGlobalNotice && <div className={`global-notice ${settingsNotice.type === "error" ? "error" : "success"}`} role={settingsNotice.type === "error" ? "alert" : "status"} aria-live={settingsNotice.type === "error" ? "assertive" : "polite"}><span>{settingsNotice.text}</span><button onClick={clearSettingsNotice} aria-label="关闭通知">关闭</button></div>}
     {renderView()}
+    <CommandPalette />
     <DeveloperPanel />
   </div></AppErrorBoundary>;
 }
