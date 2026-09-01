@@ -7,6 +7,9 @@ use uuid::Uuid;
 pub const TOOL_ID: &str = "cn_financial_pro.trade_dates.v1";
 pub const CAPABILITY_ID: &str = "REF.EXCHANGE_CALENDAR";
 pub const SSE_MARKET_CODE: &str = "212001";
+pub const SZSE_MARKET_CODE: &str = "212100";
+pub const HKEX_MARKET_CODE: &str = "212200";
+pub const CFFEX_MARKET_CODE: &str = "212020001";
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +21,96 @@ pub struct TradingCalendarResult {
     pub source: String,
     pub tool_id: String,
     pub capability: String,
+}
+
+fn normalized_market(value: &str) -> String {
+    value.trim().to_uppercase()
+}
+
+fn inferred_cn_marketcode(symbol: &str) -> Option<&'static str> {
+    let symbol = symbol.trim().to_uppercase();
+    let code = symbol
+        .strip_prefix("SH")
+        .or_else(|| symbol.strip_prefix("SZ"))
+        .unwrap_or(&symbol);
+    if [
+        "600", "601", "603", "605", "688", "689", "510", "511", "512", "513", "515", "516", "518",
+        "588", "900",
+    ]
+    .iter()
+    .any(|prefix| code.starts_with(prefix))
+    {
+        return Some(SSE_MARKET_CODE);
+    }
+    if [
+        "000", "001", "002", "003", "159", "160", "161", "162", "163", "164", "165", "166", "167",
+        "168", "169", "180", "181", "182", "184", "185", "186", "187", "188", "189", "200", "300",
+        "301",
+    ]
+    .iter()
+    .any(|prefix| code.starts_with(prefix))
+    {
+        return Some(SZSE_MARKET_CODE);
+    }
+    None
+}
+
+/// Resolve an explicit exchange or an unambiguous mainland A-share symbol.
+/// Unknown/overseas markets fail closed so the scheduler never treats an SSE
+/// holiday as the calendar for a different exchange.
+pub fn marketcode_for_position(market: &str, symbol: &str) -> Result<&'static str, String> {
+    let market = normalized_market(market);
+    if market.contains("NASDAQ")
+        || market.contains("NYSE")
+        || market.contains("AMEX")
+        || market.contains("美股")
+        || market == "US"
+    {
+        return Err("当前自动复盘暂不支持美股交易日历，请改用手动复盘".into());
+    }
+    if market.contains("HKEX")
+        || market.contains("港股")
+        || market.contains("香港")
+        || market == "HK"
+    {
+        return Ok(HKEX_MARKET_CODE);
+    }
+    if market.contains("CFFEX") || market.contains("中金所") {
+        return Ok(CFFEX_MARKET_CODE);
+    }
+    if market == "深市" || market.contains("深交所") || market == "SZ" || market == "SZSE" {
+        return Ok(SZSE_MARKET_CODE);
+    }
+    if market == "沪市" || market.contains("上交所") || market == "SH" || market == "SSE" {
+        return Ok(SSE_MARKET_CODE);
+    }
+    if market.contains("A股") || market.contains("沪深") || market.is_empty() || market == "自定义"
+    {
+        return inferred_cn_marketcode(symbol)
+            .ok_or_else(|| format!("无法根据 {symbol} 确定 A 股交易所"));
+    }
+    Err(format!(
+        "当前自动复盘暂不支持 {market} 交易日历，请改用手动复盘"
+    ))
+}
+
+pub fn marketcodes_for_positions<'a, I>(positions: I) -> Result<Vec<&'static str>, String>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let mut codes = positions
+        .into_iter()
+        .map(|(market, symbol)| marketcode_for_position(market, symbol))
+        .collect::<Result<Vec<_>, _>>()?;
+    codes.sort_by_key(|code| match *code {
+        SSE_MARKET_CODE => 0,
+        SZSE_MARKET_CODE => 1,
+        HKEX_MARKET_CODE => 2,
+        CFFEX_MARKET_CODE => 3,
+        _ => 4,
+    });
+    codes.dedup();
+    Ok(codes)
 }
 
 fn valid_date(value: &str) -> bool {
@@ -71,7 +164,10 @@ pub fn fetch_trading_calendar(
         return Err("交易日历日期参数无效".into());
     }
     let marketcode = marketcode.unwrap_or(SSE_MARKET_CODE).trim();
-    if !matches!(marketcode, "212001" | "212100" | "212200" | "212020001") {
+    if !matches!(
+        marketcode,
+        SSE_MARKET_CODE | SZSE_MARKET_CODE | HKEX_MARKET_CODE | CFFEX_MARKET_CODE
+    ) {
         return Err("交易日历市场参数无效".into());
     }
     let client = Client::builder()
@@ -146,5 +242,27 @@ mod tests {
             SSE_MARKET_CODE
         )
         .is_err());
+    }
+
+    #[test]
+    fn resolves_exchange_without_guessing_overseas_or_unknown_symbols() {
+        assert_eq!(
+            marketcode_for_position("沪深", "600519"),
+            Ok(SSE_MARKET_CODE)
+        );
+        assert_eq!(
+            marketcode_for_position("沪深", "300750"),
+            Ok(SZSE_MARKET_CODE)
+        );
+        assert_eq!(
+            marketcode_for_position("深市", "600519"),
+            Ok(SZSE_MARKET_CODE)
+        );
+        assert!(marketcode_for_position("NASDAQ", "AAPL").is_err());
+        assert!(marketcode_for_position("沪深", "999999").is_err());
+        assert_eq!(
+            marketcodes_for_positions([("沪深", "600519"), ("沪深", "300750")]),
+            Ok(vec![SSE_MARKET_CODE, SZSE_MARKET_CODE])
+        );
     }
 }

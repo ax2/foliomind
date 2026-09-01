@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { briefingSlot, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "./briefingSchedule.js";
+import { briefingSlot, hasFreshPortfolioQuote, marketCodeForPosition, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE, SZSE_MARKET_CODE } from "./briefingSchedule.js";
 
 describe("portfolio briefing schedule", () => {
   const enabled = { enabled: true, closeTime: "15:35", retryMinutes: 15, calendarDate: "2026-09-01", calendarStatus: "trading" };
@@ -19,5 +19,12 @@ describe("portfolio briefing schedule", () => {
     expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 120, asOf: "2026-09-01T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(true);
     expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 120, asOf: "2026-08-31T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(false);
     expect(normalizeBriefingSchedule({ enabled: true, closeTime: "99:99", retryMinutes: 999 })).toMatchObject({ enabled: true, closeTime: "15:35", retryMinutes: 60, timeZone: "Asia/Shanghai" });
+  });
+  it("resolves mainland exchange calendars and fails closed for unsupported markets", () => {
+    expect(marketCodeForPosition({ market: "沪深", symbol: "600519" })).toBe(SSE_MARKET_CODE);
+    expect(marketCodeForPosition({ market: "沪深", symbol: "300750" })).toBe(SZSE_MARKET_CODE);
+    expect(marketCodesForPositions([{ market: "沪深", symbol: "600519" }, { market: "沪深", symbol: "300750" }])).toEqual([SSE_MARKET_CODE, SZSE_MARKET_CODE]);
+    expect(() => marketCodesForPositions([{ market: "NASDAQ", symbol: "AAPL" }])).toThrow("暂不支持美股交易日历");
+    expect(() => marketCodeForPosition({ market: "沪深", symbol: "999999" })).toThrow("确定 A 股交易所");
   });
 });

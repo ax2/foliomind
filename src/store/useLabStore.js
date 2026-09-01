@@ -12,7 +12,7 @@ import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { normalizeWatchlistItem } from "../lib/watchlist.js";
 import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
-import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, normalizeBriefingSchedule } from "../lib/briefingSchedule.js";
+import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
 
@@ -977,9 +977,14 @@ export const useLabStore = create((set, get) => ({
     await get().persistUserState();
     try {
       if (calendarQuerying) {
-        const calendar = await queryTradingCalendar(slot.tradingDate);
-        const calendarStatus = calendar?.isTradingDay === true ? "trading" : "closed";
-        set((current) => ({ briefingSchedule: { ...current.briefingSchedule, calendarDate: slot.tradingDate, calendarStatus, calendarCheckedAt: attemptedAt, calendarSource: String(calendar?.source || "数据服务"), calendarToolId: String(calendar?.toolId || ""), lastResult: calendarStatus === "closed" ? "market-closed" : "waiting-data", lastError: "" } }));
+        const marketcodes = marketCodesForPositions(get().portfolioPositions);
+        const calendars = await Promise.all(marketcodes.map((marketcode) => marketcode === SSE_MARKET_CODE
+          ? queryTradingCalendar(slot.tradingDate)
+          : queryTradingCalendar(slot.tradingDate, marketcode)));
+        const calendarStatus = calendars.every((calendar) => calendar?.isTradingDay === true) ? "trading" : "closed";
+        const sources = [...new Set(calendars.map((calendar) => String(calendar?.source || "数据服务")))];
+        const toolIds = [...new Set(calendars.map((calendar) => String(calendar?.toolId || "")).filter(Boolean))];
+        set((current) => ({ briefingSchedule: { ...current.briefingSchedule, calendarDate: slot.tradingDate, calendarStatus, calendarCheckedAt: attemptedAt, calendarSource: sources.join(", "), calendarToolId: toolIds.join(", "), lastResult: calendarStatus === "closed" ? "market-closed" : "waiting-data", lastError: "" } }));
         await get().persistUserState();
         if (calendarStatus === "closed") {
           set({ briefingScheduleBusy: false });

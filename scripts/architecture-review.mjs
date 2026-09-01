@@ -76,6 +76,7 @@ check("Host 行情正数边界", localHost.includes('kind === "quote"') && local
 check("CAP 缓存命中语义", localHost.includes("const dataCacheHit = allDataCacheHit(results)") && localHost.includes("cacheHit: dataCacheHit") && localHost.includes("capabilityAuditOperation(cachedResult)") && localHost.includes('return result?.dataCacheHit === true ? "cached-call" : "cap-call"') && prd.includes("Stage 3BH CAP 缓存命中语义与回退门禁"), "固定 CAP 真实直连、短缓存复用和固化工具回退必须使用准确命中语义，避免误触发额外 Search");
 check("CAP 回退错误分类", localHost.includes("shouldFallbackToCachedTool") && localHost.includes("if (Number.isFinite(status)) return false") && localHost.includes("shouldFallbackForDataKind(kind, directError)") && prd.includes("Stage 3BI CAP 回退错误分类与成本护栏"), "认证、限流、参数错误、超时和服务端故障不得触发额外 Search；仅能力失效或结构不可用时允许回退固化工具");
 check("对话 CAP 回退错误分类", localHost.includes("shouldFallbackForDataKind") && localHost.includes("direct-capability-failed") && localHost.includes("!shouldFallbackForDataKind(input?.kind, error)") && prd.includes("Stage 3BJ 对话 CAP 回退错误分类"), "模型 foliomind_data 与 HTTP 数据路由必须共享回退门禁，避免认证或暂时故障追加 Search");
+check("跨市场交易日门禁", marketCalendar.includes("marketcodes_for_positions") && marketCalendar.includes("无法根据") && backgroundScheduler.includes("all_markets_trading") && labStore.includes("marketCodesForPositions") && prd.includes("Stage 3BK 跨市场交易日门禁"), "自动复盘必须按持仓交易所核对真实日历；不支持或无法判定的市场应 fail closed，不得默认为上交所");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

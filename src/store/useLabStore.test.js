@@ -286,6 +286,24 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().briefingSchedule).toMatchObject({ calendarDate: "2026-09-01", calendarStatus: "closed", lastResult: "market-closed" });
   });
 
+  it("checks every exchange represented in a mainland mixed portfolio", async () => {
+    useLabStore.setState({
+      portfolioPositions: [
+        { id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000 },
+        { id: "p2", symbol: "300750", name: "宁德时代", market: "沪深", quantity: 1, averageCost: 200 },
+      ],
+      liveQuotes: {
+        "600519": { price: 1200, asOf: "2026-09-01T07:20:00Z", source: "真实 CAP" },
+        "300750": { price: 300, asOf: "2026-09-01T07:20:00Z", source: "真实 CAP" },
+      },
+      events: [],
+      briefingSchedule: { ...initialLabState.briefingSchedule, enabled: true, closeTime: "15:35" },
+    });
+    await expect(useLabStore.getState().runDuePortfolioReview(new Date("2026-09-01T08:00:00Z"))).resolves.toBe("success");
+    expect(runtime.queryTradingCalendar).toHaveBeenNthCalledWith(1, "2026-09-01");
+    expect(runtime.queryTradingCalendar).toHaveBeenNthCalledWith(2, "2026-09-01", "212100");
+  });
+
   it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },

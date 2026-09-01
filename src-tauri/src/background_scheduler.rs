@@ -477,66 +477,107 @@ pub fn reconcile(
     };
     let settings = config::load(app)?;
     if status == DueState::CalendarNeeded {
-        let started_at = std::time::Instant::now();
-        match market_calendar::fetch_trading_calendar(
-            &api_key,
-            &settings.capability_base_url,
-            &trading_date,
-            None,
-        ) {
-            Ok(calendar) => {
-                emit_scheduler_log(
-                    app,
-                    "cap-calendar",
-                    "cn_financial_pro.trade_dates.v1",
-                    "REF.EXCHANGE_CALENDAR",
-                    json!({"marketcode":"212001","startdate":trading_date,"enddate":trading_date}),
-                    200,
-                    started_at.elapsed().as_millis(),
-                    Some(
-                        json!({"isTradingDay":calendar.is_trading_day,"source":calendar.source,"toolId":calendar.tool_id}),
-                    ),
-                    None,
-                );
-                user_state::mutate(app, |state| {
-                    state.briefing_schedule.calendar_date = trading_date.clone();
-                    state.briefing_schedule.calendar_status = if calendar.is_trading_day {
-                        "trading"
-                    } else {
-                        "closed"
-                    }
-                    .into();
-                    state.briefing_schedule.calendar_checked_at = created_at.clone();
-                    state.briefing_schedule.calendar_source = calendar.source.clone();
-                    state.briefing_schedule.calendar_tool_id = calendar.tool_id.clone();
-                    state.briefing_schedule.last_result = if calendar.is_trading_day {
-                        "waiting-data"
-                    } else {
-                        "market-closed"
-                    }
-                    .into();
-                    state.briefing_schedule.last_error.clear();
-                    Ok(())
-                })?;
-                if !calendar.is_trading_day {
-                    return Ok("market-closed".into());
+        let marketcodes = market_calendar::marketcodes_for_positions(
+            initial
+                .portfolio_positions
+                .iter()
+                .map(|position| (position.market.as_str(), position.symbol.as_str())),
+        )
+        .inspect_err(|error| {
+            emit_scheduler_log(
+                app,
+                "cap-calendar",
+                market_calendar::TOOL_ID,
+                market_calendar::CAPABILITY_ID,
+                json!({"marketcodes":[],"startdate":trading_date,"enddate":trading_date}),
+                422,
+                0,
+                None,
+                Some(error),
+            );
+            set_schedule_error(app, &created_at, "waiting-calendar", error);
+        })?;
+        let mut calendars = Vec::with_capacity(marketcodes.len());
+        for marketcode in marketcodes {
+            let started_at = std::time::Instant::now();
+            let params =
+                json!({"marketcode":marketcode,"startdate":trading_date,"enddate":trading_date});
+            match market_calendar::fetch_trading_calendar(
+                &api_key,
+                &settings.capability_base_url,
+                &trading_date,
+                Some(marketcode),
+            ) {
+                Ok(calendar) => {
+                    emit_scheduler_log(
+                        app,
+                        "cap-calendar",
+                        market_calendar::TOOL_ID,
+                        market_calendar::CAPABILITY_ID,
+                        params,
+                        200,
+                        started_at.elapsed().as_millis(),
+                        Some(
+                            json!({"isTradingDay":calendar.is_trading_day,"marketcode":calendar.marketcode,"source":calendar.source,"toolId":calendar.tool_id}),
+                        ),
+                        None,
+                    );
+                    calendars.push(calendar);
+                }
+                Err(error) => {
+                    emit_scheduler_log(
+                        app,
+                        "cap-calendar",
+                        market_calendar::TOOL_ID,
+                        market_calendar::CAPABILITY_ID,
+                        params,
+                        502,
+                        started_at.elapsed().as_millis(),
+                        None,
+                        Some(&error),
+                    );
+                    set_schedule_error(app, &created_at, "waiting-calendar", &error);
+                    return Err(error);
                 }
             }
-            Err(error) => {
-                emit_scheduler_log(
-                    app,
-                    "cap-calendar",
-                    "cn_financial_pro.trade_dates.v1",
-                    "REF.EXCHANGE_CALENDAR",
-                    json!({"marketcode":"212001","startdate":trading_date,"enddate":trading_date}),
-                    502,
-                    started_at.elapsed().as_millis(),
-                    None,
-                    Some(&error),
-                );
-                set_schedule_error(app, &created_at, "waiting-calendar", &error);
-                return Err(error);
+        }
+        let all_markets_trading = calendars.iter().all(|calendar| calendar.is_trading_day);
+        let calendar_source = calendars
+            .iter()
+            .map(|calendar| calendar.source.as_str())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let calendar_tool_id = calendars
+            .iter()
+            .map(|calendar| calendar.tool_id.as_str())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ");
+        user_state::mutate(app, |state| {
+            state.briefing_schedule.calendar_date = trading_date.clone();
+            state.briefing_schedule.calendar_status = if all_markets_trading {
+                "trading"
+            } else {
+                "closed"
             }
+            .into();
+            state.briefing_schedule.calendar_checked_at = created_at.clone();
+            state.briefing_schedule.calendar_source = calendar_source.clone();
+            state.briefing_schedule.calendar_tool_id = calendar_tool_id.clone();
+            state.briefing_schedule.last_result = if all_markets_trading {
+                "waiting-data"
+            } else {
+                "market-closed"
+            }
+            .into();
+            state.briefing_schedule.last_error.clear();
+            Ok(())
+        })?;
+        if !all_markets_trading {
+            return Ok("market-closed".into());
         }
     }
     let snapshot = user_state::load(app)?;
