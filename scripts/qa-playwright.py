@@ -8,6 +8,7 @@ from playwright.async_api import expect, async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / ".qa"
+TARGET_URL = os.environ.get("FOLIOMIND_QA_URL", "http://127.0.0.1:4173")
 CHROMIUM_CANDIDATES = (
     "/home/alex/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
     "/home/alex/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell",
@@ -37,7 +38,7 @@ async def main() -> None:
         page.set_default_timeout(6_000)
         page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
-        await page.goto("http://127.0.0.1:4173", wait_until="networkidle")
+        await page.goto(TARGET_URL, wait_until="networkidle")
         await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
 
         async def click_and_capture(label: str, filename: str, expected: str) -> None:
@@ -110,6 +111,7 @@ async def main() -> None:
         await browser.close()
 
     report = {
+        "url": TARGET_URL,
         "viewport": {**viewport, "deviceScaleFactor": 1},
         "checks": checks,
         "consoleErrors": console_errors,

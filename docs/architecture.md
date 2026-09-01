@@ -42,6 +42,8 @@ QVeris 的 `session_id`、响应视图、返回模式和最大响应大小属于
 
 每个 executor 维护 run-scoped 取消信号和活动下游 socket 注册表。停止 Runtime 时，Host 会拒绝新连接、关闭所有已接收连接，并取消仍在等待响应头或响应体的 QVeris 工具/模型请求；上游返回后会再次检查取消状态，避免已观察到停止信号的旧 run 写入成功审计或响应。`stop()` 最多等待 1 秒让连接 guard 退出后再返回；若同步 socket 写入未及时响应关闭信号，线程仍可能在系统写超时前短暂收尾，但不会继续等待上游网络响应。
 
+市场页的自选市场宽度由前端纯函数从当前 `liveQuotes` 计算，只接受具有有效价格的真实报价；缺失价格或涨跌幅不参与上涨/下跌/极值统计。它只改变展示，不新增 CAP 请求、缓存键或持久化字段，因而不会把预览值或旧值误报为市场宽度。
+
 模型网关的成功 SSE 响应由 Host 以 close-delimited HTTP 流逐块转发并及时 flush，避免 Pi 等待整轮网关响应结束后才开始处理；流式与非流式响应均受 16 MiB 总大小限制。JSON 和非成功响应继续完整缓冲，以便保留确定的状态码与错误正文。
 
 WebView 按 Pi RPC 的 `message_update.assistantMessageEvent` 与 `contentIndex` 累积文本增量，并以 `message_end.message` 覆盖为最终权威内容。整个过程只维护一条助手消息；超时、拒绝或 Runtime 异常会原位替换临时内容，避免残留半截回答或重复错误消息。

@@ -182,6 +182,22 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("涨幅超过阈值")).toBeInTheDocument();
   });
 
+  it("summarizes watchlist breadth from priced real quotes only", () => {
+    useLabStore.setState({
+      activeView: "market",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" }, demo: false },
+      watchlist: [{ symbol: "AAA", name: "上涨标的", market: "沪深" }, { symbol: "BBB", name: "下跌标的", market: "沪深" }, { symbol: "CCC", name: "待更新", market: "沪深" }],
+      liveQuotes: { AAA: { price: 10, change: 3.4, asOf: "2026-08-31T08:00:00Z", source: "真实 CAP" }, BBB: { price: 20, change: -1.2, asOf: "2026-08-31T08:00:00Z", source: "真实 CAP" }, CCC: { change: 8 } },
+    });
+    render(<MarketView />);
+    const breadth = screen.getByRole("region", { name: "自选市场宽度" });
+    expect(breadth).toHaveTextContent("2/3 有行情");
+    expect(breadth).toHaveTextContent("上涨");
+    expect(breadth).toHaveTextContent("下跌");
+    expect(breadth).toHaveTextContent("3.40%");
+    expect(breadth).toHaveTextContent("另有 1 个标的暂未返回有效价格");
+  });
+
   it("retries the events request after the background quote refresh settles", async () => {
     const refreshEvents = vi.fn().mockResolvedValue(false);
     useLabStore.setState({
