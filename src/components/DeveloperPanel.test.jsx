@@ -16,6 +16,8 @@ describe("DeveloperPanel", () => {
   it("normalizes numeric native costs and keeps units separate", () => {
     expect(normalizeCost(0.25, "credits")).toEqual({ amount: 0.25, unit: "credits" });
     expect(normalizeCost({ amount: 0.012, unit: "USD" })).toEqual({ amount: 0.012, unit: "USD" });
+    expect(normalizeCost(null)).toBeNull();
+    expect(normalizeCost("")).toBeNull();
     expect(desktopCostSummary([
       { kind: "qveris", cost: 0.25, costUnit: "credits" },
       { type: "model", cost: { amount: 0.012, unit: "USD" } },

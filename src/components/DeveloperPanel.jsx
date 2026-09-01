@@ -9,6 +9,7 @@ function formatTime(value) {
   try { return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return "--:--:--"; }
 }
 export function normalizeCost(value, unitHint = "credits") {
+  if (value == null || value === "") return null;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const amount = Number(value.amount ?? value.value ?? value.cost ?? value.credits ?? value.chargedCredits);
     if (!Number.isFinite(amount) || amount < 0) return null;
