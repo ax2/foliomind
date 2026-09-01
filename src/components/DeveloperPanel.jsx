@@ -100,6 +100,40 @@ function sampleParametersFor(capability, symbol) {
   return sample;
 }
 
+function responsePayload(result) {
+  return result?.data ?? result?.result?.data ?? result?.result ?? result;
+}
+
+function hasRenderablePayload(payload) {
+  if (Array.isArray(payload)) return payload.length > 0;
+  if (!payload || typeof payload !== "object") return Boolean(payload);
+  const collectionKeys = ["quotes", "series", "events", "capitalFlow", "capital_flow", "news", "tradingDates", "trading_dates"];
+  const collection = collectionKeys.find((key) => Object.hasOwn(payload, key));
+  if (collection) return hasRenderablePayload(payload[collection]);
+  return Object.keys(payload).length > 0;
+}
+
+/**
+ * A successful HTTP response is not enough to call a capability usable. Keep
+ * the distinction between a rejected response and a valid-but-empty response
+ * visible in the workbench so developers do not mistake an empty CAP for
+ * working market data.
+ */
+export function capabilityTestOutcome(capability, result) {
+  const nestedStatus = Number(result?.result?.status_code ?? result?.result?.statusCode ?? result?.status_code ?? result?.statusCode ?? 200);
+  if (result?.success === false || result?.result?.success === false || nestedStatus >= 400) return { state: "error", error: "上游返回失败结果，请展开调用日志查看原因" };
+  const payload = responsePayload(result);
+  if (capability?.kind === "quote") {
+    const quote = Array.isArray(payload?.quotes) ? payload.quotes.find((item) => Number.isFinite(Number(item?.price)) && Number(item.price) > 0) : payload;
+    if (quote && Number.isFinite(Number(quote.price)) && Number(quote.price) > 0) return { state: "success" };
+    return { state: "empty", message: "调用成功，但没有返回可识别的真实行情" };
+  }
+  if (capability?.kind === "trading_calendar") {
+    if (Array.isArray(payload?.tradingDates)) return payload.tradingDates.length ? { state: "success" } : { state: "empty", message: "调用成功，但当前日期范围没有返回交易日" };
+  }
+  return hasRenderablePayload(payload) ? { state: "success" } : { state: "empty", message: "调用成功，但上游没有返回可展示数据" };
+}
+
 function CapabilityCard({ capability, result, onTest, onCopy }) {
   return <details className="developer-capability" key={capability.kind}>
     <summary><div><strong>{capability.capability}</strong><small>{capability.toolId} · {capability.description}</small></div></summary>
@@ -113,7 +147,7 @@ function CapabilityCard({ capability, result, onTest, onCopy }) {
       {capability.coverage ? <div><b>覆盖边界</b><span>{capability.coverage}</span></div> : null}
       {capability.expectedCost ? <div><b>费用提示</b><span>{capability.expectedCost}（调用测试可能扣费）</span></div> : null}
       {capability.stats?.success_rate != null ? <div><b>近期成功率</b><span>{`${(Number(capability.stats.success_rate) * 100).toFixed(1)}%`}{capability.stats.sample_size ? ` · ${capability.stats.sample_size} 次样本` : ""}</span></div> : null}
-      <div className="developer-capability-action"><button type="button" className="secondary-button" disabled={result?.state === "loading"} onClick={() => void onTest(capability)}>{result?.state === "loading" ? "测试中…" : "调用测试"}</button><button type="button" className="secondary-button" onClick={() => void onCopy(capability)}>{result?.copied ? "已复制" : "复制 Tool Schema"}</button>{result?.state === "success" ? <span className="developer-capability-success" role="status">测试成功：已收到真实响应，详细调用已写入日志。</span> : null}{result?.state === "error" ? <span className="developer-capability-error" role="status">{result.error}</span> : null}</div>
+      <div className="developer-capability-action"><button type="button" className="secondary-button" disabled={result?.state === "loading"} onClick={() => void onTest(capability)}>{result?.state === "loading" ? "测试中…" : "调用测试"}</button><button type="button" className="secondary-button" onClick={() => void onCopy(capability)}>{result?.copied ? "已复制" : "复制 Tool Schema"}</button>{result?.state === "success" ? <span className="developer-capability-success" role="status">测试成功：已收到可识别的真实响应，详细调用已写入日志。</span> : null}{result?.state === "empty" ? <span className="developer-capability-empty" role="status">{result.message}</span> : null}{result?.state === "error" ? <span className="developer-capability-error" role="status">{result.error}</span> : null}</div>
     </div>
   </details>;
 }
@@ -247,11 +281,12 @@ export function DeveloperPanel() {
         : capability.kind === "trading_calendar"
         ? desktop ? await queryTradingCalendar(calendarDate) : await testCapability({ kind: capability.kind, date: calendarDate, marketcode: "212001" })
         : desktop ? await queryCapabilityData({ kind: capability.kind, symbol }) : local ? await testCapability({ kind: capability.kind, symbol }) : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
-      if (capability.kind?.startsWith("discovered:") && result?.success === false) throw new Error(result?.result?.error_message || "上游返回未成功结果");
+      const outcome = capabilityTestOutcome(capability, result);
+      if (outcome.state === "error") throw new Error(result?.result?.error_message || outcome.error);
       if (desktop && capability.kind !== "trading_calendar" && !result?.audits?.some((audit) => audit?.outcome === "success" && (audit?.toolId === capability.toolId || audit?.tool_id === capability.toolId))) {
         throw new Error("未观察到该 CAP 的成功调用记录，请在调用日志中查看原因");
       }
-      setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "success", result } }));
+      setCapabilityTests((current) => ({ ...current, [capability.kind]: { ...outcome, result } }));
     } catch (cause) {
       setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "error", error: cause?.message || "测试失败" } }));
     }

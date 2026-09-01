@@ -3,13 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const host = vi.hoisted(() => ({
   clearDeveloperLogs: vi.fn().mockResolvedValue({ cleared: true }),
-  testCapability: vi.fn().mockResolvedValue({ toolId: "qveris_finance.mkt_l1_rt", capability: "MKT.L1.RT" }),
+  testCapability: vi.fn().mockResolvedValue({ toolId: "qveris_finance.mkt_l1_rt", capability: "MKT.L1.RT", data: { quotes: [{ symbol: "AAPL", price: 227.57 }] } }),
   discoverCapabilities: vi.fn().mockResolvedValue({ query: "provider:qveris_finance", searchId: "srch_demo", total: 1, updatedAt: "2026-08-31T00:00:00Z", tools: [{ kind: "discovered:qveris_finance.analytics_rsi", toolId: "qveris_finance.analytics_rsi", capability: "RSI", description: "技术指标", provider: "qveris_finance", parameters: { symbol: "string", period: "integer?" }, parameterDetails: [{ name: "symbol", required: true, description: "证券代码" }], sampleParameters: { symbol: "600519", period: 14 }, returns: ["value"], expectedCost: "1 credit" }] }),
   loadDeveloperOverview: vi.fn().mockResolvedValue({ logs: [{ id: "1", at: "2026-08-29T03:00:00Z", method: "POST", path: "/api/data/query", status: 200, durationMs: 42 }], state: { activeRequest: false, keyPrefix: "cap_demo…", settings: { modelId: "model-a" }, toolCache: [{ kind: "quote" }] }, variables: { toolCacheEnabled: true, requestTimeoutMs: 120000, maxConcurrentDataRequests: 1, logLevel: "info" } }),
   updateDeveloperVariables: vi.fn().mockResolvedValue({ variables: { toolCacheEnabled: false, requestTimeoutMs: 120000, maxConcurrentDataRequests: 1, logLevel: "info" } }),
 }));
 vi.mock("../lib/localHost.js", () => ({ ...host, isLocalWebRuntime: () => true }));
-import { capabilityToolSchema, DeveloperPanel, desktopCostSummary, normalizeCost } from "./DeveloperPanel.jsx";
+import { capabilityTestOutcome, capabilityToolSchema, DeveloperPanel, desktopCostSummary, normalizeCost } from "./DeveloperPanel.jsx";
 
 describe("DeveloperPanel", () => {
   afterEach(() => cleanup());
@@ -30,6 +30,14 @@ describe("DeveloperPanel", () => {
       function: { name: "foliomind_cap_series", parameters: { required: ["symbol", "start_date"], properties: { end_date: { type: "string" } } } },
       "x-foliomind": { tool_id: "qveris_finance.mkt_bars_eod", capability: "MKT.BARS.EOD" },
     });
+  });
+
+  it("distinguishes usable, empty, and rejected CAP responses", () => {
+    const quote = { kind: "quote" };
+    expect(capabilityTestOutcome(quote, { data: { quotes: [{ price: 1297.4 }] } })).toEqual({ state: "success" });
+    expect(capabilityTestOutcome(quote, { data: { quotes: [] } })).toEqual({ state: "empty", message: "调用成功，但没有返回可识别的真实行情" });
+    expect(capabilityTestOutcome({ kind: "series" }, { data: { series: [] } })).toEqual({ state: "empty", message: "调用成功，但上游没有返回可展示数据" });
+    expect(capabilityTestOutcome({ kind: "details" }, { result: { status_code: 503 } })).toEqual({ state: "error", error: "上游返回失败结果，请展开调用日志查看原因" });
   });
 
   it("stays collapsed until opened and exposes redacted diagnostics", async () => {
@@ -66,6 +74,15 @@ describe("DeveloperPanel", () => {
     expect(await screen.findByText("RSI")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
     await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "600519", period: 14 } }));
+  });
+
+  it("shows a truthful empty state when a quote test returns no usable price", async () => {
+    host.testCapability.mockResolvedValueOnce({ toolId: "qveris_finance.mkt_l1_rt", capability: "MKT.L1.RT", data: { quotes: [] } });
+    render(<DeveloperPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: "调用测试" })[0]);
+    expect(await screen.findByText("调用成功，但没有返回可识别的真实行情")).toBeInTheDocument();
+    expect(screen.queryByText(/测试成功：/)).not.toBeInTheDocument();
   });
 
   it("filters the capability workbench by stable ids and shows a recoverable empty state", async () => {

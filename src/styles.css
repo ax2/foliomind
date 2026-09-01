@@ -2104,8 +2104,9 @@ textarea:focus-visible {
 .developer-capability-detail span { overflow-wrap: anywhere; }
 .developer-capability-action { display: flex !important; align-items: center; flex-wrap: wrap; gap: 8px; grid-template-columns: none !important; }
 .developer-capability-action .secondary-button { flex: 0 0 auto; padding: 5px 8px; font-size: 10px; }
-.developer-capability-success, .developer-capability-error { margin: 0; font-size: 10px; }
+.developer-capability-success, .developer-capability-empty, .developer-capability-error { margin: 0; font-size: 10px; }
 .developer-capability-success { color: #2b8c5d; }
+.developer-capability-empty { color: #8a6d28; }
 .developer-capability-error { color: #b14d45; }
 .developer-directory-meta, .developer-directory-empty { margin: 8px 0; color: #718197; font-size: 11px; }
 .developer-directory-card .developer-capability-toolbar { justify-content: flex-start; }

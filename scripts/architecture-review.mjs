@@ -40,6 +40,7 @@ check("数据与模型访问解耦", dataStatus.includes("hasRealDataAccess") &&
 check("桌面固定 CAP 通道", nativeMain.includes("qveris_data_query") && capabilityData.includes("pub fn query") && capabilityData.includes("tools/execute?tool_id=") && capabilityData.includes("connect_timeout") && prd.includes("Stage 3AE 桌面固定 CAP 数据通道"), "桌面 CAP 查询必须走白名单、短超时和统一审计契约");
 check("设置连接诊断", marketViews.includes("测试数据连接") && marketViews.includes("queryCapabilityData") && marketViews.includes("connectionTestState") && prd.includes("Stage 3AH 设置页真实数据连接诊断") && readme.includes("测试已保存的数据连接"), "设置页必须提供不依赖模型的真实 CAP 探针，并展示可恢复的来源、时间和耗时");
 check("跨链路忙碌状态", copilotPanel.includes("liveDataLoading") && copilotPanel.includes("正在更新行情，完成后可发起分析") && copilotPanel.includes("等待行情更新") && prd.includes("Stage 3AI 跨链路忙碌状态可见性"), "共享资源互斥时对话不能静默拒绝，必须给出可访问的等待状态并保留草稿");
+check("CAP 测试结果真实性", developerPanel.includes("capabilityTestOutcome") && developerPanel.includes("可识别的真实行情") && developerPanel.includes("上游没有返回可展示数据") && prd.includes("Stage 3AJ CAP 测试结果真实性"), "能力测试必须区分可用响应、合法空结果和显式失败，不能仅凭 HTTP 2xx 报成功");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
