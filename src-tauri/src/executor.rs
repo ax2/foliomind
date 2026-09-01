@@ -114,7 +114,13 @@ impl ConnectionRegistry {
             return;
         };
         inner.stopped = true;
-        for socket in inner.sockets.values() {
+        // Remove registrations while shutting down the cloned sockets. The
+        // handler threads own their original streams and will still unwind
+        // independently, but keeping stale registry entries here makes a
+        // normal stop appear stuck on Windows where shutdown/read wakeups can
+        // be scheduled after the close is observed by the peer.
+        let sockets = std::mem::take(&mut inner.sockets);
+        for socket in sockets.values() {
             let _ = socket.shutdown(Shutdown::Both);
         }
     }
