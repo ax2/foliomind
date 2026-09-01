@@ -170,3 +170,37 @@ test("does not fall back to Search after an authentication failure", async (cont
   const overview = await hostRequest(host, "/api/dev/overview");
   assert.equal(overview.payload.logs.some((entry) => entry.operation === "cap-fallback"), false);
 });
+
+test("does not fall back from model data tools after an authentication failure", async (context) => {
+  const calls = [];
+  const upstream = createServer((request, response) => {
+    const path = new URL(request.url, "http://127.0.0.1").pathname;
+    calls.push(path);
+    if (path === "/chat/completions") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ choices: [{ message: { role: "assistant", tool_calls: [{ id: "call-1", type: "function", function: { name: "foliomind_data", arguments: JSON.stringify({ kind: "quote", symbol: "600519" }) } }] }, finish_reason: "tool_calls" }] }));
+      return;
+    }
+    if (path === "/tools/execute") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "invalid_api_key" } }));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  const gateway = await listen(upstream);
+  context.after(() => new Promise((resolve) => upstream.close(resolve)));
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-prompt-fallback-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_prompt_fallback_test_123456" } });
+  await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl: gateway, modelGatewayBaseUrl: gateway, modelId: "test-model", models: [{ id: "test-model" }] } } });
+  const result = await hostRequest(host, "/api/runtime/prompt", { method: "POST", body: { message: "查询贵州茅台实时行情" } });
+
+  assert.equal(result.response.status, 401);
+  assert.deepEqual(calls, ["/chat/completions", "/tools/execute"]);
+  const overview = await hostRequest(host, "/api/dev/overview");
+  assert.equal(overview.payload.logs.some((entry) => entry.operation === "cap-fallback"), false);
+});

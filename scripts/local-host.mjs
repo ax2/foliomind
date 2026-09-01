@@ -610,10 +610,23 @@ export function shouldInvalidateToolCache(error) {
 export function shouldFallbackToCachedTool(error) {
   if (shouldInvalidateToolCache(error)) return true;
   const status = Number(error?.status);
-  if (Number.isFinite(status)) return !isRetryableUpstreamStatus(status) && ![401, 403].includes(status);
+  // An HTTP status proves the upstream understood the request. Only explicit
+  // tool invalidation (handled above) is recoverable through Search; generic
+  // client errors such as 400/422 usually mean the same parameters would fail
+  // again and must not trigger another billable call.
+  if (Number.isFinite(status)) return false;
   // Normalization/schema failures have no HTTP status and may be recoverable
   // through a previously verified tool selection.
   return true;
+}
+/**
+ * Trading-calendar data is a safety gate for scheduling and must fail closed;
+ * it must never guess from a cached tool or a weekday heuristic. Keep this
+ * kind-aware wrapper shared by HTTP data queries and model tool calls so the
+ * two entry points cannot drift into different fallback/cost behaviour.
+ */
+export function shouldFallbackForDataKind(kind, error) {
+  return String(kind || "") !== "trading_calendar" && shouldFallbackToCachedTool(error);
 }
 export function isRetryableUpstreamStatus(status) {
   return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
@@ -835,12 +848,17 @@ async function runPromptAgent(message, settings, key, signal) {
           audits.push({ operation: capabilityAuditOperation(cachedResult), runId, toolCallId: call.id || randomUUID(), outcome: "success", detail: null, cacheHit: cachedResult?.dataCacheHit === true });
           messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
         } catch (error) {
-          audits.push({ operation: "cached-call", runId, toolCallId: call.id || randomUUID(), outcome: "error", detail: "cache-miss" });
-          if (signal?.aborted) throw error;
+          const toolCallId = call.id || randomUUID();
+          if (signal?.aborted || !shouldFallbackForDataKind(input?.kind, error)) {
+            audits.push({ operation: "cap-call", runId, toolCallId, outcome: "error", detail: "direct-capability-failed", cacheHit: false });
+            throw error;
+          }
+          audits.push({ operation: "cap-call", runId, toolCallId, outcome: "error", detail: "direct-capability-unavailable", cacheHit: false });
           try {
             const cachedResult = await queryCachedData(input, settings, key, signal);
             messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
           } catch {
+            audits.push({ operation: "cached-call", runId, toolCallId, outcome: "error", detail: "cache-miss" });
             messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify({ error: "当前金融能力暂不可用", next_action: "请稍后重试；若持续失败，请打开开发者面板查看 CAP 调用日志。" }) });
           }
         }
@@ -941,7 +959,7 @@ async function route(req, body) {
     } catch (directError) {
       if (controller.signal.aborted) throw directError;
       if (isAbortError(directError)) throw directError;
-      if (kind === "trading_calendar" || !shouldFallbackToCachedTool(directError)) throw directError;
+      if (!shouldFallbackForDataKind(kind, directError)) throw directError;
       logInvocation({ type: "data", operation: "cap-fallback", status: Number(directError.status) || 502, detail: directError.message });
       const result = await queryCachedData(input, settings, key, controller.signal);
       return { data: result?.result ?? result, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "cached" }] };
