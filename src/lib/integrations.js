@@ -24,7 +24,10 @@ async function desktopInvoke(command, args) {
 export async function loadIntegrationStatus() {
   if (!isDesktopRuntime() && !isLocalWebRuntime()) return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true };
   if (!isDesktopRuntime()) {
-    try { return { ...(await localHostRequest("/api/integration/status")), demo: false, environment: "local-host" }; } catch { return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true }; }
+    // Do not turn a real Local Host outage into a fake/demo status. The
+    // settings page and store can then show a recoverable connection error and
+    // offer a retry instead of telling the user to re-enter a valid key.
+    return { ...(await localHostRequest("/api/integration/status")), demo: false, environment: "local-host" };
   }
   return desktopInvoke("integration_status");
 }

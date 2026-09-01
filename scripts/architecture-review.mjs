@@ -14,6 +14,7 @@ const marketBreadth = await load("src/lib/marketBreadth.js");
 const anomalyDetection = await load("src/lib/anomalyDetection.js");
 const piRuntime = await load("src/lib/piRuntime.js");
 const localHostClient = await load("src/lib/localHost.js");
+const integrations = await load("src/lib/integrations.js");
 const commandPalette = await load("src/components/CommandPalette.jsx");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -63,6 +64,7 @@ check("图表序列稳定化", marketChart.includes("function chartTime") && mar
 check("行情值可信边界", marketStore.includes("function numberOrNull") && marketStore.includes("price <= 0") && marketStore.includes("explicitPercent != null") && prd.includes("Stage 3AX 行情值可信边界"), "行情归一化不得把 null/空字符串价格或涨跌幅转换为 0，非正价格必须被拒绝");
 check("过期行情统计门禁", marketBreadth.includes("quoteFreshness") && marketBreadth.includes('freshness.state === "stale"') && marketBreadth.includes("staleCount") && anomalyDetection.includes("freshness.state === \"stale\"") && prd.includes("Stage 3AY 过期行情统计门禁"), "市场宽度和异动雷达不得把已明确过期的行情当作当前信号，过期数量需与缺失数量分开");
 check("数据请求取消与资源回收", localHostClient.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && marketStore.includes("abortPendingDataRequests") && marketStore.includes("new AbortController()") && piRuntime.includes("signal") && prd.includes("Stage 3AZ 数据请求取消与资源回收"), "渠道切换时应取消 Local Host 数据请求并保留代次保护，主动取消不得误报超时");
+check("Local Host 启动故障可恢复状态", integrations.includes("localHostRequest(\"/api/integration/status\")") && integrations.includes("environment: \"local-host\"") && !integrations.includes("catch { return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true;"), "集成状态读取必须传播 Host 故障，不能伪装成浏览器预览");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
