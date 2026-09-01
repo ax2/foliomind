@@ -80,6 +80,32 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, source: "真实 CAP" });
   });
 
+  it("rejects empty prices and preserves missing change fields as empty", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValueOnce({
+      data: { quotes: [{ symbol: "600519", price: 1300, changePercent: null, changeAmount: null, source: "真实 CAP" }] },
+      mode: "qveris-cap",
+      cacheHit: true,
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1300, change: null, changeAmount: null });
+
+    runtime.queryCachedData.mockResolvedValueOnce({
+      data: { quotes: [{ symbol: "600519", price: null, changePercent: 0, source: "错误响应" }] },
+      mode: "qveris-cap",
+      cacheHit: true,
+      audits: [],
+    });
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(false);
+    expect(useLabStore.getState().liveDataError).toContain("数据暂时未返回");
+  });
+
   it("builds an auditable anomaly explanation from real CAP evidence", async () => {
     const anomaly = { id: "600519-price", symbol: "600519", name: "贵州茅台", type: "price", value: 8.2, threshold: 4, asOf: "2026-08-31", source: "真实行情源" };
     useLabStore.setState({

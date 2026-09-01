@@ -203,10 +203,11 @@ function monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluati
 }
 function quoteFromReply(text) {
   const value = findJsonObject(text);
-  if (value && Number.isFinite(Number(value.price))) {
+  const structuredPrice = value && numberOrNull(value.price);
+  if (value && structuredPrice != null && structuredPrice > 0) {
     return {
-      price: Number(value.price),
-      change: Number.isFinite(Number(value.change)) ? Number(value.change) : null,
+      price: structuredPrice,
+      change: numberOrNull(value.change),
       asOf: String(value.asOf || ""),
       source: String(value.source || "数据服务"),
       series: Array.isArray(value.series) ? value.series : [],
@@ -216,38 +217,45 @@ function quoteFromReply(text) {
   }
   const source = String(text ?? "");
   const priceMatch = source.match(/(?:最新价|当前价|收盘价|last\s*price)[^\d$￥¥]{0,24}[$￥¥]?\s*([\d,]+(?:\.\d+)?)/i);
-  if (!priceMatch) return null;
+  const parsedPrice = priceMatch ? numberOrNull(priceMatch[1].replaceAll(",", "")) : null;
+  if (parsedPrice == null || parsedPrice <= 0) return null;
   const changeMatch = source.match(/(?:涨跌幅|涨幅|change)[^\d+\-]{0,18}([+\-]?\d+(?:\.\d+)?)\s*%/i);
   const asOfMatch = source.match(/(?:数据时间|截至|as\s*of)[：:\s]*([^\n|]+)/i);
   const sourceMatch = source.match(/(?:数据来源|来源|source)[：:\s]*([^\n|]+)/i);
   return {
-    price: Number(priceMatch[1].replaceAll(",", "")),
-    change: changeMatch ? Number(changeMatch[1]) : null,
+    price: parsedPrice,
+    change: changeMatch ? numberOrNull(changeMatch[1]) : null,
     asOf: asOfMatch?.[1]?.trim() || "",
     source: sourceMatch?.[1]?.trim() || "数据服务",
   };
 }
 
+function numberOrNull(rawValue) {
+  if (rawValue == null || rawValue === "") return null;
+  const value = Number(rawValue);
+  return Number.isFinite(value) ? value : null;
+}
+
 function normalizeLiveQuote(value) {
   if (!value || typeof value !== "object") return null;
-  const price = Number(value.price ?? value.lastPrice ?? value.last_price);
-  if (!Number.isFinite(price)) return null;
-  const previousClose = Number(value.previousClose ?? value.previous_close ?? value.prevClose);
-  const rawChange = Number(value.changeAmount ?? value.change_amount ?? value.changeValue ?? value.change);
-  const explicitPercent = Number(value.changePercent ?? value.change_percent ?? value.pctChange ?? value.percentChange);
-  const change = Number.isFinite(explicitPercent)
+  const price = numberOrNull(value.price ?? value.lastPrice ?? value.last_price);
+  if (price == null || price <= 0) return null;
+  const previousClose = numberOrNull(value.previousClose ?? value.previous_close ?? value.prevClose);
+  const rawChange = numberOrNull(value.changeAmount ?? value.change_amount ?? value.changeValue ?? value.change);
+  const explicitPercent = numberOrNull(value.changePercent ?? value.change_percent ?? value.pctChange ?? value.percentChange);
+  const change = explicitPercent != null
     ? explicitPercent
-    : Number.isFinite(previousClose) && previousClose !== 0 && Number.isFinite(rawChange)
+    : previousClose != null && previousClose !== 0 && rawChange != null
       ? rawChange / previousClose * 100
       : null;
   return {
     price,
-    change: Number.isFinite(change) ? change : null,
-    changeAmount: Number.isFinite(rawChange) ? rawChange : Number.isFinite(previousClose) ? price - previousClose : null,
+    change,
+    changeAmount: rawChange ?? (previousClose != null ? price - previousClose : null),
     asOf: String(value.asOf ?? value.as_of ?? value.timestamp ?? ""),
     source: String(value.source ?? value.dataSource ?? "数据服务"),
     open: value.open ?? null,
-    previousClose: Number.isFinite(previousClose) ? previousClose : value.previousClose ?? null,
+    previousClose,
     high: value.high ?? null,
     low: value.low ?? null,
     volume: value.volume ?? null,
