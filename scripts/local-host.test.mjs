@@ -71,6 +71,17 @@ test("rejects explicit CAP failure envelopes instead of exposing partial fields"
   );
 });
 
+test("rejects zero and negative quote prices at the Host normalization boundary", () => {
+  for (const price of [0, -1, "", "-0.01", undefined, Number.NaN, "NaN"]) {
+    assert.throws(
+      () => normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { result: { data: { price, timestamp: "2026-08-28T16:01:30" } } }),
+      /CAP 未返回可识别的实时行情/,
+    );
+  }
+  const result = normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { result: { data: { price: "1297.4", timestamp: "2026-08-28T16:01:30" } } });
+  assert.equal(result.quotes[0].price, 1297.4);
+});
+
 test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {
   const gate = createCacheWarmupGate();
   let ready = false;

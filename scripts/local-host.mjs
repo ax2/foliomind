@@ -355,8 +355,12 @@ export function normalizeCapabilityResult(kind, input, result) {
   const meta = result?.result?._meta || result?._meta || {};
   const source = meta.source_provider || meta.source_tool_id || DEFAULT_DATA_PROVIDER;
   if (kind === "quote") {
-    if (!data || typeof data !== "object" || Array.isArray(data) || !Number.isFinite(Number(data.price))) throw new Error("CAP 未返回可识别的实时行情");
-    return { quotes: [{ ...data, changePercent: data.change_percent, changeAmount: data.change, previousClose: data.previous_close, turnover: data.turnover_amount, asOf: data.timestamp, source }], source, capability: "MKT.L1.RT", asOf: data.timestamp || null };
+    const price = Number(data?.price);
+    // Reject non-positive quotes at the Host boundary.  The UI also guards
+    // this value, but allowing it into the shared cache would let an invalid
+    // upstream response contaminate later consumers and derived signals.
+    if (!data || typeof data !== "object" || Array.isArray(data) || !Number.isFinite(price) || price <= 0) throw new Error("CAP 未返回可识别的实时行情");
+    return { quotes: [{ ...data, price, changePercent: data.change_percent, changeAmount: data.change, previousClose: data.previous_close, turnover: data.turnover_amount, asOf: data.timestamp, source }], source, capability: "MKT.L1.RT", asOf: data.timestamp || null };
   }
   if (kind === "details") {
     if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回公司资料");
