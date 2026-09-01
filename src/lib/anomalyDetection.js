@@ -1,3 +1,5 @@
+import { quoteFreshness } from "./quoteFormatting.js";
+
 const numberValue = (value) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -25,6 +27,8 @@ export function detectMarketAnomalies(watchlist = [], liveQuotes = {}, options =
     const change = numberValue(quote?.change);
     const asOf = String(quote?.asOf || "");
     const source = String(quote?.source || "数据服务");
+    const freshness = quoteFreshness(quote?.asOf, options.now, options.staleAfterMs);
+    if (freshness.state === "stale") continue;
     if (price != null && change != null && Math.abs(change) >= priceThreshold) {
       anomalies.push({
         id: `${item.symbol}:price`, symbol: item.symbol, name: item.name, market: item.market,

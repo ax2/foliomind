@@ -295,11 +295,12 @@ describe("FolioMind core flows", () => {
 
   it("shows a source-backed anomaly explanation without changing the quote card", () => {
     window.localStorage.removeItem("foliomind.market-columns.v1");
+    const asOf = new Date(Date.now() - 60_000).toISOString();
     useLabStore.setState({
       activeView: "market",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" }, demo: false },
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
-      liveQuotes: { "600519": { price: 1_300, change: 8.2, volumeRatio: 3.1, asOf: "2026-08-31", source: "真实 CAP" } },
+      liveQuotes: { "600519": { price: 1_300, change: 8.2, volumeRatio: 3.1, asOf, source: "真实 CAP" } },
       anomalyAttributions: { "600519:price": { fact: "涨幅超过阈值", portfolioRelation: "不在持仓中", drivers: [{ text: "已验证公告", references: [{ id: "news-1", title: "公司公告", source: "交易所", url: "https://example.com/news" }] }], watchNext: ["核验公告原文"], asOf: "2026-08-31", evidenceCount: 2, disclaimer: "解读仅基于已返回的真实数据，不构成投资建议或交易指令。" } },
     });
     render(<MarketView />);
@@ -312,7 +313,7 @@ describe("FolioMind core flows", () => {
       activeView: "market",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" }, demo: false },
       watchlist: [{ symbol: "AAA", name: "上涨标的", market: "沪深" }, { symbol: "BBB", name: "下跌标的", market: "沪深" }, { symbol: "CCC", name: "待更新", market: "沪深" }],
-      liveQuotes: { AAA: { price: 10, change: 3.4, asOf: "2026-08-31T08:00:00Z", source: "真实 CAP" }, BBB: { price: 20, change: -1.2, asOf: "2026-08-31T08:00:00Z", source: "真实 CAP" }, CCC: { change: 8 } },
+      liveQuotes: { AAA: { price: 10, change: 3.4, asOf: new Date(Date.now() - 60_000).toISOString(), source: "真实 CAP" }, BBB: { price: 20, change: -1.2, asOf: new Date(Date.now() - 60_000).toISOString(), source: "真实 CAP" }, CCC: { change: 8 } },
     });
     render(<MarketView />);
     const breadth = screen.getByRole("region", { name: "自选市场宽度" });

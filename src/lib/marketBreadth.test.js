@@ -18,4 +18,17 @@ describe("marketBreadth", () => {
     expect(result.topGainer.symbol).toBe("AAA");
     expect(result.topLoser.symbol).toBe("CCC");
   });
+
+  it("excludes explicitly stale quotes without counting them as missing", () => {
+    const now = Date.parse("2026-09-02T10:00:00Z");
+    expect(marketBreadth(
+      [{ symbol: "AAA" }, { symbol: "BBB" }, { symbol: "CCC" }],
+      {
+        AAA: { price: 10, change: 2, asOf: "2026-09-02T09:55:00Z" },
+        BBB: { price: 20, change: -2, asOf: "2026-09-02T09:30:00Z" },
+        CCC: { price: 30, change: 1 },
+      },
+      { now },
+    )).toMatchObject({ pricedCount: 2, staleCount: 1, missingCount: 0, upCount: 2, downCount: 0 });
+  });
 });
