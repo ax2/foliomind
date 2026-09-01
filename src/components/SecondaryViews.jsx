@@ -21,6 +21,7 @@ import { nextBriefingLabel } from "../lib/briefingSchedule.js";
 import { loadDesktopLifecycleStatus, reconcileDesktopNow } from "../lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "../lib/piRuntime.js";
 import { marketBreadth } from "../lib/marketBreadth.js";
+import { RESEARCH_SORT_OPTIONS, sortResearchItems } from "../lib/research.js";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error) => friendlySettingsMessage(error);
@@ -344,23 +345,26 @@ export function ResearchView() {
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("all");
   const [onlyPriced, setOnlyPriced] = useState(false);
+  const [sortKey, setSortKey] = useState("default");
+  const [sortDirection, setSortDirection] = useState("desc");
   const realDataMode = hasRealDataAccess(integrationStatus);
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-  const filtered = watchlist.filter((item) => {
+  const filtered = useMemo(() => watchlist.filter((item) => {
     const quote = liveQuotes[item.symbol];
     const change = Number(quote?.change);
     const matchesQuery = !normalizedQuery || `${item.name} ${item.symbol} ${item.market} ${item.category}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery);
     const matchesDirection = direction === "all" || (direction === "up" && Number.isFinite(change) && change > 0) || (direction === "down" && Number.isFinite(change) && change < 0);
     return matchesQuery && matchesDirection && (!onlyPriced || Number.isFinite(quote?.price));
-  });
+  }), [watchlist, liveQuotes, normalizedQuery, direction, onlyPriced]);
+  const sorted = useMemo(() => sortResearchItems(filtered, liveQuotes, sortKey, sortDirection), [filtered, liveQuotes, sortKey, sortDirection]);
   const returnedCount = watchlist.filter((item) => Number.isFinite(liveQuotes[item.symbol]?.price)).length;
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length });
   const retry = () => { void refreshLiveData(); };
   const openSettings = () => setActiveView("settings");
   return <div className="secondary-page research-page"><header><div><h1>研究筛选</h1><p>在我的自选中按真实行情筛选标的，不用示例数据填充。</p></div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></header>
-    <div className="research-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、代码或市场…" aria-label="搜索标的" /></label><div className="filter-group" aria-label="涨跌方向"><button className={direction === "all" ? "active" : ""} onClick={() => setDirection("all")}>全部</button><button className={direction === "up" ? "active" : ""} onClick={() => setDirection("up")}>上涨</button><button className={direction === "down" ? "active" : ""} onClick={() => setDirection("down")}>下跌</button></div><button className={`filter-toggle${onlyPriced ? " active" : ""}`} aria-pressed={onlyPriced} onClick={() => setOnlyPriced((value) => !value)}><Funnel size={15} />仅显示有行情</button></div>
+    <div className="research-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、代码或市场…" aria-label="搜索标的" /></label><div className="filter-group" aria-label="涨跌方向"><button className={direction === "all" ? "active" : ""} onClick={() => setDirection("all")}>全部</button><button className={direction === "up" ? "active" : ""} onClick={() => setDirection("up")}>上涨</button><button className={direction === "down" ? "active" : ""} onClick={() => setDirection("down")}>下跌</button></div><button className={`filter-toggle${onlyPriced ? " active" : ""}`} aria-pressed={onlyPriced} onClick={() => setOnlyPriced((value) => !value)}><Funnel size={15} />仅显示有行情</button><label className="research-sort-control"><span>排序</span><select aria-label="研究排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{RESEARCH_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><button className="research-sort-direction" type="button" disabled={sortKey === "default"} aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button></div>
     {returnedCount > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedCount} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
-    {returnedCount === 0 ? <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : filtered.length === 0 ? <DataState state="empty" title="没有符合条件的标的" description="调整搜索词或筛选条件后再试；已有真实行情不会被修改。" /> : <section className="research-table" aria-label="真实行情筛选结果"><div className="research-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>市盈率</span><span>市净率</span><span>数据时间</span></div>{filtered.map((item) => { const quote = liveQuotes[item.symbol]; const hasQuote = Number.isFinite(quote?.price); const freshness = quoteFreshness(quote?.asOf); return <div className="research-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol} · {item.market || item.category}</small></span><span>{hasQuote ? formatPrice(quote.price) : "—"}</span><span className={changeToneClass(quote?.change)}>{formatPercent(quote?.change)}</span><span>{quote?.pe == null ? "—" : String(quote.pe)}</span><span>{quote?.pb == null ? "—" : String(quote.pb)}</span><span className={`quote-source quote-source-${freshness.state}`}>{hasQuote ? formatQuoteFreshness(quote.asOf) : "—"}</span></div>; })}</section>}
+    {returnedCount === 0 ? <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : sorted.length === 0 ? <DataState state="empty" title="没有符合条件的标的" description="调整搜索词或筛选条件后再试；已有真实行情不会被修改。" /> : <section className="research-table" aria-label="真实行情筛选结果"><div className="research-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>市盈率</span><span>市净率</span><span>数据时间</span></div>{sorted.map((item) => { const quote = liveQuotes[item.symbol]; const hasQuote = Number.isFinite(quote?.price); const freshness = quoteFreshness(quote?.asOf); return <div className="research-row" key={item.symbol}><span><strong>{item.name}</strong><small>{item.symbol} · {item.market || item.category}</small></span><span>{hasQuote ? formatPrice(quote.price) : "—"}</span><span className={changeToneClass(quote?.change)}>{formatPercent(quote?.change)}</span><span>{quote?.pe == null ? "—" : String(quote.pe)}</span><span>{quote?.pb == null ? "—" : String(quote.pb)}</span><span className={`quote-source quote-source-${freshness.state}`}>{hasQuote ? formatQuoteFreshness(quote.asOf) : "—"}</span></div>; })}</section>}
     <p className="security-note">范围：我的自选 · {returnedCount}/{watchlist.length} 个标的已返回行情{liveDataLastRefreshAt ? ` · 最近更新 ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : ""}。估值字段缺失时保持空值。</p>
   </div>;
 }

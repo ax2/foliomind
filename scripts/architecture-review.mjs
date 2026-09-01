@@ -8,6 +8,7 @@ const [packageJson, cargoToml, tauriConfig, app, errorBoundary, stockWorkspace, 
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
   load("src/App.jsx"), load("src/components/AppErrorBoundary.jsx"), load("src/components/StockWorkspace.jsx"), load("src/components/MarketChart.jsx"), load("src/components/CopilotPanel.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"), load("src/lib/anomalyAttribution.js"), load("src/lib/eventReminders.js"), load("src/lib/dataStatus.js"), load("src-tauri/src/capability_data.rs"),
 ]);
+const research = await load("src/lib/research.js");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
@@ -44,6 +45,7 @@ check("CAP 测试结果真实性", developerPanel.includes("capabilityTestOutcom
 check("动态 CAP 参数试验台", developerPanel.includes("测试参数（JSON）") && developerPanel.includes("JSON.parse") && developerPanel.includes("不能是数组或空值") && developerPanel.includes("searchId") && prd.includes("Stage 3AK 动态 CAP 参数试验台") && styles.includes("developer-capability-parameters"), "动态能力必须支持受控 JSON 参数编辑、本地校验和绑定 Search ID 的真实测试");
 check("市场表格真实字段映射", marketViews.includes("marketColumnValue(item, quote, column.id)") && prd.includes("Stage 3AL 市场行情表格真实字段映射") && marketViews.includes("我的自选"), "市场自选表格必须将列定义映射为字段 ID，真实行情不得因展示层类型错误全部降级为空值");
 check("涨跌方向缺失值中性化", stockWorkspace.includes("changeToneClass(change)") && marketViews.includes("changeToneClass(quote?.change)") && prd.includes("Stage 3AM 涨跌方向缺失值中性化"), "缺失或非法涨跌幅不得默认显示上涨/下跌颜色或进入方向筛选");
+check("研究筛选排序", marketViews.includes("sortResearchItems(filtered, liveQuotes, sortKey, sortDirection)") && research.includes("missing values always stay last") && research.includes("RESEARCH_SORT_OPTIONS") && prd.includes("Stage 3AN 研究筛选排序"), "研究页应提供稳定的真实数值排序，并将缺失字段置于末尾");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

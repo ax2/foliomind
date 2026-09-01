@@ -1399,6 +1399,10 @@ textarea:focus-visible {
 .filter-group button + button { border-left: 1px solid #dfe2e7; }
 .filter-group button.active, .filter-toggle.active { background: var(--blue-soft); color: var(--blue); }
 .filter-toggle { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #dfe2e7; border-radius: 8px; }
+.research-sort-control { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #dfe2e7; border-radius: 8px; padding: 0 8px 0 10px; color: #697586; font-size: 11px; }
+.research-sort-control select { min-height: 32px; border: 0; background: transparent; color: #3f4e62; font-size: 11px; outline: none; }
+.research-sort-direction { min-height: 32px; border: 1px solid #dfe2e7; border-radius: 8px; padding: 0 10px; background: #fff; color: #526071; cursor: pointer; font-size: 11px; }
+.research-sort-direction:disabled { color: #aab2bc; background: #f7f8fa; cursor: not-allowed; }
 .research-table { margin-top: 22px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
 .research-table-head, .research-row { display: grid; grid-template-columns: minmax(210px, 1.5fr) repeat(5, minmax(110px, 1fr)); align-items: center; min-width: 780px; padding: 0 15px; }
 .research-table-head { height: 38px; background: #f7f8fa; color: #7b8490; font-size: 10px; }
