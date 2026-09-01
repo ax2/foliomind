@@ -73,6 +73,7 @@ check("搜索标的真实详情闭环", labStore.includes("function dataItemForS
 check("共享 CAP 请求独立取消", localHost.includes("subscribeToSharedRequest") && localHost.includes("entry.subscribers") && localHost.includes("entry.controller.abort") && prd.includes("Stage 3BE 共享 CAP 请求的独立取消"), "同一 CAP 请求的单个调用方取消不得中止仍在等待的其它调用方");
 check("共享 CAP 缓存与配置切换回收", localHost.includes("cacheSharedResult") && localHost.includes("abortInFlightRequests") && localHost.includes("configuration-changed") && localHost.includes("if (!isAbortError(error))") && prd.includes("Stage 3BF 共享 CAP 结果提交与配置切换回收"), "共享结果必须由上游请求提交缓存，配置切换必须中止旧请求且不伪造错误审计");
 check("Host 行情正数边界", localHost.includes('kind === "quote"') && localHost.includes("price <= 0") && localHost.includes("Number.isFinite(price)") && prd.includes("Stage 3BG Host 行情正数边界前移"), "CAP 行情必须在 Host 归一化边界拒绝非有限和非正价格，避免污染缓存与派生指标");
+check("CAP 缓存命中语义", localHost.includes("const dataCacheHit = allDataCacheHit(results)") && localHost.includes("cacheHit: dataCacheHit") && localHost.includes("capabilityAuditOperation(cachedResult)") && localHost.includes('return result?.dataCacheHit === true ? "cached-call" : "cap-call"') && prd.includes("Stage 3BH CAP 缓存命中语义与回退门禁"), "固定 CAP 真实直连、短缓存复用和固化工具回退必须使用准确命中语义，避免误触发额外 Search");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

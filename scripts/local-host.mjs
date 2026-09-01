@@ -122,6 +122,14 @@ export function cacheSharedResult(cache, key, normalized, { ttl = 0, cacheGenera
   return normalized;
 }
 
+export function allDataCacheHit(results) {
+  return Array.isArray(results) && results.length > 0 && results.every((item) => item?.memoryCacheHit === true);
+}
+
+export function capabilityAuditOperation(result) {
+  return result?.dataCacheHit === true ? "cached-call" : "cap-call";
+}
+
 /** Keep one prompt request associated with one AbortController at a time. */
 export function createRuntimeGate() {
   let active = null;
@@ -477,11 +485,12 @@ async function queryDirectCapability(input, settings, key, signal) {
   const results = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
   if (!results.length) throw settled.find((item) => item.status === "rejected")?.reason || new Error("CAP 暂未返回数据");
   const primary = results[0];
+  const dataCacheHit = allDataCacheHit(results);
   if (kind === "details") {
     const fundamentals = results.find((item) => item.selected.kind === "fundamentals")?.normalized;
-    return { data: { ...primary.normalized, fundamentals: fundamentals?.fundamentals || {}, asOf: fundamentals?.asOf || null }, cacheHit: true, dataCacheHit: results.every((item) => item.memoryCacheHit), mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
+    return { data: { ...primary.normalized, fundamentals: fundamentals?.fundamentals || {}, asOf: fundamentals?.asOf || null }, cacheHit: dataCacheHit, dataCacheHit, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
   }
-  return { data: primary.normalized, cacheHit: true, dataCacheHit: primary.memoryCacheHit, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
+  return { data: primary.normalized, cacheHit: dataCacheHit, dataCacheHit, mode: "qveris-cap", toolId: primary.selected.toolId, capability: primary.selected.capability, provider: catalog.provider };
 }
 
 // Multiple watchlist rows can start at the same time.  Keep only the first
@@ -809,7 +818,7 @@ async function runPromptAgent(message, settings, key, signal) {
         let input; try { input = JSON.parse(call.function.arguments || "{}"); } catch { throw new Error("工具参数不是有效 JSON"); }
         try {
           const cachedResult = await queryDirectCapability(input, settings, key, signal);
-          audits.push({ operation: "cached-call", runId, toolCallId: call.id || randomUUID(), outcome: "success", detail: null });
+          audits.push({ operation: capabilityAuditOperation(cachedResult), runId, toolCallId: call.id || randomUUID(), outcome: "success", detail: null, cacheHit: cachedResult?.dataCacheHit === true });
           messages.push({ role: "tool", tool_call_id: call.id, name, content: JSON.stringify(cachedResult) });
         } catch (error) {
           audits.push({ operation: "cached-call", runId, toolCallId: call.id || randomUUID(), outcome: "error", detail: "cache-miss" });

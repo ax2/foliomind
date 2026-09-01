@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { abortInFlightRequests, adaptParameters, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
+import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -80,6 +80,15 @@ test("rejects zero and negative quote prices at the Host normalization boundary"
   }
   const result = normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { result: { data: { price: "1297.4", timestamp: "2026-08-28T16:01:30" } } });
   assert.equal(result.quotes[0].price, 1297.4);
+});
+
+test("keeps direct CAP and cached-tool audit semantics distinct", () => {
+  assert.equal(allDataCacheHit([{ memoryCacheHit: true }]), true);
+  assert.equal(allDataCacheHit([{ memoryCacheHit: true }, { memoryCacheHit: false }]), false);
+  assert.equal(allDataCacheHit([]), false);
+  assert.equal(capabilityAuditOperation({ dataCacheHit: true }), "cached-call");
+  assert.equal(capabilityAuditOperation({ dataCacheHit: false }), "cap-call");
+  assert.equal(capabilityAuditOperation({}), "cap-call");
 });
 
 test("coalesces concurrent cache warm-ups and lets waiters retry after a failed owner", async () => {
