@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics } from "./portfolio.js";
+import { normalizePortfolioPosition, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, sortPortfolioRows } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -45,6 +45,12 @@ describe("portfolio metrics", () => {
     const rows = portfolioAllocationRows(positions, { AAPL: { price: 200 }, MSFT: {} });
     expect(rows).toMatchObject([{ symbol: "AAPL", marketValue: 400, weight: 100 }]);
     expect(rows).toHaveLength(1);
+  });
+
+  it("sorts portfolio rows by real values with missing values last", () => {
+    const rows = [{ symbol: "A", marketValue: 200, pnl: -4 }, { symbol: "B", marketValue: null, pnl: null }, { symbol: "C", marketValue: 400, pnl: 8 }, { symbol: "D", marketValue: 200, pnl: 3 }];
+    expect(sortPortfolioRows(rows, "marketValue", "desc").map((row) => row.symbol)).toEqual(["C", "A", "D", "B"]);
+    expect(sortPortfolioRows(rows, "pnl", "asc").map((row) => row.symbol)).toEqual(["A", "D", "C", "B"]);
   });
 
   it("emits explainable concentration and coverage signals", () => {

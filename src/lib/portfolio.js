@@ -12,6 +12,13 @@ export const PORTFOLIO_PLAN_STATUSES = Object.freeze([
   { id: "archived", label: "已归档" },
 ]);
 
+export const PORTFOLIO_SORT_OPTIONS = Object.freeze([
+  { id: "default", label: "默认顺序", field: null },
+  { id: "marketValue", label: "市值", field: "marketValue" },
+  { id: "pnl", label: "未实现盈亏", field: "pnl" },
+  { id: "weight", label: "组合占比", field: "weight" },
+]);
+
 const PLAN_HORIZON_IDS = new Set(PORTFOLIO_PLAN_HORIZONS.map((item) => item.id));
 const PLAN_STATUS_IDS = new Set(PORTFOLIO_PLAN_STATUSES.map((item) => item.id));
 
@@ -160,6 +167,26 @@ export function portfolioAllocationRows(positions, liveQuotes) {
     }))
     .sort((left, right) => (right.weight - left.weight) || left.index - right.index)
     .map(({ index, ...row }) => row);
+}
+
+/** Sort portfolio rows for comparison; missing real quote values always stay last. */
+export function sortPortfolioRows(rows, sortKey = "default", direction = "desc") {
+  const values = Array.isArray(rows) ? rows : [];
+  const option = PORTFOLIO_SORT_OPTIONS.find((candidate) => candidate.id === sortKey);
+  if (!option?.field) return [...values];
+  const multiplier = direction === "asc" ? 1 : -1;
+  return values.map((row, index) => ({ row, index })).sort((left, right) => {
+    const leftRaw = left.row?.[option.field];
+    const rightRaw = right.row?.[option.field];
+    const leftNumber = leftRaw == null || String(leftRaw).trim() === "" ? null : Number(leftRaw);
+    const rightNumber = rightRaw == null || String(rightRaw).trim() === "" ? null : Number(rightRaw);
+    const leftValue = Number.isFinite(leftNumber) ? leftNumber : null;
+    const rightValue = Number.isFinite(rightNumber) ? rightNumber : null;
+    if (leftValue === null && rightValue === null) return left.index - right.index;
+    if (leftValue === null) return 1;
+    if (rightValue === null) return -1;
+    return (leftValue - rightValue) * multiplier || left.index - right.index;
+  }).map(({ row }) => row);
 }
 
 function csvCell(value) {

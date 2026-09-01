@@ -1735,6 +1735,14 @@ textarea:focus-visible {
 .allocation-value { margin: 0; font-variant-numeric: tabular-nums; }
 .allocation-note { margin: 13px 0 0; color: #7c8795; font-size: 10px; line-height: 1.5; }
 .portfolio-table { margin-top: 24px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+.portfolio-table-toolbar { display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); padding: 11px 15px; background: #fff; }
+.portfolio-table-toolbar > div { flex: 1; min-width: 0; }
+.portfolio-table-toolbar h2 { margin: 0; color: #273449; font-size: 14px; }
+.portfolio-table-toolbar small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.portfolio-table-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: #697586; font-size: 10px; }
+.portfolio-table-toolbar select { min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 7px; background: #fff; color: #3f4e62; font-size: 10px; }
+.portfolio-sort-direction { min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 9px; background: #fff; color: #526071; cursor: pointer; font-size: 10px; }
+.portfolio-sort-direction:disabled { color: #aab2bc; background: #f7f8fa; cursor: not-allowed; }
 .portfolio-table-head, .portfolio-row { display: grid; grid-template-columns: minmax(170px, 1.3fr) repeat(6, minmax(85px, 1fr)) minmax(160px, 1.5fr) minmax(105px, auto); align-items: center; min-width: 1080px; padding: 0 15px; }
 .portfolio-table-head { height: 38px; background: #f7f8fa; color: #7b8490; font-size: 10px; }
 .portfolio-row { min-height: 66px; border-top: 1px solid var(--line); color: #3f4855; font-size: 11px; font-variant-numeric: tabular-nums; }
