@@ -1369,6 +1369,9 @@ textarea:focus-visible {
 .event-calendar-copy p { margin: 5px 0 0; color: #657181; font-size: 11px; line-height: 1.55; }
 .event-calendar-meta { display: block; margin-top: 8px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .event-calendar-meta a { color: #3573bf; }
+.event-calendar-footer { display: flex; align-items: end; justify-content: space-between; gap: 10px; }
+.event-calendar-footer .event-calendar-meta { flex: 1; }
+.event-calendar-footer .notification-link { flex: 0 0 auto; white-space: nowrap; }
 .event-month-view { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: #fff; }
 .event-month-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .event-month-heading strong { display: block; color: #273449; font-size: 15px; }

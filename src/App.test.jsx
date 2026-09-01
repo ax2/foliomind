@@ -573,6 +573,8 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "上一个月" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /列表/ }));
     expect(screen.getByRole("region", { name: "真实公司事件列表" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看贵州茅台详情" }));
+    expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
   });
 
   it("filters the real event calendar to portfolio holdings", async () => {

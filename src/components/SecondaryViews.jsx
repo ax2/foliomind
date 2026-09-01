@@ -478,6 +478,7 @@ export function EventsView() {
   const refreshEvents = useLabStore((state) => state.refreshEvents);
   const retryEvents = useLabStore((state) => state.retryEvents);
   const setActiveView = useLabStore((state) => state.setActiveView);
+  const selectSymbol = useLabStore((state) => state.selectSymbol);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("upcoming");
   const [relationScope, setRelationScope] = useState("watchlist");
@@ -521,6 +522,10 @@ export function EventsView() {
   };
   const retry = () => { void retryEvents(); };
   const openSettings = () => setActiveView("settings");
+  const openEventSymbol = (event) => {
+    const symbol = String(event?.symbol || "").trim();
+    if (symbol) selectSymbol(symbol);
+  };
   const switchToMonth = () => {
     const firstEvent = monthDays.find((cell) => cell.inMonth && groupedEvents.has(cell.key));
     if (firstEvent) {
@@ -535,7 +540,7 @@ export function EventsView() {
     }
     setViewMode("month");
   };
-  const renderEventCard = (event) => <article className="event-calendar-card" key={event.id}><div className="event-calendar-date"><strong>{eventDateLabel(event.date)}</strong><small>{event.symbol}</small></div><div className="event-calendar-dot" aria-hidden="true" /><div className="event-calendar-copy"><div className="event-calendar-heading"><span>{event.type || "公司事件"}</span><strong>{event.name}</strong></div><h2>{event.title || "未命名事件"}</h2>{event.detail && event.detail !== event.title ? <p>{event.detail}</p> : null}<small className="event-calendar-meta">{event.source || "数据服务"}{event.url ? <> · <a href={event.url} target="_blank" rel="noreferrer">查看来源</a></> : null} · 能力 EVENT.CALENDAR.CORP</small></div></article>;
+  const renderEventCard = (event) => <article className="event-calendar-card" key={event.id}><div className="event-calendar-date"><strong>{eventDateLabel(event.date)}</strong><small>{event.symbol}</small></div><div className="event-calendar-dot" aria-hidden="true" /><div className="event-calendar-copy"><div className="event-calendar-heading"><span>{event.type || "公司事件"}</span><strong>{event.name}</strong></div><h2>{event.title || "未命名事件"}</h2>{event.detail && event.detail !== event.title ? <p>{event.detail}</p> : null}<div className="event-calendar-footer"><small className="event-calendar-meta">{event.source || "数据服务"}{event.url ? <> · <a href={event.url} target="_blank" rel="noreferrer">查看来源</a></> : null} · 能力 EVENT.CALENDAR.CORP</small>{event.symbol ? <button type="button" className="notification-link" onClick={() => openEventSymbol(event)} aria-label={`查看${event.name || event.symbol}详情`}>查看标的</button> : null}</div></div></article>;
   return <div className="secondary-page events-page"><header><div><h1>事件日历</h1><p>只展示自选标的已返回的真实公司事件，不用样例填充。</p></div><button className="secondary-button" disabled={eventDataLoading} onClick={realDataMode ? () => { void refreshEvents(); } : openSettings}><ArrowsClockwise size={16} />{realDataMode ? eventDataLoading ? "更新中…" : "刷新真实事件" : "配置数据"}</button></header>
     {dataState === DATA_STATES.NO_CREDENTIAL || dataState === DATA_STATES.LOADING || dataState === DATA_STATES.ERROR ? <LiveDataState state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     {dataState === DATA_STATES.PARTIAL ? <LiveDataState compact state={dataState} receivedCount={eventDataReceivedCount} totalCount={eventDataTotalCount || watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
