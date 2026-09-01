@@ -1,0 +1,331 @@
+use chrono::{Duration as ChronoDuration, Utc};
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+use std::{thread, time::Duration};
+use uuid::Uuid;
+
+const MAX_RESPONSE_SIZE: u64 = 20_480;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityQueryInput {
+    pub kind: String,
+    pub symbol: Option<String>,
+    pub range: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityQueryResult {
+    pub data: Value,
+    pub mode: String,
+    pub cache_hit: bool,
+    pub audits: Vec<Value>,
+    pub tool_id: String,
+    pub capability: String,
+}
+
+struct CapabilitySpec {
+    tool_id: &'static str,
+    capability: &'static str,
+}
+
+fn spec(kind: &str) -> Option<CapabilitySpec> {
+    let (tool_id, capability) = match kind {
+        "quote" => ("qveris_finance.mkt_l1_rt", "MKT.L1.RT"),
+        "details" => ("qveris_finance.ref_company_profile", "REF.COMPANY_PROFILE"),
+        "fundamentals" => (
+            "qveris_finance.fundamentals_derived_ratios",
+            "FUNDAMENTALS.DERIVED_RATIOS",
+        ),
+        "series" => ("qveris_finance.mkt_bars_eod", "MKT.BARS.EOD"),
+        "core_event" => ("qveris_finance.event_calendar_corp", "EVENT.CALENDAR.CORP"),
+        "capital_flow" => ("qveris_finance.flow_large_order", "FLOW.LARGE_ORDER"),
+        "sentiment" => ("qveris_finance.news_fin_tagged", "NEWS.FIN.TAGGED"),
+        _ => return None,
+    };
+    Some(CapabilitySpec {
+        tool_id,
+        capability,
+    })
+}
+
+fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String> {
+    let symbol = input
+        .symbol
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_uppercase();
+    if symbol.is_empty() {
+        return Err("CAP 查询需要有效的证券代码".into());
+    }
+    let today = Utc::now().date_naive();
+    let days = if kind == "series" { 90 } else { 30 };
+    let start = today - ChronoDuration::days(days);
+    if matches!(kind, "series" | "core_event" | "capital_flow" | "sentiment") {
+        return Ok(json!({
+            "symbol": symbol,
+            "start_date": start.format("%Y-%m-%d").to_string(),
+            "end_date": today.format("%Y-%m-%d").to_string(),
+        }));
+    }
+    Ok(json!({ "symbol": symbol }))
+}
+
+fn payload(value: &Value) -> Value {
+    value
+        .pointer("/result/data")
+        .or_else(|| value.get("data"))
+        .or_else(|| value.get("result"))
+        .cloned()
+        .unwrap_or_else(|| value.clone())
+}
+
+fn cost(value: &Value) -> Option<Value> {
+    let object = value.as_object()?;
+    for key in [
+        "qveris_cost",
+        "qverisCost",
+        "charged_credits",
+        "credits_used",
+        "fee",
+    ] {
+        let Some(candidate) = object.get(key) else {
+            continue;
+        };
+        if let Some(amount) = candidate
+            .as_f64()
+            .or_else(|| candidate.as_str().and_then(|item| item.parse::<f64>().ok()))
+        {
+            if amount.is_finite() && amount >= 0.0 {
+                return Some(json!({
+                    "amount": amount,
+                    "unit": object.get("currency").or_else(|| object.get("unit")).and_then(Value::as_str).unwrap_or("credits"),
+                }));
+            }
+        }
+    }
+    for key in ["usage", "billing", "meta", "metadata", "result", "data"] {
+        if let Some(found) = object.get(key).and_then(cost) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn audit(
+    spec: &CapabilitySpec,
+    params: &Value,
+    status: u16,
+    duration_ms: u128,
+    body: Option<&Value>,
+    reason: Option<&str>,
+) -> Value {
+    let mut value = json!({
+        "operation": "cap-call",
+        "outcome": if (200..300).contains(&status) { "success" } else { "error" },
+        "toolId": spec.tool_id,
+        "capability": spec.capability,
+        "status": status,
+        "durationMs": duration_ms,
+        "params": params,
+    });
+    if let Some(reason) = reason {
+        value["reason"] = Value::String(reason.to_owned());
+        value["detail"] = Value::String(reason.to_owned());
+    }
+    if let Some(body) = body {
+        value["response"] = json!({
+            "success": body.get("success").and_then(Value::as_bool),
+            "statusCode": body.pointer("/result/status_code").or_else(|| body.get("status_code")),
+            "cost": cost(body),
+        });
+        if let Some(found) = cost(body) {
+            value["cost"] = found;
+        }
+    }
+    value
+}
+
+pub fn error_audit(input: &CapabilityQueryInput, reason: &str) -> Value {
+    let Some(spec) = spec(input.kind.trim()) else {
+        return json!({
+            "operation": "cap-call",
+            "outcome": "error",
+            "status": 400,
+            "reason": reason,
+            "detail": reason,
+        });
+    };
+    let params = parameters(input, input.kind.trim()).unwrap_or_else(|_| json!({}));
+    audit(&spec, &params, 502, 0, None, Some(reason))
+}
+
+fn execute(
+    client: &Client,
+    api_key: &str,
+    base_url: &str,
+    spec: &CapabilitySpec,
+    params: &Value,
+) -> Result<(Value, Value), String> {
+    let url = format!(
+        "{}/tools/execute?tool_id={}",
+        base_url.trim_end_matches('/'),
+        spec.tool_id
+    );
+    let started = std::time::Instant::now();
+    let request = json!({
+        "session_id": format!("foliomind_cap_{}", Uuid::new_v4()),
+        "parameters": params,
+        "max_response_size": MAX_RESPONSE_SIZE,
+        "respond_with": "full",
+    });
+    let mut last_status = 502;
+    for attempt in 0..=1 {
+        let response = client
+            .post(&url)
+            .bearer_auth(api_key)
+            .json(&request)
+            .send()
+            .map_err(|_| "金融数据渠道连接失败")?;
+        let status = response.status().as_u16();
+        last_status = status;
+        let body = response
+            .json::<Value>()
+            .map_err(|_| "金融数据渠道返回内容无法解析")?;
+        let nested_status = body
+            .pointer("/result/status_code")
+            .or_else(|| body.get("status_code"))
+            .and_then(Value::as_u64)
+            .unwrap_or(200);
+        if (200..300).contains(&status) {
+            if body.get("success").and_then(Value::as_bool) == Some(false) || nested_status >= 400 {
+                return Err("金融数据渠道暂未返回可用结果".into());
+            }
+            return Ok((
+                body.clone(),
+                audit(
+                    spec,
+                    params,
+                    status,
+                    started.elapsed().as_millis(),
+                    Some(&body),
+                    None,
+                ),
+            ));
+        }
+        if attempt == 0 && matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504) {
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        let reason = if matches!(status, 401 | 403) {
+            "金融数据凭据无效或无权限"
+        } else {
+            "金融数据渠道暂时不可用"
+        };
+        return Err(reason.into());
+    }
+    Err(format!("金融数据渠道暂时不可用（HTTP {last_status}）"))
+}
+
+pub fn query(
+    api_key: &str,
+    capability_base_url: &str,
+    input: CapabilityQueryInput,
+) -> Result<CapabilityQueryResult, String> {
+    let kind = input.kind.trim();
+    let primary = spec(kind).ok_or("没有对应的金融能力")?;
+    let primary_params = parameters(&input, kind)?;
+    let client = Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| "无法初始化金融数据客户端")?;
+    let (primary_body, primary_audit) = execute(
+        &client,
+        api_key,
+        capability_base_url,
+        &primary,
+        &primary_params,
+    )?;
+    let data = if kind == "details" {
+        let fundamentals = spec("fundamentals").expect("fundamentals spec");
+        let fundamentals_params = parameters(&input, "fundamentals")?;
+        let mut audits = vec![primary_audit];
+        let fundamentals_data = match execute(
+            &client,
+            api_key,
+            capability_base_url,
+            &fundamentals,
+            &fundamentals_params,
+        ) {
+            Ok((body, record)) => {
+                audits.push(record);
+                payload(&body)
+            }
+            Err(error) => {
+                audits.push(error_audit(&input, &error));
+                Value::Object(Map::new())
+            }
+        };
+        let mut merged = payload(&primary_body)
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        merged.insert("fundamentals".into(), fundamentals_data);
+        return Ok(CapabilityQueryResult {
+            data: Value::Object(merged),
+            mode: "qveris-cap".into(),
+            cache_hit: false,
+            audits,
+            tool_id: primary.tool_id.into(),
+            capability: primary.capability.into(),
+        });
+    } else {
+        payload(&primary_body)
+    };
+    Ok(CapabilityQueryResult {
+        data,
+        mode: "qveris-cap".into(),
+        cache_hit: false,
+        audits: vec![primary_audit],
+        tool_id: primary.tool_id.into(),
+        capability: primary.capability.into(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_bounded_parameters_for_series() {
+        let input = CapabilityQueryInput {
+            kind: "series".into(),
+            symbol: Some("600519".into()),
+            range: None,
+        };
+        let value = parameters(&input, "series").unwrap();
+        assert_eq!(value["symbol"], "600519");
+        assert!(value["start_date"].as_str().unwrap().len() == 10);
+        assert!(value["end_date"].as_str().unwrap().len() == 10);
+    }
+
+    #[test]
+    fn unwraps_qveris_envelopes() {
+        let value = json!({"result": {"data": {"price": 1.2}}});
+        assert_eq!(payload(&value)["price"], 1.2);
+    }
+
+    #[test]
+    fn rejects_missing_symbol() {
+        let input = CapabilityQueryInput {
+            kind: "quote".into(),
+            symbol: None,
+            range: None,
+        };
+        assert!(parameters(&input, "quote").is_err());
+    }
+}

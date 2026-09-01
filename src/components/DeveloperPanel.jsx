@@ -3,7 +3,7 @@ import { ArrowClockwise, CaretUp, Code, Trash, X } from "@phosphor-icons/react";
 import { clearDeveloperLogs, discoverCapabilities, isLocalWebRuntime, loadDeveloperOverview, testCapability, updateDeveloperVariables } from "../lib/localHost.js";
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { BUILTIN_CAPABILITIES } from "../lib/builtinCapabilities.js";
-import { queryTradingCalendar } from "../lib/integrations.js";
+import { queryCapabilityData, queryTradingCalendar } from "../lib/integrations.js";
 
 function formatTime(value) {
   try { return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return "--:--:--"; }
@@ -236,7 +236,7 @@ export function DeveloperPanel() {
         ? await testCapability({ toolId: capability.toolId, searchId: capability.searchId, parameters: sampleParametersFor(capability, symbol) })
         : capability.kind === "trading_calendar"
         ? desktop ? await queryTradingCalendar(calendarDate) : await testCapability({ kind: capability.kind, date: calendarDate, marketcode: "212001" })
-        : local ? await testCapability({ kind: capability.kind, symbol }) : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
+        : desktop ? await queryCapabilityData({ kind: capability.kind, symbol }) : local ? await testCapability({ kind: capability.kind, symbol }) : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
       if (capability.kind?.startsWith("discovered:") && result?.success === false) throw new Error(result?.result?.error_message || "上游返回未成功结果");
       if (desktop && capability.kind !== "trading_calendar" && !result?.audits?.some((audit) => audit?.outcome === "success" && (audit?.toolId === capability.toolId || audit?.tool_id === capability.toolId))) {
         throw new Error("未观察到该 CAP 的成功调用记录，请在调用日志中查看原因");

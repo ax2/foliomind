@@ -2,6 +2,7 @@
 //! Local-only Pi RPC host. The only listener is a run-scoped loopback executor.
 
 mod background_scheduler;
+mod capability_data;
 mod config;
 mod credentials;
 mod desktop_lifecycle;
@@ -15,7 +16,7 @@ use config::IntegrationSettings;
 use credentials::{CredentialStore, OsCredentialStore};
 use executor::{AuditEvent, BridgeEnvironment, RunExecutor};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
@@ -1295,6 +1296,51 @@ async fn qveris_trading_calendar(
 }
 
 #[tauri::command]
+async fn qveris_data_query(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+    input: capability_data::CapabilityQueryInput,
+) -> Result<capability_data::CapabilityQueryResult, String> {
+    let host = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let input_for_error = input.clone();
+        let key = host
+            .credentials
+            .read_qveris_key()?
+            .ok_or("请先配置 QVeris API Key")?;
+        let settings = config::load(&app)?;
+        let result = match capability_data::query(&key, &settings.capability_base_url, input) {
+            Ok(result) => result,
+            Err(error) => {
+                let record = capability_data::error_audit(&input_for_error, &error);
+                let _ = app.emit(
+                    "pi-runtime://event",
+                    RuntimeEvent {
+                        kind: "qveris_audit".into(),
+                        status: host.status(),
+                        frame: Some(json!({ "audit": record })),
+                    },
+                );
+                return Err(error);
+            }
+        };
+        for record in &result.audits {
+            let _ = app.emit(
+                "pi-runtime://event",
+                RuntimeEvent {
+                    kind: "qveris_audit".into(),
+                    status: host.status(),
+                    frame: Some(json!({ "audit": record })),
+                },
+            );
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("CAP 数据查询任务失败: {error}"))?
+}
+
+#[tauri::command]
 fn user_state_load(app: AppHandle) -> Result<user_state::UserState, String> {
     user_state::load(&app)
 }
@@ -1370,6 +1416,7 @@ fn main() {
             integration_settings_apply,
             qveris_model_catalog_sync,
             qveris_trading_calendar,
+            qveris_data_query,
             user_state_load,
             user_state_save,
             desktop_lifecycle_status,

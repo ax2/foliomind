@@ -70,3 +70,13 @@ export async function queryTradingCalendar(date, marketcode = "212001") {
   const result = await localHostRequest("/api/data/query", { method: "POST", timeoutMs: 30_000, body: JSON.stringify({ input: { kind: "trading_calendar", date, marketcode } }) });
   return result?.data || result;
 }
+
+/**
+ * Execute a fixed CAP contract without involving the model runtime. Local
+ * Web uses the authenticated Host; desktop uses the native Tauri Host.
+ */
+export async function queryCapabilityData(input, options = {}) {
+  if (isDesktopRuntime()) return desktopInvoke("qveris_data_query", { input });
+  if (!isLocalWebRuntime()) throw new Error("真实金融数据仅在桌面端或 localhost 调试环境可用");
+  return localHostRequest("/api/data/query", { ...options, method: "POST", body: JSON.stringify({ input }) });
+}

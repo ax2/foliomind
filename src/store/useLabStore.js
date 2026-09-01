@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { skills, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
-import { getDeveloperVariable, isLocalWebRuntime, queryCachedData } from "../lib/localHost.js";
-import { loadIntegrationStatus, queryTradingCalendar } from "../lib/integrations.js";
+import { getDeveloperVariable, isLocalWebRuntime } from "../lib/localHost.js";
+import { loadIntegrationStatus, queryCapabilityData, queryTradingCalendar } from "../lib/integrations.js";
 import { loadUserState, mergeUserStateChanges, normalizeUserState, saveUserState } from "../lib/userState.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { hasModelAccess, hasRealDataAccess } from "../lib/dataStatus.js";
@@ -353,9 +353,9 @@ function portfolioContextForSymbol(positions, symbol, quote) {
 }
 
 async function queryMonitorData(kind, symbol) {
-  if (!isLocalWebRuntime() || typeof queryCachedData !== "function") return null;
+  if ((!isLocalWebRuntime() && !isDesktopRuntime()) || typeof queryCapabilityData !== "function") return null;
   try {
-    const cached = await queryCachedData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 });
+    const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 });
     const text = JSON.stringify(cached?.data ?? cached ?? {});
     return { fields: monitorFieldsFromReply(text, symbol), mode: cached?.mode || "pi-local-host", audits: cached?.audits || [{ operation: "cap-call", outcome: "success", kind }] };
   } catch {
@@ -423,9 +423,9 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 async function askFinancialData(prompt, kind, symbol, range, options) {
-  if (isLocalWebRuntime()) {
+  if (isLocalWebRuntime() || isDesktopRuntime()) {
     try {
-      const cached = await queryCachedData({ kind, symbol: qverisSymbol(symbol), range }, { timeoutMs: options?.settleTimeoutMs || 90_000 });
+      const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol), range }, { timeoutMs: options?.settleTimeoutMs || 90_000 });
       return { text: JSON.stringify(cached.data ?? cached), mode: cached.mode || "pi-local-host", audits: cached.audits || [{ operation: "cached-call", outcome: "success" }], cacheHit: cached.cacheHit === true };
     } catch (error) {
       if (error?.code !== "TOOL_CACHE_MISS") {
@@ -462,7 +462,7 @@ async function executeMonitorForItem(rule, item) {
   let result;
   let parsed = null;
   const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${item?.symbol || rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
-  if (isLocalWebRuntime() && typeof queryCachedData === "function") {
+  if ((isLocalWebRuntime() || isDesktopRuntime()) && typeof queryCapabilityData === "function") {
     const kinds = [...new Set(conditionsForRule(rule).map((condition) => monitorDataKind(condition.type)))];
     const directResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, item?.symbol || rule.symbol)))).filter(Boolean);
     const monitorData = directResults.reduce((merged, current) => ({ ...merged, ...current.fields, asOf: current.fields.asOf || merged.asOf, source: current.fields.source || merged.source }), {});
@@ -620,8 +620,8 @@ export const useLabStore = create((set, get) => ({
     let evidence = normalizeAttributionEvidence({ quote });
     let audits = [];
     try {
-      if (isLocalWebRuntime() && typeof queryCachedData === "function") {
-        const results = await Promise.allSettled(["sentiment", "core_event", "capital_flow"].map((kind) => queryCachedData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 })));
+      if ((isLocalWebRuntime() || isDesktopRuntime()) && typeof queryCapabilityData === "function") {
+        const results = await Promise.allSettled(["sentiment", "core_event", "capital_flow"].map((kind) => queryCapabilityData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 })));
         const data = results.filter((result) => result.status === "fulfilled").flatMap((result) => {
           const value = result.value;
           audits = [...audits, ...(Array.isArray(value?.audits) ? value.audits : [])];

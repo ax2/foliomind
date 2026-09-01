@@ -4,7 +4,7 @@ const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 
-import { applyIntegrationSettings, queryTradingCalendar, syncQVerisModels } from "./integrations.js";
+import { applyIntegrationSettings, queryCapabilityData, queryTradingCalendar, syncQVerisModels } from "./integrations.js";
 
 describe("integration client", () => {
   beforeEach(() => {
@@ -46,5 +46,12 @@ describe("integration client", () => {
     tauri.invoke.mockResolvedValue({ queriedDate: "2026-08-31", isTradingDay: true, source: "cn_financial_pro" });
     await expect(queryTradingCalendar("2026-08-31")).resolves.toMatchObject({ isTradingDay: true });
     expect(tauri.invoke).toHaveBeenCalledWith("qveris_trading_calendar", { date: "2026-08-31", marketcode: "212001" });
+  });
+
+  it("queries fixed CAP data through the native Host", async () => {
+    const input = { kind: "quote", symbol: "600519.SH", range: "" };
+    tauri.invoke.mockResolvedValue({ data: { price: 1297.4 }, mode: "qveris-cap", audits: [] });
+    await expect(queryCapabilityData(input)).resolves.toMatchObject({ mode: "qveris-cap" });
+    expect(tauri.invoke).toHaveBeenCalledWith("qveris_data_query", { input });
   });
 });
