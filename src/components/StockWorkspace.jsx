@@ -45,7 +45,7 @@ export function StockWorkspace() {
   const [showMovingAverage, setShowMovingAverage] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
-  const stock = stocks[symbol] ?? watchlist.find((item) => item.symbol === symbol) ?? { symbol, name: symbol, market: "", category: "" };
+  const stock = watchlist.find((item) => item.symbol === symbol) ?? stocks[symbol] ?? { symbol, name: symbol, market: "", category: "" };
   const quote = liveQuotes[symbol];
   const realDataMode = hasRealDataAccess(integrationStatus);
   const isWatched = watchlist.some((item) => item.symbol === symbol);

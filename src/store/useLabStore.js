@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { skills, watchGroups } from "../data/market.js";
+import { skills, stocks, watchGroups } from "../data/market.js";
 import { defaultMonitorRules, strategyFor } from "../data/monitorStrategies.js";
 import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { getDeveloperVariable, isLocalWebRuntime } from "../lib/localHost.js";
@@ -93,6 +93,13 @@ function marketContext(item) {
   if (/NASDAQ|NYSE|AMEX|美股|US/.test(market)) return "美股";
   if (/HKEX|港股|香港|HK/.test(market)) return "港股";
   return "A股";
+}
+function dataItemForSymbol(state, symbol) {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  if (!normalized) return null;
+  return state.watchlist.find((item) => String(item?.symbol || "").trim().toUpperCase() === normalized)
+    || stocks[normalized]
+    || { symbol: normalized, name: normalized, market: "", category: "" };
 }
 function findJsonObject(text) {
   const source = String(text ?? "");
@@ -619,7 +626,7 @@ export const useLabStore = create((set, get) => ({
   },
   refreshSelectedQuote: async (symbol) => {
     const state = get();
-    const item = state.watchlist.find((candidate) => candidate.symbol === symbol);
+    const item = dataItemForSymbol(state, symbol);
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !item || state.selectedQuoteLoading?.[symbol] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode)) return false;
     const requestGeneration = (selectedQuoteGenerations.get(symbol) || 0) + 1;
@@ -692,7 +699,7 @@ export const useLabStore = create((set, get) => ({
   },
   refreshQuoteDetails: async (symbol) => {
     const state = get();
-    const item = state.watchlist.find((entry) => entry.symbol === symbol);
+    const item = dataItemForSymbol(state, symbol);
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !item || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling" || state.quoteDetailsLoading[symbol] || state.quoteDetailsLoaded[symbol]) return false;
     const requestGeneration = ++detailsRequestGeneration;
@@ -722,7 +729,7 @@ export const useLabStore = create((set, get) => ({
   },
   refreshQuoteSeries: async (symbol, range) => {
     const state = get();
-    const item = state.watchlist.find((entry) => entry.symbol === symbol);
+    const item = dataItemForSymbol(state, symbol);
     const configured = hasRealDataAccess(state.integrationStatus);
     const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
     if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;

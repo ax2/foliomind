@@ -189,6 +189,25 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveDataLoading).toBe(false);
   });
 
+  it("can refresh a searchable symbol before it is added to the watchlist", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "AAPL", name: "Apple Inc.", market: "NASDAQ", category: "科技" }],
+      selectedSymbol: "600519",
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: { quotes: [{ symbol: "600519.SH", price: 1297.4, changePercent: 0.39, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] },
+      cacheHit: true,
+      mode: "qveris-cap",
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshSelectedQuote("600519")).resolves.toBe(true);
+    expect(runtime.queryCachedData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519.SH", range: "" }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, source: "真实 CAP" });
+  });
+
   it("does not block a selected refresh while the background batch is running", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

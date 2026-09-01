@@ -69,6 +69,7 @@ check("数据请求取消与资源回收", localHostClient.includes("LOCAL_HOST_
 check("Local Host 启动故障可恢复状态", integrations.includes("localHostRequest(\"/api/integration/status\")") && integrations.includes("environment: \"local-host\"") && !integrations.includes("catch { return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true;"), "集成状态读取必须传播 Host 故障，不能伪装成浏览器预览");
 check("Local Host 用户状态单一事实源", userStateClient.includes("isLocalWebRuntime()") && userStateClient.includes("localHostRequest(\"/api/user-state\")") && !userStateClient.includes("Keep browser preview usable when Host is offline") && prd.includes("Stage 3BB Local Host 用户状态单一事实源"), "localhost 用户状态必须以 Host 为唯一事实源，离线不得回退浏览器存储");
 check("用户状态加载失败可恢复", labStore.includes("userStateLoading") && labStore.includes("userStateError") && labStore.includes("userStateLoaded: false") && labStore.includes("mergeUserStateChanges(base, local, remote)") && prd.includes("Stage 3BC 用户状态加载失败可恢复与早期编辑保护"), "用户状态失败不得继续触发后台任务，重试和慢速响应需保留可恢复性");
+check("搜索标的真实详情闭环", labStore.includes("function dataItemForSymbol") && labStore.includes("dataItemForSymbol(state, symbol)") && stockWorkspace.includes("watchlist.find((item) => item.symbol === symbol) ?? stocks[symbol]") && prd.includes("Stage 3BD 搜索标的详情与真实行情闭环"), "非自选搜索标的详情动作必须仍能发起真实请求，静态目录数据不得冒充行情");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
