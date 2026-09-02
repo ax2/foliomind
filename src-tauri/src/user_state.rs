@@ -855,25 +855,31 @@ mod tests {
                     last_signal_triggered: None,
                 }
             };
-        let mut migrated = UserState::default();
-        migrated.monitor_rules = vec![
-            seed("r1", "600519", "price_change", 3.0, 300),
-            seed("r2", "300750", "news_risk", 1.0, 600),
-        ];
+        let migrated = UserState {
+            monitor_rules: vec![
+                seed("r1", "600519", "price_change", 3.0, 300),
+                seed("r2", "300750", "news_risk", 1.0, 600),
+            ],
+            ..UserState::default()
+        };
         assert!(migrate_legacy_seed_rules(migrated).monitor_rules.is_empty());
 
-        let mut edited = UserState::default();
-        edited.monitor_rules = vec![
-            seed("r1", "600519", "price_change", 4.0, 300),
-            seed("r2", "300750", "news_risk", 1.0, 600),
-        ];
+        let edited = UserState {
+            monitor_rules: vec![
+                seed("r1", "600519", "price_change", 4.0, 300),
+                seed("r2", "300750", "news_risk", 1.0, 600),
+            ],
+            ..UserState::default()
+        };
         assert_eq!(migrate_legacy_seed_rules(edited).monitor_rules.len(), 2);
 
-        let mut active = UserState::default();
-        active.monitor_rules = vec![
-            seed("r1", "600519", "price_change", 3.0, 300),
-            seed("r2", "300750", "news_risk", 1.0, 600),
-        ];
+        let mut active = UserState {
+            monitor_rules: vec![
+                seed("r1", "600519", "price_change", 3.0, 300),
+                seed("r2", "300750", "news_risk", 1.0, 600),
+            ],
+            ..UserState::default()
+        };
         active.notifications.push(Notification {
             id: "n1".into(),
             kind: "monitor".into(),
