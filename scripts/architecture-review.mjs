@@ -15,6 +15,7 @@ const research = await load("src/lib/research.js");
 const portfolio = await load("src/lib/portfolio.js");
 const marketBreadth = await load("src/lib/marketBreadth.js");
 const anomalyDetection = await load("src/lib/anomalyDetection.js");
+const liveQuotes = await load("src/components/LiveQuotesStrip.jsx");
 const piRuntime = await load("src/lib/piRuntime.js");
 const localHostClient = await load("src/lib/localHost.js");
 const integrations = await load("src/lib/integrations.js");
@@ -74,6 +75,7 @@ check("市场概览卡快捷打开与方向中性", marketViews.includes("index-
 check("图表序列稳定化", marketChart.includes("function chartTime") && marketChart.includes("function numericOrNaN") && marketChart.includes("const byTime = new Map()") && marketChart.includes("sort((left, right) => left.time - right.time)") && prd.includes("Stage 3AW 行情序列稳定化与图表恢复"), "行情序列交给图表前必须统一时间、过滤无效值、去重并严格升序，异常响应不得导致渲染故障");
 check("行情值可信边界", marketStore.includes("function numberOrNull") && marketStore.includes("price <= 0") && marketStore.includes("explicitPercent != null") && prd.includes("Stage 3AX 行情值可信边界"), "行情归一化不得把 null/空字符串价格或涨跌幅转换为 0，非正价格必须被拒绝");
 check("自选行情新鲜度", watchlistSidebar.includes("quote-freshness") && quoteFormatting.includes("formatCompactQuoteFreshness") && watchlistSidebar.includes("formatQuoteFreshness") && prd.includes("Stage 3CO 自选行情新鲜度"), "自选侧栏的真实行情必须显式标记新鲜度，过期或未知时间不能看起来像实时数据");
+check("多市场行情时区", quoteFormatting.includes("marketTimeZone") && quoteFormatting.includes("America/New_York") && quoteFormatting.includes("Asia/Hong_Kong") && quoteFormatting.includes("formatQuoteTimestamp") && stockWorkspace.includes("stock.market") && liveQuotes.includes("item.market") && marketViews.includes("item.market") && prd.includes("Stage 3CP 多市场行情时区标签"), "跨市场行情时间必须按交易所时区展示，未知市场不得猜测时区，所有主要行情入口需共享该格式化边界");
 check("过期行情统计门禁", marketBreadth.includes("quoteFreshness") && marketBreadth.includes('freshness.state === "stale"') && marketBreadth.includes("staleCount") && anomalyDetection.includes("freshness.state === \"stale\"") && prd.includes("Stage 3AY 过期行情统计门禁"), "市场宽度和异动雷达不得把已明确过期的行情当作当前信号，过期数量需与缺失数量分开");
 check("数据请求取消与资源回收", localHostClient.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && marketStore.includes("abortPendingDataRequests") && marketStore.includes("new AbortController()") && piRuntime.includes("signal") && prd.includes("Stage 3AZ 数据请求取消与资源回收"), "渠道切换时应取消 Local Host 数据请求并保留代次保护，主动取消不得误报超时");
 check("Local Host 启动故障可恢复状态", integrations.includes("localHostRequest(\"/api/integration/status\")") && integrations.includes("environment: \"local-host\"") && !integrations.includes("catch { return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true;"), "集成状态读取必须传播 Host 故障，不能伪装成浏览器预览");

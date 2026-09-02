@@ -332,7 +332,9 @@ describe("FolioMind core flows", () => {
     const { container } = render(<WatchlistSidebar />);
     const freshness = container.querySelector(".watch-row .quote-freshness");
     expect(freshness).toHaveTextContent(/^新鲜 ·/);
+    expect(freshness).toHaveTextContent(/北京时间$/);
     expect(freshness).toHaveAttribute("title", expect.stringContaining("CAP"));
+    expect(freshness).toHaveAttribute("title", expect.stringContaining("北京时间"));
     expect(container.querySelector(".watch-row .quote strong")).toHaveTextContent("10.00");
   });
 

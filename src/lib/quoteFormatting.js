@@ -1,6 +1,22 @@
 const numberValue = (value) => Number(value);
 export const QUOTE_STALE_AFTER_MS = 15 * 60 * 1000;
 
+const MARKET_TIME_ZONE_DEFINITIONS = [
+  { patterns: ["NASDAQ", "NYSE", "AMEX", "美股", "US"], timeZone: "America/New_York", label: "美东时间" },
+  { patterns: ["HKEX", "港股", "香港", "HK"], timeZone: "Asia/Hong_Kong", label: "香港时间" },
+  { patterns: ["LSE", "伦敦", "英国", "UK"], timeZone: "Europe/London", label: "伦敦时间" },
+  { patterns: ["TSE", "东京", "日本", "日股", "JP"], timeZone: "Asia/Tokyo", label: "东京时间" },
+  { patterns: ["EURONEXT", "欧洲", "欧股", "EU"], timeZone: "Europe/Paris", label: "中欧时间" },
+  { patterns: ["SSE", "SZSE", "沪市", "深市", "沪深", "上交所", "深交所", "A股", "中国", "CN"], timeZone: "Asia/Shanghai", label: "北京时间" },
+];
+
+/** Return the display timezone for a known market without guessing unknown venues. */
+export function marketTimeZone(market) {
+  const value = String(market ?? "").trim().toUpperCase();
+  if (!value) return null;
+  return MARKET_TIME_ZONE_DEFINITIONS.find(({ patterns }) => patterns.some((pattern) => value === pattern || value.includes(pattern))) || null;
+}
+
 /** A quote price is displayable only when the provider returned a finite positive value. */
 export function isValidQuotePrice(value) {
   const number = numberValue(value);
@@ -29,10 +45,19 @@ export function quoteFreshness(value, now = Date.now(), staleAfterMs = QUOTE_STA
   return { state: ageMs > staleAfterMs ? "stale" : "fresh", timestamp, ageMs };
 }
 
-export function formatQuoteFreshness(value, now = Date.now()) {
+function formatQuoteTimestamp(timestamp, market, compact = false) {
+  const definition = marketTimeZone(market);
+  const options = compact
+    ? { hour: "2-digit", minute: "2-digit" }
+    : { hour: "2-digit", minute: "2-digit", second: "2-digit" };
+  const time = new Intl.DateTimeFormat("zh-CN", { ...options, timeZone: definition?.timeZone }).format(new Date(timestamp));
+  return String(market ?? "").trim() ? `${time} · ${definition?.label || "时区未知"}` : time;
+}
+
+export function formatQuoteFreshness(value, now = Date.now(), market = "") {
   const freshness = quoteFreshness(value, now);
   if (freshness.state === "unknown") return "数据时间未知";
-  const time = new Date(freshness.timestamp).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const time = formatQuoteTimestamp(freshness.timestamp, market);
   return freshness.state === "stale" ? `可能已延迟 · 数据时间 ${time}` : `数据时间 ${time}`;
 }
 
@@ -41,10 +66,10 @@ export function formatQuoteFreshness(value, now = Date.now()) {
  * available through the row title and the evidence drawer, while this label
  * makes stale quotes visible without making the sidebar unreadable.
  */
-export function formatCompactQuoteFreshness(value, now = Date.now()) {
+export function formatCompactQuoteFreshness(value, now = Date.now(), market = "") {
   const freshness = quoteFreshness(value, now);
   if (freshness.state === "unknown") return "时间未知";
-  const time = new Date(freshness.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const time = formatQuoteTimestamp(freshness.timestamp, market, true);
   return `${freshness.state === "stale" ? "可能延迟" : "新鲜"} · ${time}`;
 }
 

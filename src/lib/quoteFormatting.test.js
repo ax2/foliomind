@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteFreshness } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketTimeZone, quoteFreshness } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -53,6 +53,15 @@ describe("quote formatting", () => {
     expect(formatCompactQuoteFreshness("2026-08-29T09:55:00Z", now)).toMatch(/^新鲜 · \d{2}:\d{2}$/);
     expect(formatCompactQuoteFreshness("2026-08-29T09:30:00Z", now)).toMatch(/^可能延迟 · \d{2}:\d{2}$/);
     expect(formatCompactQuoteFreshness("", now)).toBe("时间未知");
+  });
+
+  it("labels known market timestamps in their exchange timezone", () => {
+    const now = Date.parse("2026-01-15T15:00:00Z");
+    expect(marketTimeZone("NASDAQ")).toMatchObject({ timeZone: "America/New_York", label: "美东时间" });
+    expect(formatQuoteFreshness("2026-01-15T14:55:00Z", now, "NASDAQ")).toMatch(/09:55:00.*美东时间/);
+    expect(formatQuoteFreshness("2026-07-15T13:55:00Z", Date.parse("2026-07-15T14:00:00Z"), "NASDAQ")).toMatch(/09:55:00.*美东时间/);
+    expect(formatCompactQuoteFreshness("2026-01-15T14:55:00Z", now, "HKEX")).toContain("香港时间");
+    expect(formatQuoteFreshness("2026-01-15T14:55:00Z", now, "自定义市场")).toContain("时区未知");
   });
 
   it("accepts unix-second and unix-millisecond provider timestamps", () => {
