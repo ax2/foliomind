@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
-import { EventsView, MarketView, NotificationsView, ResearchView } from "./components/SecondaryViews.jsx";
+import { EventsView, MarketView, NotificationsView, PortfolioView, ResearchView } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
@@ -482,6 +482,24 @@ describe("FolioMind core flows", () => {
     expect(await screen.findByText("1 个持仓")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(screen.getAllByText("等待真实行情").length).toBeGreaterThan(0);
+  });
+
+  it("renders portfolio performance only from two real review snapshots", () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      portfolioPositions: [{ id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100 }],
+      portfolioReviews: [
+        { id: "r1", tradingDate: "2026-08-30", createdAt: "2026-08-30T08:00:00Z", totalPnlPercent: 1.2, totalMarketValue: 202 },
+        { id: "r2", tradingDate: "2026-08-31", createdAt: "2026-08-31T08:00:00Z", totalPnlPercent: 3.4, totalMarketValue: 206 },
+      ],
+    });
+    render(<PortfolioView />);
+    expect(screen.getByRole("heading", { name: "组合表现趋势" })).toBeInTheDocument();
+    expect(screen.getByText("2 个有效快照")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /组合盈亏比例从/ })).toBeInTheDocument();
+    expect(screen.getByText("盈亏比例百分点")).toBeInTheDocument();
   });
 
   it("records a trade plan and lets the user mark it executed", async () => {

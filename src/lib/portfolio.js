@@ -71,6 +71,7 @@ export function normalizePortfolioPosition(value) {
 }
 
 function finite(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
@@ -172,6 +173,40 @@ export function portfolioAllocationRows(positions, liveQuotes) {
     }))
     .sort((left, right) => (right.weight - left.weight) || left.index - right.index)
     .map(({ index, ...row }) => row);
+}
+
+/**
+ * Return a stable, display-ready performance series from saved close reviews.
+ * Only snapshots with a parseable date and real P/L percentage are included;
+ * duplicate trading days keep the latest snapshot and missing values remain
+ * absent rather than being interpolated.
+ */
+export function portfolioPerformanceSeries(reviews, limit = 60) {
+  const safeLimit = Number.isInteger(limit) ? Math.min(120, Math.max(1, limit)) : 60;
+  const byDay = new Map();
+  for (const review of Array.isArray(reviews) ? reviews : []) {
+    const pnlPercent = finite(review?.totalPnlPercent);
+    if (pnlPercent == null) continue;
+    const rawDate = String(review?.createdAt || review?.tradingDate || "").trim();
+    const timestamp = Date.parse(rawDate);
+    if (!Number.isFinite(timestamp)) continue;
+    const day = /^\d{4}-\d{2}-\d{2}/.test(String(review?.tradingDate || ""))
+      ? String(review.tradingDate).slice(0, 10)
+      : new Date(timestamp).toISOString().slice(0, 10);
+    const point = {
+      id: String(review?.id || `${day}-${timestamp}`),
+      tradingDate: day,
+      createdAt: rawDate,
+      timestamp,
+      totalPnlPercent: pnlPercent,
+      totalMarketValue: finitePositiveValue(review?.totalMarketValue),
+      pricedCount: Number.isFinite(Number(review?.pricedCount)) ? Number(review.pricedCount) : null,
+      totalCount: Number.isFinite(Number(review?.totalCount)) ? Number(review.totalCount) : null,
+    };
+    const previous = byDay.get(day);
+    if (!previous || timestamp >= previous.timestamp) byDay.set(day, point);
+  }
+  return [...byDay.values()].sort((left, right) => left.timestamp - right.timestamp).slice(-safeLimit);
 }
 
 /** Sort portfolio rows for comparison; missing real quote values always stay last. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, sortPortfolioRows } from "./portfolio.js";
+import { normalizePortfolioPosition, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, sortPortfolioRows } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -52,6 +52,20 @@ describe("portfolio metrics", () => {
     const rows = portfolioAllocationRows(positions, { AAPL: { price: 200 }, MSFT: {} });
     expect(rows).toMatchObject([{ symbol: "AAPL", marketValue: 400, weight: 100 }]);
     expect(rows).toHaveLength(1);
+  });
+
+  it("builds a dated performance series from real review snapshots", () => {
+    const series = portfolioPerformanceSeries([
+      { id: "old", tradingDate: "2026-08-30", createdAt: "2026-08-30T08:00:00Z", totalPnlPercent: 1.2, totalMarketValue: 1000, pricedCount: 1, totalCount: 1 },
+      { id: "same-day-stale", tradingDate: "2026-08-31", createdAt: "2026-08-31T08:00:00Z", totalPnlPercent: 2, totalMarketValue: 1100 },
+      { id: "same-day-latest", tradingDate: "2026-08-31", createdAt: "2026-08-31T09:00:00Z", totalPnlPercent: 2.5, totalMarketValue: 1120, pricedCount: 1, totalCount: 1 },
+      { id: "invalid", tradingDate: "2026-09-01", createdAt: "not-a-date", totalPnlPercent: 4 },
+      { id: "missing-pnl", tradingDate: "2026-09-02", createdAt: "2026-09-02T08:00:00Z", totalPnlPercent: null },
+    ]);
+    expect(series).toHaveLength(2);
+    expect(series.map((point) => point.id)).toEqual(["old", "same-day-latest"]);
+    expect(series.at(-1)).toMatchObject({ tradingDate: "2026-08-31", totalPnlPercent: 2.5, totalMarketValue: 1120 });
+    expect(portfolioPerformanceSeries(series, 1).map((point) => point.id)).toEqual(["same-day-latest"]);
   });
 
   it("sorts portfolio rows by real values with missing values last", () => {

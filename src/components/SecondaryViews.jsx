@@ -4,7 +4,7 @@ import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, quoteFreshness } from "../lib/quoteFormatting.js";
-import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, portfolioAllocationRows, portfolioMetrics, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
+import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
@@ -147,6 +147,21 @@ export function PortfolioView() {
   const allocationRows = useMemo(() => portfolioAllocationRows(positions, liveQuotes), [positions, liveQuotes]);
   const sortedPortfolioRows = useMemo(() => sortPortfolioRows(metrics.rows, portfolioSortKey, portfolioSortDirection), [metrics.rows, portfolioSortKey, portfolioSortDirection]);
   const risk = useMemo(() => portfolioRiskMetrics(positions, liveQuotes), [positions, liveQuotes]);
+  const performanceSeries = useMemo(() => portfolioPerformanceSeries(portfolioReviews), [portfolioReviews]);
+  const performanceChart = useMemo(() => {
+    if (performanceSeries.length < 2) return null;
+    const values = performanceSeries.map((point) => point.totalPnlPercent);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const points = performanceSeries.map((point, index) => ({
+      ...point,
+      x: performanceSeries.length === 1 ? 320 : 20 + (index / (performanceSeries.length - 1)) * 600,
+      y: 148 - ((point.totalPnlPercent - min) / range) * 116,
+    }));
+    const zeroY = Math.min(148, Math.max(32, 148 - ((0 - min) / range) * 116));
+    return { points, min, max, zeroY, first: points[0], latest: points.at(-1) };
+  }, [performanceSeries]);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const portfolioDataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: metrics.pricedCount, totalCount: metrics.totalCount });
   const money = (value) => value == null ? "—" : formatPrice(value);
@@ -224,6 +239,10 @@ export function PortfolioView() {
     <section className="risk-overview" aria-label="组合风险洞察">
       <div className="risk-overview-heading"><div><h2>风险洞察</h2><small>只基于已返回的真实行情；数据不足时不生成风险评分。</small></div><ShieldCheck size={22} /></div>
       {positions.length === 0 ? <p className="risk-empty">添加持仓并获取真实行情后，这里会显示集中度与数据覆盖情况。</p> : <><div className="risk-metrics"><article><span>最大持仓</span><strong>{risk.topPosition?.name || "—"}</strong><small>{risk.topWeight == null ? "等待真实行情" : `${formatPercent(risk.topWeight)} 组合占比`}</small></article><article><span>行情覆盖</span><strong>{risk.pricedCoverage == null ? "—" : formatPercent(risk.pricedCoverage)}</strong><small>{metrics.pricedCount}/{metrics.totalCount} 个持仓</small></article><article><span>未计价成本</span><strong>{risk.missingCostWeight == null ? "—" : formatPercent(risk.missingCostWeight)}</strong><small>{risk.missingCostWeight == null ? "等待真实行情" : "暂未纳入市值计算"}</small></article></div><div className="risk-signal-list">{risk.signals.length ? risk.signals.map((signal) => <article className={`risk-signal ${signal.level}`} key={`${signal.level}-${signal.title}`}><span>{signal.level === "critical" ? <Warning size={17} /> : signal.level === "warning" ? <Warning size={17} /> : <Info size={17} />}</span><div><strong>{signal.title}</strong><p>{signal.detail}</p></div></article>) : <p className="risk-empty">当前没有可确认的风险信号；补齐历史行情后才会计算波动率与相关性。</p>}</div></>}
+    </section>
+    <section className="portfolio-performance-overview" aria-label="组合表现趋势">
+      <div className="portfolio-performance-heading"><div><h2>组合表现趋势</h2><small>仅连接已保存的真实盘后复盘；按交易日保留最新快照，不补齐缺失日期。</small></div><span>{performanceSeries.length ? `${performanceSeries.length} 个有效快照` : "暂无趋势"}</span></div>
+      {!performanceChart ? <p className="portfolio-performance-empty">{portfolioReviews.length < 2 ? "生成至少两次真实复盘后，这里会显示盈亏比例趋势。" : "已有复盘，但有效盈亏比例不足两次，暂不绘制趋势。"}</p> : <><div className="portfolio-performance-chart"><svg viewBox="0 0 640 180" role="img" aria-label={`组合盈亏比例从 ${formatPercent(performanceChart.first.totalPnlPercent)} 变为 ${formatPercent(performanceChart.latest.totalPnlPercent)}`}><line x1="20" y1="148" x2="620" y2="148" /><line x1="20" y1="32" x2="20" y2="148" /><polyline points={performanceChart.points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ")} /><line className="portfolio-performance-zero" x1="20" x2="620" y1={performanceChart.zeroY.toFixed(1)} y2={performanceChart.zeroY.toFixed(1)} />{performanceChart.points.map((point) => <circle key={point.id} cx={point.x} cy={point.y} r="4"><title>{point.tradingDate} · {formatPercent(point.totalPnlPercent)}</title></circle>)}</svg><div className="portfolio-performance-axis"><span>{performanceChart.first.tradingDate} · {formatPercent(performanceChart.first.totalPnlPercent)}</span><span>{performanceChart.latest.tradingDate} · {formatPercent(performanceChart.latest.totalPnlPercent)}</span></div></div><div className="portfolio-performance-summary"><article><span>起点</span><strong>{formatPercent(performanceChart.first.totalPnlPercent)}</strong><small>{performanceChart.first.tradingDate}</small></article><article><span>最近</span><strong className={performanceChart.latest.totalPnlPercent >= 0 ? "up" : "down"}>{formatPercent(performanceChart.latest.totalPnlPercent)}</strong><small>{performanceChart.latest.tradingDate}</small></article><article><span>变化</span><strong className={performanceChart.latest.totalPnlPercent - performanceChart.first.totalPnlPercent >= 0 ? "up" : "down"}>{formatPercent(performanceChart.latest.totalPnlPercent - performanceChart.first.totalPnlPercent)}</strong><small>盈亏比例百分点</small></article></div></>}
     </section>
     <section className="plan-overview" aria-label="交易计划概览">
       <div className="plan-overview-heading"><div><h2>交易计划</h2><small>记录买入逻辑与目标价；只做提醒和留痕，不会自动下单。</small></div><CheckCircle size={22} /></div>

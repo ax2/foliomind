@@ -1789,6 +1789,22 @@ textarea:focus-visible {
 .allocation-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #75a9df, #3d80c7); }
 .allocation-value { margin: 0; font-variant-numeric: tabular-nums; }
 .allocation-note { margin: 13px 0 0; color: #7c8795; font-size: 10px; line-height: 1.5; }
+.portfolio-performance-overview { margin-top: 24px; border: 1px solid #e2eaf4; border-radius: 10px; padding: 15px; background: #fbfdff; }
+.portfolio-performance-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.portfolio-performance-heading h2 { margin: 0; color: #273449; font-size: 15px; }
+.portfolio-performance-heading small, .portfolio-performance-heading > span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.portfolio-performance-chart { margin-top: 14px; border: 1px solid #e6edf5; border-radius: 8px; padding: 8px 10px 7px; background: #fff; }
+.portfolio-performance-chart svg { display: block; width: 100%; height: 180px; overflow: visible; }
+.portfolio-performance-chart svg line { stroke: #dce5ef; stroke-width: 1; }
+.portfolio-performance-chart svg polyline { fill: none; stroke: #3d80c7; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.portfolio-performance-chart svg circle { fill: #fff; stroke: #3d80c7; stroke-width: 2; }
+.portfolio-performance-chart svg .portfolio-performance-zero { stroke: #c5ced9; stroke-dasharray: 4 4; }
+.portfolio-performance-axis { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.portfolio-performance-empty { margin: 15px 0 0; color: #7c8795; font-size: 10px; line-height: 1.5; }
+.portfolio-performance-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-top: 10px; }
+.portfolio-performance-summary article { display: grid; gap: 4px; border-radius: 7px; padding: 10px; background: #fff; }
+.portfolio-performance-summary span, .portfolio-performance-summary small { color: var(--muted); font-size: 10px; }
+.portfolio-performance-summary strong { color: #273449; font-size: 14px; font-variant-numeric: tabular-nums; }
 .portfolio-table { margin-top: 24px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
 .portfolio-table-toolbar { display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); padding: 11px 15px; background: #fff; }
 .portfolio-table-toolbar > div { flex: 1; min-width: 0; }
@@ -2036,6 +2052,10 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
   .portfolio-summary { grid-template-columns: 1fr; }
+  .portfolio-performance-heading { flex-direction: column; gap: 4px; }
+  .portfolio-performance-chart svg { height: 150px; }
+  .portfolio-performance-summary { grid-template-columns: 1fr; }
+  .portfolio-performance-axis { flex-direction: column; gap: 3px; }
   .portfolio-review-heading { flex-direction: column; gap: 4px; }
   .briefing-schedule-card { grid-template-columns: 1fr; align-items: start; }
   .portfolio-review-card summary { grid-template-columns: minmax(0, 1fr); }
