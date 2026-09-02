@@ -361,6 +361,29 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
   });
 
+  it("surfaces persistence failures and deduplicates a retry save", async () => {
+    const error = new Error("Host unavailable");
+    persistence.saveUserState.mockClear();
+    persistence.saveUserState.mockRejectedValueOnce(error).mockResolvedValueOnce({
+      revision: 2,
+      watchlist: [{ symbol: "TSLA", name: "Tesla", market: "NASDAQ", category: "自选" }],
+      monitorRules: [],
+      notifications: [],
+      portfolioPositions: [],
+      monitorHistory: [],
+      portfolioReviews: [],
+    });
+
+    await expect(useLabStore.getState().addWatchlist({ symbol: "TSLA", name: "Tesla", market: "NASDAQ" })).rejects.toBe(error);
+    expect(useLabStore.getState().settingsNotice).toMatchObject({ type: "error", action: "retry" });
+
+    const firstRetry = useLabStore.getState().retryPersistedUserState();
+    const secondRetry = useLabStore.getState().retryPersistedUserState();
+    await expect(Promise.all([firstRetry, secondRetry])).resolves.toEqual([true, false]);
+    expect(persistence.saveUserState).toHaveBeenCalledTimes(2);
+    expect(useLabStore.getState().settingsNotice).toEqual({ type: "success", text: "本地数据已保存" });
+  });
+
   it("normalizes a custom watchlist group when adding a symbol", async () => {
     const saved = await useLabStore.getState().addWatchlist({ symbol: "tsla", name: "Tesla", market: "NASDAQ", group: "成长观察" });
     expect(saved).toMatchObject({ symbol: "TSLA", group: "成长观察" });

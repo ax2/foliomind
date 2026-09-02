@@ -72,8 +72,13 @@ function persistSnapshot(snapshot) {
       lastLocalSnapshot = local;
       return lastPersistedState;
     } catch (error) {
-      useLabStore.setState((current) => current.settingsNotice?.type === "error" ? current : { settingsNotice: { type: "error", text: error?.code === "USER_STATE_MERGE_CONFLICT" ? "用户数据已在另一窗口修改，请重新加载后再操作" : "本地数据暂时无法保存，请稍后重试" } });
-      return null;
+      useLabStore.setState((current) => current.settingsNotice?.type === "error" ? current : { settingsNotice: { type: "error", action: error?.code === "USER_STATE_MERGE_CONFLICT" ? "reload" : "retry", text: error?.code === "USER_STATE_MERGE_CONFLICT" ? "用户数据已在另一窗口修改，请重新读取后再操作" : "本地数据暂时无法保存，请稍后重试" } });
+      // Do not let a mutating action report success when the canonical state
+      // was not written. Callers that await a mutation can surface the
+      // recoverable error; fire-and-forget notifications use an explicit
+      // catch at their call site so the browser never gets an unhandled
+      // rejection.
+      throw error;
     }
   });
   return persistenceQueue;
@@ -537,7 +542,7 @@ async function executeMonitorForItem(rule, item) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: false, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -820,7 +825,7 @@ export const useLabStore = create((set, get) => ({
       return { notifications: [...reminders, ...state.notifications].slice(0, 500) };
     });
     if (!delivered.length) return 0;
-    await get().persistUserState();
+    await get().persistUserState().catch(() => null);
     for (const notification of delivered) void sendSystemNotification(notification);
     return delivered.length;
   },
@@ -880,6 +885,19 @@ export const useLabStore = create((set, get) => ({
     return true;
   },
   persistUserState: () => persistSnapshot(get()),
+  retryPersistedUserState: async () => {
+    if (get().persistenceRetrying) return false;
+    set({ persistenceRetrying: true });
+    try {
+      await get().persistUserState();
+      set({ settingsNotice: { type: "success", text: "本地数据已保存" } });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      set({ persistenceRetrying: false });
+    }
+  },
   addWatchlist: async (item) => {
     const value = normalizeWatchlistItem({ ...item, market: String(item?.market ?? "").trim() || "自定义", category: String(item?.category ?? "").trim() || "自选" });
     if (!value.symbol || !value.name) throw new Error("请输入股票代码和名称");
@@ -974,7 +992,12 @@ export const useLabStore = create((set, get) => ({
       return { briefingScheduleBusy: true, briefingSchedule: { ...state.briefingSchedule, lastAttemptAt: attemptedAt, lastResult: calendarQuerying ? "waiting-calendar" : "waiting-data", lastError: calendarQuerying ? "正在核对真实交易日历" : "正在刷新持仓真实行情" } };
     });
     if (!acquired) return slot?.status || false;
-    await get().persistUserState();
+    try {
+      await get().persistUserState();
+    } catch (error) {
+      set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastResult: "error", lastError: friendlyDataMessage(error, "本地数据暂时无法保存，请稍后重试") } }));
+      return "error";
+    }
     try {
       if (calendarQuerying) {
         const marketcodes = marketCodesForPositions(get().portfolioPositions);
@@ -985,7 +1008,7 @@ export const useLabStore = create((set, get) => ({
         const sources = [...new Set(calendars.map((calendar) => String(calendar?.source || "数据服务")))];
         const toolIds = [...new Set(calendars.map((calendar) => String(calendar?.toolId || "")).filter(Boolean))];
         set((current) => ({ briefingSchedule: { ...current.briefingSchedule, calendarDate: slot.tradingDate, calendarStatus, calendarCheckedAt: attemptedAt, calendarSource: sources.join(", "), calendarToolId: toolIds.join(", "), lastResult: calendarStatus === "closed" ? "market-closed" : "waiting-data", lastError: "" } }));
-        await get().persistUserState();
+        await get().persistUserState().catch(() => null);
         if (calendarStatus === "closed") {
           set({ briefingScheduleBusy: false });
           return "market-closed";
@@ -999,24 +1022,24 @@ export const useLabStore = create((set, get) => ({
       const state = get();
       if (!hasFreshPortfolioQuote({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, now })) {
         set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastResult: "waiting-data", lastError: "尚未取得当日真实持仓行情，将按重试间隔再次尝试" } }));
-        await get().persistUserState();
+        await get().persistUserState().catch(() => null);
         return "waiting-data";
       }
       if (state.portfolioReviews.some((review) => review.kind === "close" && review.tradingDate === slot.tradingDate)) {
         set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastSuccessKey: slot.key, lastResult: "success", lastError: "" } }));
-        await get().persistUserState();
+        await get().persistUserState().catch(() => null);
         return "completed";
       }
       const review = createPortfolioReviewSnapshot({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, events: state.events, createdAt: attemptedAt, id: createId("portfolio-review") });
       const notification = { id: createId("notification"), kind: "briefing", symbol: "", name: "", ruleId: "", eventKey: slot.key, reminderPhase: "completed", title: `${review.tradingDate} 组合复盘已生成`, body: `已使用 ${review.pricedCount}/${review.totalCount} 个持仓的当日真实行情生成复盘。`, severity: "info", createdAt: attemptedAt, read: false, source: "data-service" };
       set((current) => ({ portfolioReviews: [review, ...current.portfolioReviews].slice(0, 90), notifications: [notification, ...current.notifications].slice(0, 500), briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastSuccessKey: slot.key, lastResult: "success", lastError: "" } }));
-      await get().persistUserState();
+      await get().persistUserState().catch(() => null);
       void sendSystemNotification(notification);
       return "success";
     } catch (error) {
       const message = friendlyDataMessage(error);
       set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, ...(calendarQuerying ? { calendarDate: slot?.tradingDate || "", calendarStatus: "error", calendarCheckedAt: attemptedAt } : {}), lastResult: calendarQuerying ? "waiting-calendar" : "error", lastError: message } }));
-      await get().persistUserState();
+      await get().persistUserState().catch(() => null);
       return "error";
     }
   },
@@ -1031,12 +1054,12 @@ export const useLabStore = create((set, get) => ({
     const next = get().watchlist.filter((item) => item.symbol !== symbol); if (!next.length) throw new Error("至少保留一个自选标的");
     set((state) => ({ watchlist: next, selectedSymbol: state.selectedSymbol === symbol ? next[0].symbol : state.selectedSymbol })); await get().persistUserState();
   },
-  toggleRule: (id) => { set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? { ...rule, enabled: !rule.enabled } : rule) })); void get().persistUserState(); },
+  toggleRule: (id) => { set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? { ...rule, enabled: !rule.enabled } : rule) })); void get().persistUserState().catch(() => {}); },
   addRule: async (input = {}) => { const strategy = strategyFor(input.strategyId); const rule = normalizeRule({ ...input, id: createId("rule"), symbol: String(input.symbol || get().selectedSymbol || "600519"), strategyId: strategy.id }); set((state) => ({ rules: [...state.rules, rule] })); await get().persistUserState(); return rule; },
   deleteRule: async (id) => { set((state) => ({ rules: state.rules.filter((rule) => rule.id !== id) })); await get().persistUserState(); },
-  addNotification: (notification) => { set((state) => ({ notifications: [{ ...notification, id: notification.id || createId("notification"), createdAt: notification.createdAt || nowIso(), read: false }, ...state.notifications].slice(0, 500) })); void get().persistUserState(); },
-  markNotificationRead: (id) => { set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); void get().persistUserState(); },
-  markAllNotificationsRead: () => { set((state) => ({ notifications: state.notifications.map((item) => ({ ...item, read: true })) })); void get().persistUserState(); },
+  addNotification: (notification) => { set((state) => ({ notifications: [{ ...notification, id: notification.id || createId("notification"), createdAt: notification.createdAt || nowIso(), read: false }, ...state.notifications].slice(0, 500) })); void get().persistUserState().catch(() => {}); },
+  markNotificationRead: (id) => { set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); void get().persistUserState().catch(() => {}); },
+  markAllNotificationsRead: () => { set((state) => ({ notifications: state.notifications.map((item) => ({ ...item, read: true })) })); void get().persistUserState().catch(() => {}); },
   runMonitorCheck: async (ruleId) => {
     let acquired = false; let rule; let items = [];
     set((state) => {
@@ -1099,7 +1122,7 @@ export const useLabStore = create((set, get) => ({
       };
     });
     for (const notification of deliveredNotifications) void sendSystemNotification(notification);
-    await get().persistUserState();
+    await get().persistUserState().catch(() => null);
     return outcomes.some((outcome) => !outcome.error);
   },
   runDueMonitorChecks: async () => {
