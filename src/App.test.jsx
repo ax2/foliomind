@@ -754,7 +754,7 @@ describe("FolioMind core flows", () => {
       demo: false,
       environment: "local-host",
     });
-    useLabStore.setState({ userStateLoaded: true, refreshLiveData });
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData });
     const previousVisibilityState = document.visibilityState;
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     try {
