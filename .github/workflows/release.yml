@@ -50,8 +50,72 @@ jobs:
           node -e 'const fs=require("fs"); const v=process.env.VERSION; const values=[require("./package.json").version,require("./package-lock.json").version,require("./src-tauri/tauri.conf.json").version]; const cargo=fs.readFileSync("src-tauri/Cargo.toml","utf8").match(/^version\s*=\s*"([^"]+)"/m)?.[1]; values.push(cargo); if(values.some(x=>x!==v)) throw new Error(`Version mismatch: expected ${v}, found ${values.join(", ")}`)'
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-  build:
+  web-qa:
     needs: prepare
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend and browser QA dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+          python3 -m venv "$RUNNER_TEMP/foliomind-qa-venv"
+          "$RUNNER_TEMP/foliomind-qa-venv/bin/pip" install --upgrade pip playwright
+          "$RUNNER_TEMP/foliomind-qa-venv/bin/python" -m playwright install --with-deps chromium
+      - run: npm run build
+      - name: Start standalone Web Host
+        env:
+          FOLIOMIND_DEV_DATA_DIR: ${{ runner.temp }}/foliomind-qa-data
+          FOLIOMIND_WEB_PORT: "5173"
+          FOLIOMIND_HOST_PORT: "43123"
+        run: |
+          set -euo pipefail
+          npm run web:dev > "$RUNNER_TEMP/foliomind-web.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/foliomind-web.pid"
+          ready=false
+          for _ in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            sed -n '1,240p' "$RUNNER_TEMP/foliomind-web.log"
+            exit 1
+          fi
+      - name: Run repeatable real-data boundary QA
+        env:
+          FOLIOMIND_QA_URL: http://127.0.0.1:5173
+          FOLIOMIND_QA_DATA_DIR: ${{ runner.temp }}/foliomind-qa-data
+        run: |
+          set -euo pipefail
+          export FOLIOMIND_CHROMIUM="$($RUNNER_TEMP/foliomind-qa-venv/bin/python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          FOLIOMIND_DEV_DATA_DIR="$FOLIOMIND_QA_DATA_DIR" "$RUNNER_TEMP/foliomind-qa-venv/bin/python" scripts/qa-playwright.py
+      - name: Upload Web QA evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: FolioMind-Web-QA
+          path: |
+            .qa/
+            ${{ runner.temp }}/foliomind-web.log
+          if-no-files-found: warn
+      - name: Stop standalone Web Host
+        if: always()
+        run: |
+          set +e
+          if [ -f "$RUNNER_TEMP/foliomind-web.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/foliomind-web.pid")" 2>/dev/null || true
+          fi
+
+  build:
+    needs: [prepare, web-qa]
     permissions:
       contents: read
     strategy:

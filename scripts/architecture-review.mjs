@@ -29,6 +29,7 @@ check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriCo
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
 check("状态脱敏", userState.includes("normalizeUserState") && userState.includes("revision:") && userState.includes("watchlist:") && userState.includes("briefingSchedule:") && !userState.includes("integration-settings.json") && !userState.includes("apiKey"), "用户状态 schema 只处理脱敏用户事实");
 check("发布资产", workflow.includes("SHA256SUMS") && workflow.includes("gh release upload"), "Release workflow 需校验并上传安装包");
+check("发布前 Web QA 门禁", workflow.includes("web-qa:") && workflow.includes("scripts/qa-playwright.py") && workflow.includes("needs: [prepare, web-qa]"), "桌面安装包构建前必须通过隔离 Web/Local Host Playwright 回归，并保留失败证据");
 check("安装升级路径", tauriConfig.bundle?.windows?.allowDowngrades === false && tauriConfig.bundle?.windows?.nsis?.installMode === "currentUser" && Boolean(tauriConfig.bundle?.windows?.wix?.upgradeCode) && readme.includes("不要求用户先手动卸载"), "Windows 同一产品必须覆盖升级、阻止降级并保留用户配置");
 check("阶段设计", prd.includes("Stage 1E") && prd.includes("异动雷达"), "新功能必须先有可验收的 PRD 阶段设计");
 check("自选迁移边界", watchlist.includes("parseWatchlistImport") && watchlist.includes("watchlistCsv"), "批量自选导入需先解析校验，导出不得包含实时数据或凭证");
