@@ -4,6 +4,7 @@ import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, installedSkillIdsForBackup } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
+import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
@@ -349,6 +350,40 @@ describe("FolioMind core flows", () => {
     const name = container.querySelector(".watch-row-main > span:first-child strong");
     expect(name).toHaveTextContent("这是一个非常长的公司名称用于验证侧栏截断和可访问提示");
     expect(name).toHaveAttribute("title", "这是一个非常长的公司名称用于验证侧栏截断和可访问提示");
+  });
+
+  it("keeps long names discoverable across live quotes and research tables", () => {
+    const longName = "这是一个非常长的公司名称用于验证跨页面省略和可访问提示";
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "LONG", name: longName, market: "沪深" }],
+      liveQuotes: { LONG: { price: 10, change: 1.2, asOf: new Date().toISOString() } },
+      activeView: "research",
+    });
+    const { container, rerender } = render(<LiveQuotesStrip />);
+    expect(container.querySelector(".live-quotes-grid strong")).toHaveAttribute("title", longName);
+    rerender(<MarketView />);
+    expect(container.querySelector(".market-table-row strong")).toHaveAttribute("title", longName);
+    rerender(<ResearchView />);
+    expect(container.querySelector(".research-row strong")).toHaveAttribute("title", longName);
+  });
+
+  it("renders a large watchlist without silently truncating user items", () => {
+    const watchlist = Array.from({ length: 200 }, (_, index) => ({
+      symbol: `T${String(index).padStart(3, "0")}`,
+      name: `测试标的 ${index}`,
+      market: "自定义",
+      group: index % 2 ? "观察" : "核心",
+    }));
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true },
+      watchlist,
+      selectedSymbol: watchlist[0].symbol,
+      liveQuotes: {},
+    });
+    const { container } = render(<WatchlistSidebar />);
+    expect(container.querySelectorAll(".watch-row")).toHaveLength(200);
+    expect(screen.getByRole("option", { name: "全部（200）" })).toBeInTheDocument();
   });
 
   it("saves and restores named market views without changing the data contract", () => {
