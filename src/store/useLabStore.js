@@ -16,6 +16,7 @@ import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, market
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
 import { isValidQuotePrice } from "../lib/quoteFormatting.js";
+import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -162,7 +163,7 @@ function normalizeRule(rule) {
     .map(([key, value]) => [String(key).trim().toUpperCase(), value])
     .filter(([key, value]) => key && typeof value === "boolean")
     .slice(0, 200));
-  return { id: String(rule.id ?? createId("rule")), scope, symbol, strategyId: strategy.id, conditions, logic: String(rule.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", threshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol };
+  return { id: String(rule.id ?? createId("rule")), scope, symbol, strategyId: strategy.id, conditions, logic: String(rule.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", threshold, intervalSeconds: Math.max(15, Math.min(86_400, Number(rule.intervalSeconds) || 300)), enabled: rule.enabled !== false, lastCheckedAt: rule.lastCheckedAt ?? null, lastTriggeredAt: rule.lastTriggeredAt ?? null, lastSignalTriggered: typeof rule.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol, triggerMode: normalizeMonitorTriggerMode(rule.triggerMode), expiresAt: normalizeMonitorExpiresAt(rule.expiresAt) };
 }
 function notificationFromResult(rule, item, result, reply) {
   const strategy = strategyFor(rule.strategyId);
@@ -1186,15 +1187,23 @@ export const useLabStore = create((set, get) => ({
   markNotificationRead: (id) => { set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); void get().persistUserState().catch(() => {}); },
   markAllNotificationsRead: () => { set((state) => ({ notifications: state.notifications.map((item) => ({ ...item, read: true })) })); void get().persistUserState().catch(() => {}); },
   runMonitorCheck: async (ruleId) => {
-    let acquired = false; let rule; let items = [];
+    let acquired = false; let expired = false; let rule; let items = [];
     set((state) => {
       rule = state.rules.find((candidate) => candidate.id === ruleId);
       items = rule?.scope === "watchlist" ? state.watchlist : state.watchlist.filter((candidate) => candidate.symbol === rule?.symbol);
+      if (rule?.enabled && isMonitorRuleExpired(rule)) {
+        expired = true;
+        return { rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, enabled: false } : candidate) };
+      }
       if (!rule || !rule.enabled || !items.length || state.monitorBusy || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || ["running", "cancelling"].includes(state.runtimeMode)) return {};
       acquired = true;
       const checkedAt = nowIso();
       return { monitorBusy: true, monitorLastRunAt: checkedAt, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastCheckedAt: checkedAt } : candidate) };
     });
+    if (expired) {
+      await get().persistUserState().catch(() => null);
+      return false;
+    }
     if (!acquired) return false;
     const outcomes = await mapWithConcurrency(items, resolveLiveQuoteConcurrency(), async (item) => {
       const checkedAt = nowIso();
@@ -1215,6 +1224,7 @@ export const useLabStore = create((set, get) => ({
       let lastSignalTriggered = currentRule.lastSignalTriggered;
       let lastTriggeredAt = currentRule.lastTriggeredAt;
       const notifications = [];
+      let onceTriggered = false;
       const histories = outcomes.map((outcome) => outcome.history).filter(Boolean);
       for (const outcome of outcomes) {
         const symbol = outcome.item?.symbol || currentRule.symbol;
@@ -1225,6 +1235,7 @@ export const useLabStore = create((set, get) => ({
         if (currentRule.scope === "watchlist") signalBySymbol[symbol] = hasDecision ? triggered : previous;
         else lastSignalTriggered = hasDecision ? triggered : lastSignalTriggered;
         if (triggered) lastTriggeredAt = checkedAt;
+        if (currentRule.triggerMode === "once" && triggered) onceTriggered = true;
         // Alerts are edge-triggered per symbol; repeated true checks do not spam notifications.
         if (hasDecision && ((triggered && previous !== true) || outcome.reply?.mode === "browser-demo" || !outcome.parsed)) {
           const notification = notificationFromResult(currentRule, outcome.item, outcome.result, outcome.reply);
@@ -1241,7 +1252,7 @@ export const useLabStore = create((set, get) => ({
       }
       return {
         monitorBusy: false,
-        rules: state.rules.map((candidate) => candidate.id === currentRule.id ? { ...candidate, lastTriggeredAt, lastSignalTriggered, lastSignalBySymbol: signalBySymbol } : candidate),
+        rules: state.rules.map((candidate) => candidate.id === currentRule.id ? { ...candidate, enabled: onceTriggered ? false : candidate.enabled, lastTriggeredAt, lastSignalTriggered, lastSignalBySymbol: signalBySymbol } : candidate),
         notifications: notifications.length ? [...notifications, ...state.notifications].slice(0, 500) : state.notifications,
         monitorHistory: [...histories, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY),
       };
@@ -1251,13 +1262,20 @@ export const useLabStore = create((set, get) => ({
     return outcomes.some((outcome) => !outcome.error);
   },
   runDueMonitorChecks: async () => {
-    const state = get();
+    let state = get();
     const hostRuntime = isDesktopRuntime() || isLocalWebRuntime();
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!hostRuntime || !state.userStateLoaded || !configured || state.monitorBusy) return false;
     const now = Date.now();
+    const expiredIds = state.rules.filter((rule) => rule.enabled && isMonitorRuleExpired(rule, now)).map((rule) => rule.id);
+    if (expiredIds.length) {
+      set((current) => ({ rules: current.rules.map((rule) => expiredIds.includes(rule.id) ? { ...rule, enabled: false } : rule) }));
+      await get().persistUserState().catch(() => null);
+      state = get();
+    }
     const due = state.rules.find((rule) => {
-      if (!rule.enabled || !rule.lastCheckedAt) return rule.enabled;
+      if (!rule.enabled || isMonitorRuleExpired(rule, now)) return false;
+      if (!rule.lastCheckedAt) return rule.enabled;
       const checkedAt = Date.parse(rule.lastCheckedAt);
       return !Number.isFinite(checkedAt) || now - checkedAt >= rule.intervalSeconds * 1000;
     });

@@ -1,3 +1,4 @@
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -118,6 +119,10 @@ fn default_scope() -> String {
     "symbol".into()
 }
 
+fn default_trigger_mode() -> String {
+    "edge".into()
+}
+
 fn default_installed_skill_ids() -> Vec<String> {
     vec!["fundamental".into(), "monitor".into()]
 }
@@ -143,6 +148,10 @@ pub struct MonitorRule {
     pub last_signal_triggered: Option<bool>,
     #[serde(default)]
     pub last_signal_by_symbol: HashMap<String, bool>,
+    #[serde(default = "default_trigger_mode")]
+    pub trigger_mode: String,
+    #[serde(default)]
+    pub expires_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -553,6 +562,15 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         }
         if rule.conditions.len() > 6 || !matches!(rule.logic.as_str(), "AND" | "OR") {
             return Err("monitor rule conditions are invalid".into());
+        }
+        if !matches!(rule.trigger_mode.as_str(), "edge" | "once") {
+            return Err("monitor rule trigger mode is invalid".into());
+        }
+        if let Some(expires_at) = &rule.expires_at {
+            validate_text(expires_at, "monitor rule expiry", 64)?;
+            if DateTime::parse_from_rfc3339(expires_at).is_err() {
+                return Err("monitor rule expiry is invalid".into());
+            }
         }
         if !rule.threshold.is_finite()
             || rule.threshold < 0.0
@@ -967,6 +985,8 @@ mod tests {
                     logic: default_logic(),
                     last_signal_triggered: None,
                     last_signal_by_symbol: HashMap::new(),
+                    trigger_mode: default_trigger_mode(),
+                    expires_at: None,
                 }
             };
         let migrated = UserState {
@@ -1045,6 +1065,8 @@ mod tests {
             logic: default_logic(),
             last_signal_triggered: None,
             last_signal_by_symbol: HashMap::new(),
+            trigger_mode: default_trigger_mode(),
+            expires_at: None,
         });
         state.monitor_rules[0].threshold = f64::NAN;
         assert!(validate(&state).is_err());
@@ -1067,6 +1089,8 @@ mod tests {
             logic: default_logic(),
             last_signal_triggered: None,
             last_signal_by_symbol: HashMap::new(),
+            trigger_mode: default_trigger_mode(),
+            expires_at: None,
         });
         assert!(validate(&state).is_err());
     }
@@ -1091,7 +1115,7 @@ mod tests {
                 "intervalSeconds": 300, "enabled": true, "lastCheckedAt": null, "lastTriggeredAt": null,
                 "conditions": [{"type": "price_change", "operator": "abs_gte", "value": 3}], "logic": "OR",
                 "lastSignalBySymbol": {"600519": true, "300750": false},
-                "lastSignalTriggered": true
+                "lastSignalTriggered": true, "triggerMode": "once", "expiresAt": "2026-09-10T23:59:59Z"
             }],
             "notifications": [{
                 "id": "n1", "kind": "event-reminder", "symbol": "600519", "name": "贵州茅台", "ruleId": "",
@@ -1129,6 +1153,8 @@ mod tests {
         assert_eq!(state.monitor_rules[0].conditions.len(), 1);
         assert_eq!(state.monitor_rules[0].logic, "OR");
         assert_eq!(state.monitor_rules[0].scope, "watchlist");
+        assert_eq!(state.monitor_rules[0].trigger_mode, "once");
+        assert_eq!(state.monitor_rules[0].expires_at.as_deref(), Some("2026-09-10T23:59:59Z"));
         assert_eq!(
             state.monitor_rules[0].last_signal_by_symbol.get("600519"),
             Some(&true)
@@ -1173,6 +1199,8 @@ mod tests {
         assert_eq!(state.monitor_rules[0].logic, "AND");
         assert_eq!(state.monitor_rules[0].scope, "symbol");
         assert!(state.monitor_rules[0].last_signal_by_symbol.is_empty());
+        assert_eq!(state.monitor_rules[0].trigger_mode, "edge");
+        assert!(state.monitor_rules[0].expires_at.is_none());
         assert!(state.monitor_history.is_empty());
         assert!(state.portfolio_reviews.is_empty());
         assert_eq!(
@@ -1188,5 +1216,32 @@ mod tests {
             ..UserState::default()
         };
         assert!(validate(&state).is_err());
+    }
+
+    #[test]
+    fn invalid_monitor_lifecycle_values_are_rejected() {
+        let mut state = UserState::default();
+        state.monitor_rules.push(MonitorRule {
+            id: "test-rule".into(),
+            scope: "symbol".into(),
+            symbol: "600519".into(),
+            strategy_id: "price_change".into(),
+            threshold: 3.0,
+            interval_seconds: 300,
+            enabled: true,
+            last_checked_at: None,
+            last_triggered_at: None,
+            conditions: Vec::new(),
+            logic: default_logic(),
+            last_signal_triggered: None,
+            last_signal_by_symbol: HashMap::new(),
+            trigger_mode: "repeat".into(),
+            expires_at: Some("not-a-timestamp".into()),
+        });
+        assert!(validate(&state).is_err());
+        state.monitor_rules[0].trigger_mode = "once".into();
+        assert!(validate(&state).is_err());
+        state.monitor_rules[0].expires_at = Some("2026-09-10T23:59:59Z".into());
+        assert!(validate(&state).is_ok());
     }
 }

@@ -1674,6 +1674,7 @@ textarea:focus-visible {
 .modal-card label { display: grid; gap: 6px; color: #59616d; font-size: 11px; }
 .modal-card input, .modal-card select { width: 100%; height: 38px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 10px; background: #fff; color: #171a21; }
 .modal-card label small { margin-top: -25px; margin-left: auto; padding-right: 10px; color: var(--muted); }
+.modal-card label small.field-help { margin: -2px 0 0; padding: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .modal-help { margin: -5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .condition-modal { width: min(680px, 100%); max-height: min(88vh, 760px); overflow: auto; }
 .monitor-scope-note { margin: -2px 0 2px; padding: 9px 10px; border: 1px solid #dce8f7; border-radius: 7px; background: #f5f9ff; color: #54708f; font-size: 11px; line-height: 1.5; }

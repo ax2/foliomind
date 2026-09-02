@@ -83,6 +83,8 @@ async def main() -> None:
         else:
             await new_monitor.click()
             await page.get_by_text("触发条件", exact=True).wait_for()
+            await expect(page.get_by_label("触发方式")).to_be_visible()
+            await expect(page.get_by_label("盯盘有效期")).to_be_visible()
             # Close the modal before navigating to another workspace so its
             # backdrop cannot intercept the next interaction.
             await page.locator(".condition-modal button[aria-label='关闭']").click()
@@ -122,13 +124,20 @@ async def main() -> None:
         checks.append({"flow": "真实数据与模型设置", "passed": True})
 
         await click_and_capture("对话", "implementation-chat.png", "分析摘要")
-        composer = page.get_by_placeholder("向 FolioMind 提问或下达分析指令…")
-        await composer.fill("分析贵州茅台近期风险")
-        send_button = page.locator(".send-button").first
-        if await send_button.is_enabled():
-            await composer.press("Enter")
-            await page.get_by_text("分析贵州茅台近期风险", exact=True).wait_for()
-            checks.append({"flow": "发送对话", "passed": True})
+        # The placeholder intentionally changes while live data or Pi is busy;
+        # use the stable accessible label so the QA flow does not race a
+        # transient status message.
+        composer = page.get_by_label("分析问题")
+        await expect(composer).to_be_visible()
+        if await composer.is_enabled():
+            await composer.fill("分析贵州茅台近期风险")
+            send_button = page.locator(".send-button").first
+            if await send_button.is_enabled():
+                await composer.press("Enter")
+                await page.get_by_text("分析贵州茅台近期风险", exact=True).wait_for()
+                checks.append({"flow": "发送对话", "passed": True})
+            else:
+                checks.append({"flow": "模型未就绪时安全阻止对话", "passed": True})
         else:
             await expect(composer).to_be_visible()
             checks.append({"flow": "模型未就绪时安全阻止对话", "passed": True})

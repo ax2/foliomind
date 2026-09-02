@@ -1,6 +1,7 @@
 import { normalizeConditions } from "./monitorConditions.js";
 import { normalizeWatchlistItem } from "./watchlist.js";
 import { normalizeBriefingSchedule } from "./briefingSchedule.js";
+import { normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "./monitorLifecycle.js";
 
 const text = (value, max = 512) => String(value ?? "").trim().slice(0, max);
 const finiteNumber = (value) => {
@@ -47,6 +48,8 @@ function isLegacySeedRule(rule, seed) {
     && rule.lastTriggeredAt === null
     && rule.lastSignalTriggered === null
     && Object.keys(rule.lastSignalBySymbol || {}).length === 0
+    && rule.triggerMode === "edge"
+    && rule.expiresAt === null
     && rule.logic === "AND"
     && condition?.type === seedCondition.type
     && condition?.operator === seedCondition.operator
@@ -62,7 +65,7 @@ function sanitizeRules(items) {
       .filter(([key, value]) => key && typeof value === "boolean")
       .slice(0, 200));
     return {
-      id: text(rule?.id, 128), scope, symbol, strategyId: text(rule?.strategyId, 64), threshold: finiteNumber(rule?.threshold), conditions: normalizeConditions(rule?.conditions, text(rule?.strategyId, 64)), logic: String(rule?.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", intervalSeconds: finiteNumber(rule?.intervalSeconds), enabled: rule?.enabled !== false, lastCheckedAt: rule?.lastCheckedAt ? text(rule.lastCheckedAt, 64) : null, lastTriggeredAt: rule?.lastTriggeredAt ? text(rule.lastTriggeredAt, 64) : null, lastSignalTriggered: typeof rule?.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol,
+      id: text(rule?.id, 128), scope, symbol, strategyId: text(rule?.strategyId, 64), threshold: finiteNumber(rule?.threshold), conditions: normalizeConditions(rule?.conditions, text(rule?.strategyId, 64)), logic: String(rule?.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", intervalSeconds: finiteNumber(rule?.intervalSeconds), enabled: rule?.enabled !== false, lastCheckedAt: rule?.lastCheckedAt ? text(rule.lastCheckedAt, 64) : null, lastTriggeredAt: rule?.lastTriggeredAt ? text(rule.lastTriggeredAt, 64) : null, lastSignalTriggered: typeof rule?.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol, triggerMode: normalizeMonitorTriggerMode(rule?.triggerMode), expiresAt: normalizeMonitorExpiresAt(rule?.expiresAt),
     };
   }).filter((rule) => rule.id && rule.symbol && rule.strategyId && rule.threshold !== null && rule.intervalSeconds !== null);
   return normalized;

@@ -712,6 +712,52 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications).toHaveLength(2);
   });
 
+  it("auto-disables a single-trigger rule after its first real trigger", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "once-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, triggerMode: "once", enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+
+    await expect(useLabStore.getState().runMonitorCheck("once-rule")).resolves.toBe(true);
+    expect(useLabStore.getState().rules[0]).toMatchObject({ triggerMode: "once", enabled: false, lastSignalTriggered: true });
+    expect(useLabStore.getState().notifications).toHaveLength(1);
+    await expect(useLabStore.getState().runMonitorCheck("once-rule")).resolves.toBe(false);
+    expect(runtime.queryCachedData).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not query or keep an expired rule enabled", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "expired-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, expiresAt: "2026-09-01T23:59:59.999Z", enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+
+    await expect(useLabStore.getState().runMonitorCheck("expired-rule")).resolves.toBe(false);
+    expect(useLabStore.getState().rules[0].enabled).toBe(false);
+    expect(runtime.queryCachedData).not.toHaveBeenCalled();
+  });
+
+  it("reconciles expired rules before selecting a due background check", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [
+        { id: "expired-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, expiresAt: "2026-09-01T23:59:59.999Z", enabled: true, lastCheckedAt: null },
+        { id: "active-rule", symbol: "300750", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: false, lastCheckedAt: null },
+      ],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+
+    await expect(useLabStore.getState().runDueMonitorChecks()).resolves.toBe(false);
+    expect(useLabStore.getState().rules[0].enabled).toBe(false);
+    expect(persistence.saveUserState).toHaveBeenCalled();
+    expect(runtime.queryCachedData).not.toHaveBeenCalled();
+  });
+
   it("checks a dynamic watchlist rule independently and de-duplicates each symbol", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

@@ -130,6 +130,15 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ scope: "watchlist", symbol: "*", lastSignalBySymbol: { "600519": true, AAPL: false } });
   });
 
+  it("round-trips monitor lifecycle controls and safely defaults legacy rules", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      monitorRules: [{ id: "once-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, triggerMode: "once", expiresAt: "2026-09-10", enabled: true }],
+    });
+    expect(parseUserStateBackup(raw).monitorRules[0]).toMatchObject({ triggerMode: "once", expiresAt: "2026-09-10T23:59:59.999Z" });
+    expect(normalizeUserState({ monitorRules: [{ id: "legacy", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300 }] }).monitorRules[0]).toMatchObject({ triggerMode: "edge", expiresAt: null });
+  });
+
   it("round-trips watchlist groups while migrating legacy items", () => {
     const raw = serializeUserStateBackup({ watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", group: "核心持仓" }] });
     expect(parseUserStateBackup(raw).watchlist[0]).toMatchObject({ symbol: "600519", group: "核心持仓" });
