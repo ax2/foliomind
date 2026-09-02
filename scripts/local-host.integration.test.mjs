@@ -237,6 +237,19 @@ test("动态 CAP 测试只允许当前目录已验证的工具", async (context)
   assert.equal(verified.response.status, 200);
   assert.equal(verified.payload.result.result.value, 52.4);
   assert.deepEqual(calls, ["/search", "/tools/execute"]);
+
+  // Directory metadata survives for inspection, but its authorization is
+  // bound to the Host process that performed Search. Restarting the Host must
+  // require a fresh discovery before another billable dynamic call.
+  await stopHost(host.child);
+  const restarted = await startHost(dataDir);
+  context.after(() => stopHost(restarted.child));
+  const overview = await hostRequest(restarted, "/api/dev/overview");
+  assert.equal(overview.payload.state.capabilityDirectory.searchId, "search-current");
+  const afterRestart = await hostRequest(restarted, "/api/dev/capabilities/test", { method: "POST", body: { input: { toolId: "qveris_finance.analytics_rsi", searchId: "search-current", parameters: { symbol: "600519" } } } });
+  assert.equal(afterRestart.response.status, 403);
+  assert.equal(afterRestart.payload.code, "CAPABILITY_NOT_VERIFIED");
+  assert.deepEqual(calls, ["/search", "/tools/execute"]);
 });
 
 test("does not fall back to Search after an authentication failure", async (context) => {

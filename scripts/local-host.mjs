@@ -62,6 +62,10 @@ const DIRECT_DATA_CACHE_TTL_MS = Object.freeze({
 const directDataCache = new Map();
 const directDataInFlight = new Map();
 let directDataCacheGeneration = 0;
+// Directory metadata may be persisted for diagnostics, but authorization is
+// scoped to this Host process. A previous session's Search result must never
+// authorize a new billable dynamic-tool call.
+const capabilityDirectorySession = randomUUID();
 
 function abortReason(signal) {
   return signal?.reason || Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" });
@@ -832,7 +836,7 @@ async function discoverCapabilityDirectory(input, settings, key, signal) {
   const tools = rawResults.map((item) => normalizeDiscoveredCapability(item, { searchId, provider: settings?.dataProvider || DEFAULT_DATA_PROVIDER })).filter((item) => item.toolId);
   logInvocation({ type: "qveris", operation: "capability-discover", method: "POST", path: url, status: 200, durationMs: Date.now() - startedAt, params: { query, limit }, response: { searchId, total: result?.total ?? tools.length, tools: tools.map((tool) => ({ toolId: tool.toolId, capability: tool.capability, provider: tool.provider })) }, cost: costFrom(result) });
   if (!searchId && !tools.length) throw new Error("能力目录暂未返回可用结果");
-  const directory = { query, searchId, total: Number(result?.total) || tools.length, tools, remainingCredits: result?.remaining_credits ?? null, updatedAt: new Date().toISOString() };
+  const directory = { query, searchId, total: Number(result?.total) || tools.length, tools, remainingCredits: result?.remaining_credits ?? null, updatedAt: new Date().toISOString(), sessionId: capabilityDirectorySession };
   const cache = await readToolCache();
   cache.__directory = directory;
   await writeToolCache(cache);
@@ -846,13 +850,15 @@ async function discoverCapabilityDirectory(input, settings, key, signal) {
  * on an unverified QVeris capability. The directory is intentionally
  * replaced on every discover operation, so stale cards must be refreshed.
  */
-export function validateDiscoveredCapabilitySelection(directory, { toolId = "", searchId = "" } = {}) {
+export function validateDiscoveredCapabilitySelection(directory, { toolId = "", searchId = "", sessionId = "" } = {}) {
   const normalizedToolId = String(toolId || "").trim();
   const normalizedSearchId = String(searchId || "").trim();
+  const normalizedSessionId = String(sessionId || "").trim();
   const directorySearchId = String(directory?.searchId || "").trim();
+  const directorySessionId = String(directory?.sessionId || "").trim();
   const verified = Array.isArray(directory?.tools)
     && directory.tools.some((tool) => String(tool?.toolId || "").trim() === normalizedToolId);
-  if (!normalizedToolId || !normalizedSearchId || !directorySearchId || normalizedSearchId !== directorySearchId || !verified) {
+  if (!normalizedToolId || !normalizedSearchId || !directorySearchId || normalizedSearchId !== directorySearchId || !verified || (normalizedSessionId && directorySessionId !== normalizedSessionId)) {
     const error = new Error("该能力尚未由当前能力目录验证，请先刷新完整能力目录");
     error.status = 403;
     error.code = "CAPABILITY_NOT_VERIFIED";
@@ -867,7 +873,7 @@ async function testDiscoveredCapability(input, settings, key, signal) {
   const parameters = input?.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters) ? input.parameters : null;
   if (!toolId || !searchId || !parameters) throw new Error("能力测试需要 toolId、searchId 和 JSON 参数");
   const cache = await readToolCache();
-  validateDiscoveredCapabilitySelection(cache.__directory, { toolId, searchId });
+  validateDiscoveredCapabilitySelection(cache.__directory, { toolId, searchId, sessionId: capabilityDirectorySession });
   const runId = `cap_test_${randomUUID()}`;
   const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(toolId)}`;
   const startedAt = Date.now();

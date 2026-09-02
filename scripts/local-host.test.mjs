@@ -71,6 +71,7 @@ test("binds dynamic capability tests to the currently discovered directory", () 
   ]) {
     assert.throws(() => validateDiscoveredCapabilitySelection(directory, input), (error) => error?.code === "CAPABILITY_NOT_VERIFIED" && error?.status === 403);
   }
+  assert.throws(() => validateDiscoveredCapabilitySelection({ ...directory, sessionId: "host-a" }, { toolId: "qveris_finance.analytics_rsi", searchId: "search-current", sessionId: "host-b" }), (error) => error?.code === "CAPABILITY_NOT_VERIFIED" && error?.status === 403);
 });
 
 test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {

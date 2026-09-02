@@ -157,3 +157,5 @@ Local Web Host 与桌面 Rust Host 共享出站地址信任边界：保存配置
 动态 CAP 目录测试也受 Host 授权边界保护。Local Host 只允许测试最近一次目录搜索返回且已规范化的 `toolId/searchId` 组合；目录刷新会替换旧绑定，目录外或过期组合在出站请求前返回 `CAPABILITY_NOT_VERIFIED`。固定 CAP 产品链路与 Pi 的 Search → Inspect → Call 阶段约束保持独立，开发面板的动态测试不会扩大 Skill 或固化工具白名单，见 PRD Stage 3BU。
 
 页面固定 CAP 的恢复也保持错误分类。行情、详情、序列和事件请求只有在收到明确的工具缓存缺失、能力不存在或 HTTP 404 能力失效信号时才进入 Agent 发现；认证、限流、超时、网络和服务端错误直接沿用 CAP 的可恢复状态，避免无意义的 Search → Inspect → Call 与重复计费。前端层对 Local Host 和原生 Host 的返回再做一次防御性判断，缺少明确错误码时默认不回退，见 PRD Stage 3BW。
+
+动态 CAP 目录的可见性与授权分离。Local Host 会保留上次目录的非敏感元数据供开发面板检查，但每个进程生成独立会话标识；动态测试必须同时匹配当前会话、最近一次 Search ID 和目录内的 tool ID。Host 重启后旧目录仍可查看，却会在出站请求前返回 `CAPABILITY_NOT_VERIFIED`，要求重新发现后才允许计费调用。会话标识不进入用户状态、备份或对外 Tool Schema，见 PRD Stage 3BX。
