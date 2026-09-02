@@ -50,6 +50,7 @@ describe("DeveloperPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
     expect(await screen.findByText(/\/api\/data\/query/)).toBeInTheDocument();
     expect(screen.getByText("cap_demo…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出日志" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "启用工具固化缓存" }));
     await waitFor(() => expect(host.updateDeveloperVariables).toHaveBeenCalledWith({ toolCacheEnabled: false }));
     expect(screen.getByText("当前支持的金融能力（CAP）")).toBeInTheDocument();

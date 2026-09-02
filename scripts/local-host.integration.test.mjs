@@ -111,6 +111,13 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(restored.payload.watchlist[0].symbol, "600519");
   assert.equal(restored.payload.revision, 1);
   assert.equal(restored.payload.briefingSchedule.closeTime, "15:40");
+  const restoredOverview = await hostRequest(host, "/api/dev/overview");
+  assert.equal(restoredOverview.payload.logs.some((entry) => entry.path === "/api/integration/credential"), true);
+  assert.equal(JSON.stringify(restoredOverview.payload.logs).includes("sk_contract_test_123456"), false);
+  const cleared = await hostRequest(host, "/api/dev/logs", { method: "DELETE" });
+  assert.equal(cleared.payload.cleared, true);
+  const emptyOverview = await hostRequest(host, "/api/dev/overview");
+  assert.equal(emptyOverview.payload.logs.length, 0);
 });
 
 test("Local Host serializes prompt requests, aborts the owner, and releases runtime state", async (context) => {

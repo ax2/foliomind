@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowClockwise, CaretUp, Code, Trash, X } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretUp, Code, DownloadSimple, Trash, X } from "@phosphor-icons/react";
 import { clearDeveloperLogs, discoverCapabilities, isLocalWebRuntime, loadDeveloperOverview, testCapability, updateDeveloperVariables } from "../lib/localHost.js";
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { BUILTIN_CAPABILITIES } from "../lib/builtinCapabilities.js";
@@ -320,12 +320,26 @@ export function DeveloperPanel() {
       setError("");
     } catch (cause) { setError(cause?.message || "复制 Tool Schema 失败"); }
   };
+  const exportLogs = () => {
+    try {
+      const content = JSON.stringify({ name: "FolioMind developer logs", exportedAt: new Date().toISOString(), logs }, null, 2);
+      const url = URL.createObjectURL(new Blob([content], { type: "application/json;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `foliomind-developer-logs-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setError("");
+    } catch (cause) { setError(cause?.message || "导出日志失败"); }
+  };
   return <section className={`developer-panel ${open ? "open" : ""}`} style={{ "--dev-drag-offset": `${dragOffset}px` }} aria-label="本地开发者面板">
     <button className="developer-handle" type="button" onClick={() => setOpen((value) => !value)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} aria-expanded={open} aria-controls="developer-panel-content">
       <span><Code size={16} />开发者面板</span><CaretUp size={15} className={open ? "rotated" : ""} />
     </button>
     {open && <div className="developer-panel-content" id="developer-panel-content">
-      <header><div><strong>{desktop ? "桌面调试" : "本地调试"}</strong><small>仅本机可见 · 密钥和原始提示词不会记录</small></div><div className="developer-actions"><button type="button" onClick={() => void refresh()} aria-label="刷新日志"><ArrowClockwise size={15} /></button><button type="button" onClick={async () => { try { if (local) await clearDeveloperLogs(); setDesktopLogs([]); setOverview((current) => current ? { ...current, logs: [] } : current); await refresh(); } catch (cause) { setError(cause?.message || "清空失败"); } }} aria-label="清空日志"><Trash size={15} /></button><button type="button" onClick={() => setOpen(false)} aria-label="关闭开发者面板"><X size={16} /></button></div></header>
+      <header><div><strong>{desktop ? "桌面调试" : "本地调试"}</strong><small>仅本机可见 · 脱敏日志可跨 Host 重启保留</small></div><div className="developer-actions"><button type="button" onClick={() => void refresh()} aria-label="刷新日志"><ArrowClockwise size={15} /></button><button type="button" onClick={exportLogs} aria-label="导出日志"><DownloadSimple size={15} /></button><button type="button" onClick={async () => { try { if (local) await clearDeveloperLogs(); setDesktopLogs([]); setOverview((current) => current ? { ...current, logs: [] } : current); await refresh(); } catch (cause) { setError(cause?.message || "清空失败"); } }} aria-label="清空日志"><Trash size={15} /></button><button type="button" onClick={() => setOpen(false)} aria-label="关闭开发者面板"><X size={16} /></button></div></header>
       {error && <div className="developer-error" role="status">{error}</div>}
       <div className="developer-grid">
         <div className="developer-card"><h4>运行状态</h4><dl><div><dt>运行时</dt><dd>{overview?.state?.runtimeState || (overview?.state?.activeRequest ? "执行中" : "空闲")}</dd></div><div><dt>模型</dt><dd>{overview?.state?.settings?.modelId || "未配置"}</dd></div><div><dt>API Key</dt><dd>{overview?.state?.keyPrefix || "未配置"}</dd></div><div><dt>能力目录</dt><dd>{overview?.state?.capabilityCatalog?.provider || "qveris_finance"} · {overview?.state?.capabilityCatalog?.tools?.length || 0} 项（共 {overview?.state?.capabilityCatalog?.providerSummary?.capabilityCount || 141} 个能力）</dd></div><div><dt>固化工具</dt><dd>{overview?.state?.toolCache?.length || 0} 类</dd></div></dl></div>

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,6 +25,10 @@ const settingsFile = join(dataDir, "integration-settings.json");
 const credentialFile = join(dataDir, "qveris-api-key");
 const stateFile = join(dataDir, "user-state.json");
 const toolCacheFile = join(dataDir, "tool-selection-cache.json");
+const developerLogFile = join(dataDir, "developer-logs.ndjson");
+export const DEVELOPER_LOG_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
+const MAX_PERSISTED_DEVELOPER_LOGS = 2_000;
+const MAX_PERSISTED_DEVELOPER_LOG_BYTES = 8 * 1024 * 1024;
 
 const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [], dataChannel: "qveris-cap", dataProvider: DEFAULT_DATA_PROVIDER };
 const defaultState = {
@@ -39,6 +43,10 @@ const defaultState = {
 let runtimeState = "stopped";
 let userStateMutationQueue = Promise.resolve();
 const devLogs = [];
+let developerLogsLoaded = false;
+let developerLogsLoadPromise = null;
+let developerLogWriteQueue = Promise.resolve();
+let developerLogWritesSinceCompaction = 0;
 const devVariables = {
   toolCacheEnabled: true,
   requestTimeoutMs: 120_000,
@@ -261,11 +269,75 @@ export function costSummary(logs) {
   }
   return { ...summary, qverisCost: Number(summary.qverisCost.toFixed(8)), modelCost: Number(summary.modelCost.toFixed(8)), units: [...summary.units], qverisUnits: [...summary.qverisUnits], modelUnits: [...summary.modelUnits] };
 }
+function developerLogEntriesFromText(text) {
+  const cutoff = Date.now() - DEVELOPER_LOG_RETENTION_MS;
+  return String(text || "").split("\n").map((line) => {
+    try { return JSON.parse(line); } catch { return null; }
+  }).filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string" && Number.isFinite(Date.parse(entry.at)) && Date.parse(entry.at) >= cutoff).slice(-MAX_PERSISTED_DEVELOPER_LOGS);
+}
+async function writeDeveloperLogEntries(entries) {
+  const bounded = (Array.isArray(entries) ? entries : []).slice(-MAX_PERSISTED_DEVELOPER_LOGS);
+  const content = bounded.length ? `${bounded.map((entry) => JSON.stringify(entry)).join("\n")}\n` : "";
+  await mkdir(dataDir, { recursive: true });
+  const tempFile = `${developerLogFile}.${process.pid}.tmp`;
+  await writeFile(tempFile, content, { encoding: "utf8", mode: 0o600 });
+  await rename(tempFile, developerLogFile);
+  await chmod(developerLogFile, 0o600).catch(() => {});
+}
+function enqueueDeveloperLogWrite(task) {
+  developerLogWriteQueue = developerLogWriteQueue.then(task, task).catch(() => {});
+  return developerLogWriteQueue;
+}
+function persistDeveloperLog(entry) {
+  enqueueDeveloperLogWrite(async () => {
+    await mkdir(dataDir, { recursive: true });
+    await appendFile(developerLogFile, `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 });
+    await chmod(developerLogFile, 0o600).catch(() => {});
+    developerLogWritesSinceCompaction += 1;
+    if (developerLogWritesSinceCompaction < 100) return;
+    developerLogWritesSinceCompaction = 0;
+    const content = await readFile(developerLogFile, "utf8").catch(() => "");
+    await writeDeveloperLogEntries(developerLogEntriesFromText(content));
+  });
+}
+async function ensureDeveloperLogsLoaded() {
+  if (developerLogsLoaded) {
+    await developerLogWriteQueue;
+    return;
+  }
+  if (!developerLogsLoadPromise) {
+    developerLogsLoadPromise = (async () => {
+      await developerLogWriteQueue;
+      const content = await readFile(developerLogFile, "utf8").catch(() => "");
+      const persisted = developerLogEntriesFromText(content);
+      const known = new Set(devLogs.map((entry) => entry.id));
+      devLogs.push(...persisted.filter((entry) => !known.has(entry.id)));
+      devLogs.sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+      while (devLogs.length > 500) devLogs.shift();
+      const bytes = Buffer.byteLength(content, "utf8");
+      if (content && (bytes > MAX_PERSISTED_DEVELOPER_LOG_BYTES || persisted.length < content.split("\n").filter(Boolean).length)) {
+        await enqueueDeveloperLogWrite(() => writeDeveloperLogEntries(persisted));
+      }
+      developerLogsLoaded = true;
+    })().finally(() => { developerLogsLoadPromise = null; });
+  }
+  await developerLogsLoadPromise;
+}
+async function clearDeveloperLogs() {
+  devLogs.length = 0;
+  developerLogsLoaded = true;
+  developerLogWritesSinceCompaction = 0;
+  await enqueueDeveloperLogWrite(async () => {
+    try { await unlink(developerLogFile); } catch (error) { if (error?.code !== "ENOENT") throw error; }
+  });
+}
 function logInvocation(event) {
   if (devVariables.logLevel === "silent") return;
   if (devVariables.logLevel === "error" && Number(event.status || 200) < 400) return;
-  devLogs.push({ id: randomUUID(), at: new Date().toISOString(), ...event, detail: event.detail ? redact(event.detail) : undefined, params: event.params ? debugPayload(event.params) : undefined, response: event.response ? debugPayload(event.response) : undefined, reason: event.reason ? redact(event.reason) : undefined });
+  const entry = { id: randomUUID(), at: new Date().toISOString(), ...event, detail: event.detail ? redact(event.detail) : undefined, params: event.params ? debugPayload(event.params) : undefined, response: event.response ? debugPayload(event.response) : undefined, reason: event.reason ? redact(event.reason) : undefined };
+  devLogs.push(entry);
   while (devLogs.length > 500) devLogs.shift();
+  persistDeveloperLog(entry);
 }
 function safeSettings(settings) {
   return { capabilityBaseUrl: redact(settings?.capabilityBaseUrl || DEFAULT_CAPABILITY), modelGatewayBaseUrl: redact(settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY), modelId: redact(settings?.modelId || ""), dataChannel: String(settings?.dataChannel || "qveris-cap"), dataProvider: String(settings?.dataProvider || DEFAULT_DATA_PROVIDER), modelCount: Array.isArray(settings?.models) ? settings.models.length : 0 };
@@ -1031,6 +1103,7 @@ async function route(req, body, requestSignal) {
   }
   if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const previous = await readSettings(); const settings = validateIntegrationSettings({ ...previous, capabilityBaseUrl: endpointInput(input, "capabilityBaseUrl", previous.capabilityBaseUrl, "数据能力地址"), modelGatewayBaseUrl: endpointInput(input, "modelGatewayBaseUrl", previous.modelGatewayBaseUrl, "模型网关地址"), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || previous.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || previous.dataProvider || DEFAULT_DATA_PROVIDER), models: Array.isArray(input.models) ? input.models : previous.models || [] }); await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
   if (method === "GET" && path === "/api/dev/overview") {
+    await ensureDeveloperLogsLoaded();
     const settings = await readSettings(); const key = await readKey();
     const cache = await readToolCache();
     return { logs: devLogs.slice(-200), costSummary: costSummary(devLogs), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings), capabilityDirectory: cache.__directory || null }, variables: { ...devVariables } };
@@ -1065,7 +1138,7 @@ async function route(req, body, requestSignal) {
     try { return await queryDirectCapability(input, settings, key, scope.signal); }
     finally { scope.close(); }
   }
-  if (method === "DELETE" && path === "/api/dev/logs") { devLogs.length = 0; return { cleared: true }; }
+  if (method === "DELETE" && path === "/api/dev/logs") { await clearDeveloperLogs(); return { cleared: true }; }
   if (method === "PATCH" && path === "/api/dev/variables") {
     const input = body && typeof body === "object" ? body : {};
     if (Object.hasOwn(input, "toolCacheEnabled")) { if (typeof input.toolCacheEnabled !== "boolean") throw new Error("toolCacheEnabled 必须是布尔值"); devVariables.toolCacheEnabled = input.toolCacheEnabled; }
@@ -1151,7 +1224,7 @@ export function startLocalHost({ port = PORT } = {}) {
       const body = ["POST", "PUT", "PATCH"].includes(req.method) ? await bodyOf(req) : {};
       const result = await route(req, body, requestController.signal);
       if (requestController.signal.aborted) return;
-      logInvocation({ type: "http", method: req.method, path, status: 200, durationMs: Date.now() - startedAt });
+      if (path !== "/api/dev/logs") logInvocation({ type: "http", method: req.method, path, status: 200, durationMs: Date.now() - startedAt });
       responseStarted = true;
       res.writeHead(200, jsonHeaders(origin)); res.end(JSON.stringify(result));
     } catch (error) {
