@@ -608,6 +608,8 @@ function dataChannelChanged(previous, next) {
     || previous.settings?.modelId !== next?.settings?.modelId
     || previous.settings?.modelGatewayBaseUrl !== next?.settings?.modelGatewayBaseUrl
     || previous.settings?.capabilityBaseUrl !== next?.settings?.capabilityBaseUrl
+    || previous.settings?.dataChannel !== next?.settings?.dataChannel
+    || previous.settings?.dataProvider !== next?.settings?.dataProvider
   );
 }
 

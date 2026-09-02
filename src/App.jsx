@@ -31,7 +31,7 @@ export function App() {
   const rules = useLabStore((state) => state.rules);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
-  const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl].join("|");
+  const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
   const pollingChannelRef = useRef("");
   useEffect(() => {

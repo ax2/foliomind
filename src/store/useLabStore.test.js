@@ -575,6 +575,20 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLastRefreshAt: null, quoteDetailsLoaded: {}, quoteSeriesLoaded: {} });
   });
 
+  it("clears stale quotes when the provider or channel changes", () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://gateway.example", capabilityBaseUrl: "https://data.example", dataChannel: "qveris-cap", dataProvider: "qveris_finance" } },
+      liveQuotes: { AAPL: { price: 100 } },
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      quoteDetailsLoaded: { AAPL: true },
+      quoteSeriesLoaded: { AAPL: { 日K: true } },
+    });
+
+    useLabStore.getState().setIntegrationStatus({ credentialConfigured: true, settings: { modelId: "model-a", modelGatewayBaseUrl: "https://gateway.example", capabilityBaseUrl: "https://data.example", dataChannel: "backup-cap", dataProvider: "backup_finance" } });
+
+    expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLastRefreshAt: null, quoteDetailsLoaded: {}, quoteSeriesLoaded: {} });
+  });
+
   it("ignores an in-flight quote response from an old data channel", async () => {
     let resolveQuote;
     useLabStore.setState({
