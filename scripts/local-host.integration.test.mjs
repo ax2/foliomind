@@ -191,6 +191,54 @@ test("客户端断开时取消上游 CAP request", async (context) => {
   assert.equal(overview.payload.state.activeRequest, false);
 });
 
+test("动态 CAP 测试只允许当前目录已验证的工具", async (context) => {
+  const calls = [];
+  const upstream = createServer((request, response) => {
+    const path = new URL(request.url, "http://127.0.0.1").pathname;
+    calls.push(path);
+    if (path === "/search") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ search_id: "search-current", total: 1, results: [{ tool_id: "qveris_finance.analytics_rsi", name: "RSI", params: [{ name: "symbol", type: "string", required: true }] }] }));
+      return;
+    }
+    if (path === "/tools/execute") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ success: true, result: { value: 52.4 } }));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  const capabilityBaseUrl = await listen(upstream);
+  context.after(() => new Promise((resolve) => upstream.close(resolve)));
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-capability-test-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_capability_test_123456" } });
+  await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl } } });
+
+  const unverified = await hostRequest(host, "/api/dev/capabilities/test", { method: "POST", body: { input: { toolId: "qveris_finance.hidden_tool", searchId: "search-attacker", parameters: { symbol: "600519" } } } });
+  assert.equal(unverified.response.status, 403);
+  assert.equal(unverified.payload.code, "CAPABILITY_NOT_VERIFIED");
+  assert.deepEqual(calls, []);
+
+  const directory = await hostRequest(host, "/api/dev/capabilities/discover", { method: "POST", body: { input: { query: "provider:qveris_finance", limit: 10 } } });
+  assert.equal(directory.response.status, 200);
+  assert.equal(directory.payload.searchId, "search-current");
+  assert.deepEqual(calls, ["/search"]);
+
+  const stale = await hostRequest(host, "/api/dev/capabilities/test", { method: "POST", body: { input: { toolId: "qveris_finance.analytics_rsi", searchId: "search-old", parameters: { symbol: "600519" } } } });
+  assert.equal(stale.response.status, 403);
+  assert.equal(stale.payload.code, "CAPABILITY_NOT_VERIFIED");
+  assert.deepEqual(calls, ["/search"]);
+
+  const verified = await hostRequest(host, "/api/dev/capabilities/test", { method: "POST", body: { input: { toolId: "qveris_finance.analytics_rsi", searchId: "search-current", parameters: { symbol: "600519" } } } });
+  assert.equal(verified.response.status, 200);
+  assert.equal(verified.payload.result.result.value, 52.4);
+  assert.deepEqual(calls, ["/search", "/tools/execute"]);
+});
+
 test("does not fall back to Search after an authentication failure", async (context) => {
   const calls = [];
   const upstream = createServer((request, response) => {

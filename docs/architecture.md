@@ -151,3 +151,5 @@ CAP 数据访问与模型推理访问在状态层明确解耦：有效 API Key �
 组合表现趋势属于复盘快照的纯派生层：只从带有可解析交易日和真实 `totalPnlPercent` 的历史复盘生成有序点位，同日取最新记录，少于两个有效点位保持空态。趋势图不发起请求、不写回用户状态、不参与费用统计，删除或新增复盘后由当前内存快照重新计算，见 PRD Stage 3BR。
 
 Local Web Host 与桌面 Rust Host 共享出站地址信任边界：保存配置和发起模型/CAP 请求前，地址必须是无用户名密码、无查询参数/片段的 HTTP(S) URL；远程地址强制 HTTPS，仅 `localhost`、`127.0.0.0/8` 与 `::1` 允许 HTTP 本地 mock。每次读取已保存配置时再次校验，检测到手动篡改或损坏即进入可恢复错误，不向该地址发送凭据，见 PRD Stage 3BT。
+
+动态 CAP 目录测试也受 Host 授权边界保护。Local Host 只允许测试最近一次目录搜索返回且已规范化的 `toolId/searchId` 组合；目录刷新会替换旧绑定，目录外或过期组合在出站请求前返回 `CAPABILITY_NOT_VERIFIED`。固定 CAP 产品链路与 Pi 的 Search → Inspect → Call 阶段约束保持独立，开发面板的动态测试不会扩大 Skill 或固化工具白名单，见 PRD Stage 3BU。

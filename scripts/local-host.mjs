@@ -839,11 +839,35 @@ async function discoverCapabilityDirectory(input, settings, key, signal) {
   return directory;
 }
 
+/**
+ * Dynamic capability tests must be bound to the directory the user actually
+ * discovered in this Host session. Accepting arbitrary tool/search IDs from
+ * a browser would let a compromised local page spend the configured API key
+ * on an unverified QVeris capability. The directory is intentionally
+ * replaced on every discover operation, so stale cards must be refreshed.
+ */
+export function validateDiscoveredCapabilitySelection(directory, { toolId = "", searchId = "" } = {}) {
+  const normalizedToolId = String(toolId || "").trim();
+  const normalizedSearchId = String(searchId || "").trim();
+  const directorySearchId = String(directory?.searchId || "").trim();
+  const verified = Array.isArray(directory?.tools)
+    && directory.tools.some((tool) => String(tool?.toolId || "").trim() === normalizedToolId);
+  if (!normalizedToolId || !normalizedSearchId || !directorySearchId || normalizedSearchId !== directorySearchId || !verified) {
+    const error = new Error("该能力尚未由当前能力目录验证，请先刷新完整能力目录");
+    error.status = 403;
+    error.code = "CAPABILITY_NOT_VERIFIED";
+    throw error;
+  }
+  return { toolId: normalizedToolId, searchId: normalizedSearchId };
+}
+
 async function testDiscoveredCapability(input, settings, key, signal) {
   const toolId = String(input?.toolId || "").trim();
   const searchId = String(input?.searchId || "").trim();
   const parameters = input?.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters) ? input.parameters : null;
   if (!toolId || !searchId || !parameters) throw new Error("能力测试需要 toolId、searchId 和 JSON 参数");
+  const cache = await readToolCache();
+  validateDiscoveredCapabilitySelection(cache.__directory, { toolId, searchId });
   const runId = `cap_test_${randomUUID()}`;
   const url = `${endpoint(settings.capabilityBaseUrl || DEFAULT_CAPABILITY, "tools/execute")}?tool_id=${encodeURIComponent(toolId)}`;
   const startedAt = Date.now();

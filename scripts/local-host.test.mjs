@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
+import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -53,6 +53,24 @@ test("normalizes discovered capabilities without losing schema, examples, or bil
   assert.equal(capability.sampleParameters.symbol, "600519");
   assert.equal(capability.expectedCost, "1 credit");
   assert.equal(capability.searchId, "srch_demo");
+});
+
+test("binds dynamic capability tests to the currently discovered directory", () => {
+  const directory = {
+    searchId: "search-current",
+    tools: [{ toolId: "qveris_finance.analytics_rsi" }],
+  };
+  assert.deepEqual(validateDiscoveredCapabilitySelection(directory, { toolId: "qveris_finance.analytics_rsi", searchId: "search-current" }), {
+    toolId: "qveris_finance.analytics_rsi",
+    searchId: "search-current",
+  });
+  for (const input of [
+    { toolId: "qveris_finance.other", searchId: "search-current" },
+    { toolId: "qveris_finance.analytics_rsi", searchId: "search-old" },
+    { toolId: "qveris_finance.analytics_rsi", searchId: "" },
+  ]) {
+    assert.throws(() => validateDiscoveredCapabilitySelection(directory, input), (error) => error?.code === "CAPABILITY_NOT_VERIFIED" && error?.status === 403);
+  }
 });
 
 test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () => {
