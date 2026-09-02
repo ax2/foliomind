@@ -13,6 +13,7 @@ const integrationMocks = vi.hoisted(() => ({
   applyIntegrationSettings: vi.fn(),
   loadIntegrationStatus: vi.fn(),
   queryCapabilityData: vi.fn(),
+  testModelConnection: vi.fn(),
 }));
 const runtimeMocks = vi.hoisted(() => ({ askPi: vi.fn() }));
 
@@ -32,6 +33,7 @@ vi.mock("./lib/integrations.js", async (importOriginal) => ({
   applyIntegrationSettings: integrationMocks.applyIntegrationSettings,
   loadIntegrationStatus: integrationMocks.loadIntegrationStatus,
   queryCapabilityData: integrationMocks.queryCapabilityData,
+  testModelConnection: integrationMocks.testModelConnection,
 }));
 
 vi.mock("./lib/piRuntime.js", async (importOriginal) => ({
@@ -51,6 +53,7 @@ afterEach(cleanup);
 beforeEach(() => {
   integrationMocks.applyIntegrationSettings.mockReset();
   integrationMocks.queryCapabilityData.mockReset();
+  integrationMocks.testModelConnection.mockReset().mockResolvedValue({ text: "模型连接正常", model: "model-a" });
   runtimeMocks.askPi.mockReset().mockResolvedValue({ text: "模型连接正常" });
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
@@ -647,7 +650,7 @@ describe("FolioMind core flows", () => {
     expect(integrationMocks.queryCapabilityData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519" });
   });
 
-  it("tests the saved model through a minimal prompt without calling financial tools", async () => {
+  it("tests the saved model through a Host probe without calling financial tools", async () => {
     integrationMocks.loadIntegrationStatus.mockResolvedValue({
       credentialConfigured: true,
       keyPrefix: "cap_demo…",
@@ -669,7 +672,7 @@ describe("FolioMind core flows", () => {
     expect(testButton).toBeEnabled();
     fireEvent.click(testButton);
     expect(await screen.findByText(/模型连接成功 · model-a/)).toBeInTheDocument();
-    expect(runtimeMocks.askPi).toHaveBeenCalledWith("请仅回复“模型连接正常”，不要调用工具，也不要查询市场数据。", { settleTimeoutMs: 30_000 });
+    expect(integrationMocks.testModelConnection).toHaveBeenCalledWith();
   });
 
   it("turns model gateway failures into a recoverable settings message", async () => {
@@ -684,7 +687,7 @@ describe("FolioMind core flows", () => {
       demo: false,
       environment: "local-host",
     });
-    runtimeMocks.askPi.mockRejectedValue(new Error("model gateway timeout"));
+    integrationMocks.testModelConnection.mockRejectedValue(new Error("model gateway timeout"));
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置", exact: true }));
@@ -704,12 +707,12 @@ describe("FolioMind core flows", () => {
       demo: false,
       environment: "local-host",
     });
-    runtimeMocks.askPi.mockResolvedValue({ text: "模型连接正常", audits: [{ operation: "cap-call" }] });
+    integrationMocks.testModelConnection.mockRejectedValue(new Error("模型网关返回了不符合连接测试协议的结果"));
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "设置", exact: true }));
     fireEvent.click(await screen.findByRole("button", { name: "测试模型" }));
-    expect(await screen.findByText("模型测试触发了金融工具，请重试；测试不会接受工具调用结果")).toBeInTheDocument();
+    expect(await screen.findByText("模型暂时没有完成响应，请稍后重试")).toBeInTheDocument();
   });
 
   it("keeps only installed Skill IDs for settings backup export", () => {

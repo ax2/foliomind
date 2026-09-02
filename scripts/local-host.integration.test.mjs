@@ -225,6 +225,36 @@ test("Local Host serializes prompt requests, aborts the owner, and releases runt
   assert.equal(after.payload.state.activeRequest, false);
 });
 
+test("model connection probe omits finance tools and records model cost", async (context) => {
+  let capturedBody;
+  const upstream = createServer(async (request, response) => {
+    if (request.url !== "/chat/completions") { response.writeHead(404).end(); return; }
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    capturedBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: "probe-1", model: "test-model", choices: [{ message: { role: "assistant", content: "模型连接正常" }, finish_reason: "stop" }], usage: { total_tokens: 8 }, cost: { credits: 0.01 } }));
+  });
+  const gateway = await listen(upstream);
+  context.after(() => new Promise((resolve) => upstream.close(resolve)));
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-model-probe-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+  await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_model_probe_test_123456" } });
+  const settings = await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { modelGatewayBaseUrl: gateway, modelId: "test-model", models: [{ id: "test-model" }] } } });
+  assert.equal(settings.response.status, 200);
+  const result = await hostRequest(host, "/api/integration/model/test", { method: "POST" });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.payload.text, "模型连接正常");
+  assert.equal(capturedBody.tool_choice, "none");
+  assert.equal(Object.hasOwn(capturedBody, "tools"), false);
+  const overview = await hostRequest(host, "/api/dev/overview");
+  const entry = overview.payload.logs.find((item) => item.operation === "connection-test");
+  assert.equal(JSON.parse(entry.params).tools, false);
+  assert.equal(entry.cost.amount, 0.01);
+});
+
 test("客户端断开时取消上游 CAP request", async (context) => {
   let upstreamStartedResolve;
   let upstreamClosedResolve;

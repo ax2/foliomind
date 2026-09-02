@@ -6,7 +6,7 @@ const localHost = vi.hoisted(() => ({ isLocalWebRuntime: vi.fn(() => false), loc
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("./localHost.js", () => localHost);
 
-import { applyIntegrationSettings, loadIntegrationStatus, queryCapabilityData, queryTradingCalendar, syncQVerisModels } from "./integrations.js";
+import { applyIntegrationSettings, loadIntegrationStatus, queryCapabilityData, queryTradingCalendar, syncQVerisModels, testModelConnection } from "./integrations.js";
 
 describe("integration client", () => {
   beforeEach(() => {
@@ -57,6 +57,20 @@ describe("integration client", () => {
     tauri.invoke.mockResolvedValue({ data: { price: 1297.4 }, mode: "qveris-cap", audits: [] });
     await expect(queryCapabilityData(input)).resolves.toMatchObject({ mode: "qveris-cap" });
     expect(tauri.invoke).toHaveBeenCalledWith("qveris_data_query", { input });
+  });
+
+  it("tests the model gateway through a no-tools Host probe", async () => {
+    tauri.invoke.mockResolvedValue({ text: "模型连接正常", model: "model-a", cost: null });
+    await expect(testModelConnection()).resolves.toMatchObject({ text: "模型连接正常" });
+    expect(tauri.invoke).toHaveBeenCalledWith("qveris_model_connection_test", undefined);
+  });
+
+  it("routes the model probe to Local Host during web debugging", async () => {
+    delete window.__TAURI_INTERNALS__;
+    localHost.isLocalWebRuntime.mockReturnValue(true);
+    localHost.localHostRequest.mockResolvedValue({ text: "模型连接正常", model: "model-a" });
+    await expect(testModelConnection()).resolves.toMatchObject({ model: "model-a" });
+    expect(localHost.localHostRequest).toHaveBeenCalledWith("/api/integration/model/test", { method: "POST", timeoutMs: 40_000 });
   });
 
   it("surfaces a Local Host outage instead of presenting a fake demo state", async () => {

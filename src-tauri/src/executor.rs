@@ -11,7 +11,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use url::Url;
 use uuid::Uuid;
@@ -746,6 +746,79 @@ pub fn fetch_model_catalog(api_key: &str, base_url: &str) -> Result<Vec<Value>, 
         .and_then(Value::as_array)
         .ok_or("QVeris model catalog is missing data")?;
     normalize_model_catalog(values)
+}
+
+/// Make a model-gateway connectivity probe without starting Pi. The request
+/// deliberately contains no tool definitions and forces `tool_choice=none`,
+/// so diagnostics cannot invoke a finance capability or mutate the runtime.
+pub fn test_model_connection(
+    api_key: &str,
+    base_url: &str,
+    model_id: &str,
+) -> Result<Value, String> {
+    let model = model_id.trim();
+    if model.is_empty() {
+        return Err("请先同步模型目录并选择模型".into());
+    }
+    let endpoint = model_endpoint(base_url, "chat/completions")?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(UPSTREAM_TIMEOUT)
+        .build()
+        .map_err(|_| "cannot initialize QVeris model client")?;
+    let started_at = Instant::now();
+    let response = client
+        .post(endpoint)
+        .bearer_auth(api_key)
+        .header("Accept", "application/json")
+        .json(&json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "请仅回复：模型连接正常"}],
+            "tool_choice": "none",
+            "max_tokens": 32,
+        }))
+        .send()
+        .map_err(|_| "QVeris 模型网关连接失败或超时".to_string())?;
+    let status = response.status();
+    let mut limited = response.take((MAX_RESPONSE_BYTES + 1) as u64);
+    let mut bytes = Vec::new();
+    limited
+        .read_to_end(&mut bytes)
+        .map_err(|_| "无法读取 QVeris 模型网关响应".to_string())?;
+    if bytes.len() > MAX_RESPONSE_BYTES {
+        return Err("QVeris 模型网关响应超过大小限制".into());
+    }
+    let payload: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "QVeris 模型网关返回了无效响应".to_string())?;
+    if !status.is_success() {
+        return Err(format!("QVeris 模型网关返回 HTTP {}", status.as_u16()));
+    }
+    let assistant = payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .ok_or("模型网关返回为空")?;
+    if assistant
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some_and(|calls| !calls.is_empty())
+    {
+        return Err("模型网关返回了不符合连接测试协议的结果".into());
+    }
+    let text = assistant
+        .get("content")
+        .and_then(Value::as_str)
+        .or_else(|| assistant.get("reasoning").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .ok_or("模型没有返回可识别内容")?;
+    Ok(json!({
+        "text": text,
+        "model": payload.get("model").and_then(Value::as_str).unwrap_or(model),
+        "usage": payload.get("usage"),
+        "cost": extract_cost(&payload),
+        "elapsedMs": started_at.elapsed().as_millis(),
+    }))
 }
 
 fn normalize_model_catalog(values: &[Value]) -> Result<Vec<Value>, String> {

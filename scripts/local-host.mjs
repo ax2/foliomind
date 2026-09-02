@@ -1192,6 +1192,44 @@ async function runPromptAgent(message, settings, key, signal) {
   throw new Error("模型工具调用超过最大轮数");
 }
 
+async function testModelGateway(settings, key, signal) {
+  const model = settings.modelId || settings.models?.[0]?.id;
+  if (!model) throw new Error("请先同步模型目录并选择模型");
+  const startedAt = Date.now();
+  const path = endpoint(settings.modelGatewayBaseUrl, "chat/completions");
+  const response = await upstreamWithRetry(path, {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    // Deliberately omit tools and force tool_choice=none. This is a Host-level
+    // guarantee that a diagnostic cannot invoke a finance capability.
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "请仅回复：模型连接正常" }],
+      tool_choice: "none",
+      max_tokens: 32,
+    }),
+  }, signal);
+  const assistant = response.choices?.[0]?.message;
+  if (!assistant || Array.isArray(assistant.tool_calls) && assistant.tool_calls.length) {
+    throw new Error("模型网关返回了不符合连接测试协议的结果");
+  }
+  const text = String(assistant.content || assistant.reasoning || "").trim();
+  if (!text) throw new Error("模型没有返回可识别内容");
+  logInvocation({
+    type: "model",
+    operation: "connection-test",
+    method: "POST",
+    path,
+    model,
+    status: 200,
+    durationMs: Date.now() - startedAt,
+    params: { messageCount: 1, toolChoice: "none", tools: false },
+    response: { id: response.id, model: response.model, hasContent: true, toolCallCount: 0, usage: response.usage },
+    cost: costFrom(response),
+  });
+  return { text, model, usage: response.usage, cost: costFrom(response) };
+}
+
 async function promptAgent(message, settings, key, signal) {
   const releaseWarmup = await reserveCacheWarmup(message, settings);
   try {
@@ -1221,6 +1259,13 @@ async function route(req, body, requestSignal) {
     } finally { scope.close(); }
   }
   if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const previous = await readSettings(); const settings = validateIntegrationSettings({ ...previous, capabilityBaseUrl: endpointInput(input, "capabilityBaseUrl", previous.capabilityBaseUrl, "数据能力地址"), modelGatewayBaseUrl: endpointInput(input, "modelGatewayBaseUrl", previous.modelGatewayBaseUrl, "模型网关地址"), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || previous.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || previous.dataProvider || DEFAULT_DATA_PROVIDER), models: Array.isArray(input.models) ? input.models : previous.models || [] }); await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
+  if (method === "POST" && path === "/api/integration/model/test") {
+    const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
+    const settings = await readSettings();
+    const scope = createAbortScope(requestSignal, 35_000);
+    try { return await testModelGateway(settings, key, scope.signal); }
+    finally { scope.close(); }
+  }
   if (method === "GET" && path === "/api/dev/overview") {
     await ensureDeveloperLogsLoaded();
     const settings = await readSettings(); const key = await readKey();

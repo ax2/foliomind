@@ -1271,6 +1271,25 @@ async fn qveris_model_catalog_sync(
 }
 
 #[tauri::command]
+async fn qveris_model_connection_test(
+    host: State<'_, PiHost>,
+    app: AppHandle,
+) -> Result<Value, String> {
+    let host = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = host
+            .credentials
+            .read_qveris_key()?
+            .filter(|value| !value.trim().is_empty())
+            .ok_or("请先配置 QVeris API Key")?;
+        let settings = config::load(&app)?;
+        executor::test_model_connection(&key, &settings.model_gateway_base_url, &settings.model_id)
+    })
+    .await
+    .map_err(|error| format!("model connection test task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn qveris_trading_calendar(
     host: State<'_, PiHost>,
     app: AppHandle,
@@ -1415,6 +1434,7 @@ fn main() {
             integration_status,
             integration_settings_apply,
             qveris_model_catalog_sync,
+            qveris_model_connection_test,
             qveris_trading_calendar,
             qveris_data_query,
             user_state_load,

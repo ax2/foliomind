@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarDots, CaretLeft, CaretRight, CheckCircle, DownloadSimple, Funnel, Info, List, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
-import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
+import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels, testModelConnection as testModelGateway } from "../lib/integrations.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlyModelMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
@@ -908,14 +908,11 @@ export function SettingsView() {
     setModelTestMessage("");
     const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     try {
-      const result = await askPi("请仅回复“模型连接正常”，不要调用工具，也不要查询市场数据。", { settleTimeoutMs: 30_000 });
+      const result = await testModelGateway();
       if (!String(result?.text || "").trim()) throw new Error("模型没有返回可识别内容");
-      if (Array.isArray(result?.audits) && result.audits.some((audit) => ["search", "inspect", "call", "cap-call", "cached-call"].includes(audit?.operation))) {
-        throw new Error("模型测试触发了金融工具");
-      }
       const elapsed = Math.max(0, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt));
       setModelTestState("success");
-      setModelTestMessage(`模型连接成功 · ${status.settings.modelId} · ${elapsed}ms`);
+      setModelTestMessage(`模型连接成功 · ${result.model || status.settings.modelId} · ${elapsed}ms`);
     } catch (error) {
       setModelTestState("error");
       setModelTestMessage(friendlyModelMessage(error));

@@ -66,6 +66,17 @@ export async function applyIntegrationSettings(input) {
   return desktopInvoke("integration_settings_apply", { input });
 }
 
+/**
+ * Run a minimal model-gateway probe. This intentionally bypasses Pi and the
+ * finance tool registry: the Host sends a request with tool_choice=none so a
+ * connectivity check can never trigger a billable data lookup.
+ */
+export async function testModelConnection() {
+  if (isDesktopRuntime()) return desktopInvoke("qveris_model_connection_test");
+  if (!isLocalWebRuntime()) throw new Error("模型连接测试仅在桌面端或 localhost 调试环境可用");
+  return localHostRequest("/api/integration/model/test", { method: "POST", timeoutMs: 40_000 });
+}
+
 export async function queryTradingCalendar(date, marketcode = "212001") {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) throw new Error("交易日历日期无效");
   if (isDesktopRuntime()) return desktopInvoke("qveris_trading_calendar", { date, marketcode });
