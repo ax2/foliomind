@@ -9,6 +9,10 @@ const finiteNumber = (value) => {
 };
 const PLAN_HORIZONS = new Set(["short", "swing", "medium", "long"]);
 const PLAN_STATUSES = new Set(["none", "active", "executed", "archived"]);
+const LEGACY_SEED_RULES = Object.freeze([
+  { id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300 },
+  { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600 },
+]);
 // Skill metadata ships with the application; only the selected IDs belong in
 // the persisted, portable state. Keep legacy defaults so older state files do
 // not uninstall the two built-in skills on their first reload.
@@ -28,8 +32,29 @@ function sanitizeWatchlist(items) {
   })).filter((item) => item.symbol && item.name);
 }
 
+function isLegacySeedRule(rule, seed) {
+  const condition = rule.conditions?.[0];
+  const seedCondition = seed.id === "r1"
+    ? { type: "price_change", operator: "abs_gte", value: 3 }
+    : { type: "core_event", operator: "gte", value: 1 };
+  return rule.id === seed.id
+    && rule.symbol === seed.symbol
+    && rule.strategyId === seed.strategyId
+    && rule.threshold === seed.threshold
+    && rule.intervalSeconds === seed.intervalSeconds
+    && rule.enabled === true
+    && rule.lastCheckedAt === null
+    && rule.lastTriggeredAt === null
+    && rule.lastSignalTriggered === null
+    && Object.keys(rule.lastSignalBySymbol || {}).length === 0
+    && rule.logic === "AND"
+    && condition?.type === seedCondition.type
+    && condition?.operator === seedCondition.operator
+    && condition?.value === seedCondition.value;
+}
+
 function sanitizeRules(items) {
-  return (Array.isArray(items) ? items : []).slice(0, 500).map((rule) => {
+  const normalized = (Array.isArray(items) ? items : []).slice(0, 500).map((rule) => {
     const scope = rule?.scope === "watchlist" ? "watchlist" : "symbol";
     const symbol = scope === "watchlist" ? "*" : text(rule?.symbol, 64).toUpperCase();
     const lastSignalBySymbol = Object.fromEntries(Object.entries(rule?.lastSignalBySymbol || {})
@@ -40,6 +65,17 @@ function sanitizeRules(items) {
       id: text(rule?.id, 128), scope, symbol, strategyId: text(rule?.strategyId, 64), threshold: finiteNumber(rule?.threshold), conditions: normalizeConditions(rule?.conditions, text(rule?.strategyId, 64)), logic: String(rule?.logic || "AND").toUpperCase() === "OR" ? "OR" : "AND", intervalSeconds: finiteNumber(rule?.intervalSeconds), enabled: rule?.enabled !== false, lastCheckedAt: rule?.lastCheckedAt ? text(rule.lastCheckedAt, 64) : null, lastTriggeredAt: rule?.lastTriggeredAt ? text(rule.lastTriggeredAt, 64) : null, lastSignalTriggered: typeof rule?.lastSignalTriggered === "boolean" ? rule.lastSignalTriggered : null, lastSignalBySymbol,
     };
   }).filter((rule) => rule.id && rule.symbol && rule.strategyId && rule.threshold !== null && rule.intervalSeconds !== null);
+  return normalized;
+}
+
+function migrateLegacySeedRules(rules, notifications, monitorHistory) {
+  // Versions before the explicit-alert onboarding seeded two enabled rules.
+  // Remove only an untouched exact pair with no activity; any user edit,
+  // notification, history, or additional rule is preserved during upgrade.
+  if (notifications.length === 0 && monitorHistory.length === 0
+    && rules.length === LEGACY_SEED_RULES.length
+    && LEGACY_SEED_RULES.every((seed) => rules.some((rule) => isLegacySeedRule(rule, seed)))) return [];
+  return rules;
 }
 
 function sanitizeNotifications(items) {
@@ -82,7 +118,10 @@ function sanitizeReviewPosition(value) {
 export function normalizeUserState(state = {}) {
   const value = state && typeof state === "object" ? state : {};
   const revision = Number(value.revision);
-  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills) };
+  const notifications = sanitizeNotifications(value.notifications);
+  const monitorHistory = sanitizeMonitorHistory(value.monitorHistory);
+  const monitorRules = migrateLegacySeedRules(sanitizeRules(value.monitorRules ?? value.rules), notifications, monitorHistory);
+  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules, notifications, portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory, portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills) };
 }
 
 export { sanitizeInstalledSkillIds, sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };

@@ -355,34 +355,10 @@ impl Default for UserState {
                     group: "A股".into(),
                 },
             ],
-            monitor_rules: vec![
-                MonitorRule {
-                    id: "r1".into(),
-                    symbol: "600519".into(),
-                    strategy_id: "price_change".into(),
-                    threshold: 3.0,
-                    interval_seconds: 300,
-                    enabled: true,
-                    last_checked_at: None,
-                    last_triggered_at: None,
-                    conditions: Vec::new(),
-                    logic: default_logic(),
-                    last_signal_triggered: None,
-                },
-                MonitorRule {
-                    id: "r2".into(),
-                    symbol: "300750".into(),
-                    strategy_id: "news_risk".into(),
-                    threshold: 1.0,
-                    interval_seconds: 600,
-                    enabled: true,
-                    last_checked_at: None,
-                    last_triggered_at: None,
-                    conditions: Vec::new(),
-                    logic: default_logic(),
-                    last_signal_triggered: None,
-                },
-            ],
+            // Alerts are user-created actions. Starting with none prevents a
+            // first-run credential save from silently triggering billable
+            // background checks.
+            monitor_rules: Vec::new(),
             notifications: Vec::new(),
             portfolio_positions: Vec::new(),
             monitor_history: Vec::new(),
@@ -695,7 +671,67 @@ fn load_unlocked(app: &AppHandle) -> Result<UserState, String> {
     let state = serde_json::from_slice::<UserState>(&bytes)
         .map_err(|_| "user state is invalid".to_string())?;
     validate(&state)?;
-    Ok(state)
+    Ok(migrate_legacy_seed_rules(state))
+}
+
+fn legacy_seed_rule(
+    rule: &MonitorRule,
+    id: &str,
+    symbol: &str,
+    strategy_id: &str,
+    threshold: f64,
+    interval_seconds: u64,
+) -> bool {
+    let expected_condition = if id == "r1" {
+        ("price_change", "abs_gte", 3.0)
+    } else {
+        ("core_event", "gte", 1.0)
+    };
+    let normalized_condition = rule.conditions.len() == 1
+        && rule.conditions[0]
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            == Some(expected_condition.0)
+        && rule.conditions[0]
+            .get("operator")
+            .and_then(serde_json::Value::as_str)
+            == Some(expected_condition.1)
+        && rule.conditions[0]
+            .get("value")
+            .and_then(serde_json::Value::as_f64)
+            .is_some_and(|value| (value - expected_condition.2).abs() < f64::EPSILON);
+    rule.id == id
+        && rule.symbol == symbol
+        && rule.strategy_id == strategy_id
+        && (rule.threshold - threshold).abs() < f64::EPSILON
+        && rule.interval_seconds == interval_seconds
+        && rule.enabled
+        && rule.last_checked_at.is_none()
+        && rule.last_triggered_at.is_none()
+        && rule.last_signal_triggered.is_none()
+        && rule.logic == "AND"
+        && (rule.conditions.is_empty() || normalized_condition)
+}
+
+/// Remove only the untouched rules seeded by pre-onboarding releases. A user
+/// edit, a prior check, a notification, or any additional rule keeps the
+/// persisted configuration intact.
+fn migrate_legacy_seed_rules(mut state: UserState) -> UserState {
+    if state.notifications.is_empty()
+        && state.monitor_history.is_empty()
+        && state.monitor_rules.len() == 2
+        && state
+            .monitor_rules
+            .iter()
+            .any(|rule| legacy_seed_rule(rule, "r1", "600519", "price_change", 3.0, 300))
+        && state
+            .monitor_rules
+            .iter()
+            .any(|rule| legacy_seed_rule(rule, "r2", "300750", "news_risk", 1.0, 600))
+    {
+        state.monitor_rules.clear();
+    }
+    state
 }
 
 pub fn load(app: &AppHandle) -> Result<UserState, String> {
@@ -794,10 +830,66 @@ mod tests {
     fn defaults_are_valid() {
         assert!(validate(&UserState::default()).is_ok());
         assert_eq!(UserState::default().revision, 0);
+        assert!(UserState::default().monitor_rules.is_empty());
         assert_eq!(
             UserState::default().installed_skill_ids,
             vec!["fundamental".to_string(), "monitor".to_string()]
         );
+    }
+
+    #[test]
+    fn legacy_seed_rules_are_removed_only_when_untouched() {
+        let seed =
+            |id: &str, symbol: &str, strategy_id: &str, threshold: f64, interval_seconds: u64| {
+                MonitorRule {
+                    id: id.into(),
+                    symbol: symbol.into(),
+                    strategy_id: strategy_id.into(),
+                    threshold,
+                    interval_seconds,
+                    enabled: true,
+                    last_checked_at: None,
+                    last_triggered_at: None,
+                    conditions: Vec::new(),
+                    logic: default_logic(),
+                    last_signal_triggered: None,
+                }
+            };
+        let mut migrated = UserState::default();
+        migrated.monitor_rules = vec![
+            seed("r1", "600519", "price_change", 3.0, 300),
+            seed("r2", "300750", "news_risk", 1.0, 600),
+        ];
+        assert!(migrate_legacy_seed_rules(migrated).monitor_rules.is_empty());
+
+        let mut edited = UserState::default();
+        edited.monitor_rules = vec![
+            seed("r1", "600519", "price_change", 4.0, 300),
+            seed("r2", "300750", "news_risk", 1.0, 600),
+        ];
+        assert_eq!(migrate_legacy_seed_rules(edited).monitor_rules.len(), 2);
+
+        let mut active = UserState::default();
+        active.monitor_rules = vec![
+            seed("r1", "600519", "price_change", 3.0, 300),
+            seed("r2", "300750", "news_risk", 1.0, 600),
+        ];
+        active.notifications.push(Notification {
+            id: "n1".into(),
+            kind: "monitor".into(),
+            title: "已有提醒".into(),
+            body: String::new(),
+            severity: "info".into(),
+            created_at: String::new(),
+            read: false,
+            source: None,
+            symbol: String::new(),
+            name: String::new(),
+            rule_id: String::new(),
+            event_key: String::new(),
+            reminder_phase: String::new(),
+        });
+        assert_eq!(migrate_legacy_seed_rules(active).monitor_rules.len(), 2);
     }
 
     #[test]
@@ -819,6 +911,19 @@ mod tests {
     #[test]
     fn invalid_threshold_is_rejected() {
         let mut state = UserState::default();
+        state.monitor_rules.push(MonitorRule {
+            id: "test-rule".into(),
+            symbol: "600519".into(),
+            strategy_id: "price_change".into(),
+            threshold: 3.0,
+            interval_seconds: 300,
+            enabled: true,
+            last_checked_at: None,
+            last_triggered_at: None,
+            conditions: Vec::new(),
+            logic: default_logic(),
+            last_signal_triggered: None,
+        });
         state.monitor_rules[0].threshold = f64::NAN;
         assert!(validate(&state).is_err());
     }

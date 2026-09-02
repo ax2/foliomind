@@ -33,7 +33,7 @@ const MAX_PERSISTED_DEVELOPER_LOG_BYTES = 8 * 1024 * 1024;
 const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [], dataChannel: "qveris-cap", dataProvider: DEFAULT_DATA_PROVIDER };
 const defaultState = {
   watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }, { symbol: "300750", name: "宁德时代", market: "深市", category: "新能源" }],
-  monitorRules: [{ id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }, { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true, lastCheckedAt: null, lastTriggeredAt: null }],
+  monitorRules: [],
   notifications: [],
   portfolioPositions: [],
   portfolioReviews: [],

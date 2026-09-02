@@ -25,10 +25,10 @@ export const monitorStrategies = [
   },
 ];
 
-export const defaultMonitorRules = [
-  { id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
-  { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true },
-];
+// New installations must not create billable background checks before the
+// user explicitly configures an alert. Existing persisted rules are kept by
+// the state migration in userStateSchema.js.
+export const defaultMonitorRules = [];
 
 export const monitorTemplates = [
   { id: "workday", name: "上班族盯盘", description: "价格大幅波动或公告出现", logic: "OR", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }, { type: "core_event", operator: "gte", value: 1 }], intervalSeconds: 300 },

@@ -2,13 +2,34 @@ import { ArrowsClockwise, BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle 
 import { useEffect, useState } from "react";
 import { stocks } from "../data/market.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
-import { hasRealDataAccess } from "../lib/dataStatus.js";
+import { hasModelAccess, hasRealDataAccess } from "../lib/dataStatus.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
 import { MarketChart } from "./MarketChart.jsx";
 
 const ranges = ["分时", "5日", "日K", "周K", "月K", "季K", "年K"];
 const quoteFields = [["今开", "open"], ["昨收", "previousClose"], ["最高", "high"], ["最低", "low"], ["成交量", "volume"], ["成交额", "turnover"], ["换手率", "turnoverRate"], ["量比", "volumeRatio"], ["市盈率(TTM)", "pe"], ["市净率(LF)", "pb"], ["总市值", "marketCap"], ["流通市值", "floatMarketCap"]];
+
+function SetupChecklist({ userStateLoaded, integrationStatus, integrationStatusLoading, integrationStatusError, hasQuote, liveDataLoading, onSettings, onRefresh }) {
+  if (!userStateLoaded || integrationStatusLoading || integrationStatusError) return null;
+  const connected = hasRealDataAccess(integrationStatus);
+  const modelReady = hasModelAccess(integrationStatus);
+  if (connected && hasQuote && modelReady) return null;
+  const steps = connected
+    ? [
+      { label: "获取首个真实行情", detail: hasQuote ? "行情已返回" : "验证当前数据渠道和更新时间", done: hasQuote, action: hasQuote ? null : onRefresh },
+      { label: "开启 Agent 对话", detail: modelReady ? "模型已配置" : "同步并选择模型后可分析", done: modelReady, action: modelReady ? null : onSettings },
+    ]
+    : [
+      { label: "连接真实数据", detail: "保存 API Key，行情页不会使用示例价格", done: false, action: onSettings },
+      { label: "开启 Agent 对话（可选）", detail: "同步模型目录后即可使用研究和解读", done: false, action: onSettings },
+    ];
+  const completed = steps.filter((step) => step.done).length;
+  return <section className="setup-checklist" aria-label="开始使用 FolioMind">
+    <div className="setup-checklist-heading"><div><span>开始使用</span><h2>{connected ? "再完成一步，开始工作" : "先连接数据，再开始研究"}</h2><p>每一步都由你主动触发；未返回的字段会保持为空，不会用演示数据代替。</p></div><strong>{completed}/{steps.length}</strong></div>
+    <ol>{steps.map((step, index) => <li className={step.done ? "done" : ""} key={step.label}><span className="setup-step-number" aria-hidden="true">{step.done ? "✓" : index + 1}</span><div><strong>{step.label}</strong><small>{step.detail}</small></div>{step.action && <button type="button" className="secondary-button" disabled={liveDataLoading && index === 0} onClick={step.action}>{index === 0 && connected ? liveDataLoading ? "获取中…" : "获取行情" : "去设置"}</button>}</li>)}</ol>
+  </section>;
+}
 
 export function StockWorkspace() {
   const symbol = useLabStore((state) => state.selectedSymbol);
@@ -121,6 +142,7 @@ export function StockWorkspace() {
         <div className="data-health-copy"><strong>{healthTitle}</strong><small>{healthDetail}</small></div>
         <button className="data-health-action" disabled={healthState === "checking" || healthState === "loading"} onClick={() => { if (integrationStatusError || (!realDataMode && healthState !== "checking")) setActiveView("settings"); else if (realDataMode) void refreshLiveData(); }}><ArrowsClockwise size={14} />{integrationStatusLoading ? "读取中…" : integrationStatusError ? "去设置重试" : realDataMode ? healthState === "loading" ? "更新中…" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button><button className="data-health-evidence" type="button" onClick={() => setEvidenceOpen(true)}>来源与证据</button>
       </section>
+      <SetupChecklist userStateLoaded={userStateLoaded} integrationStatus={integrationStatus} integrationStatusLoading={integrationStatusLoading} integrationStatusError={integrationStatusError} hasQuote={hasQuote} liveDataLoading={liveDataLoading} onSettings={() => setActiveView("settings")} onRefresh={() => { void refreshSelectedQuote(symbol); }} />
       <section className="quote-overview">
       <div className={`primary-price ${changeToneClass(change)}`}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (integrationStatusLoading ? "正在读取数据连接" : integrationStatusError ? "数据连接暂不可用" : realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small className={hasQuote ? `quote-source quote-source-${freshness.state}` : ""}>{hasQuote ? `数据源 · ${quote.source || "真实数据"} · ${formatQuoteFreshness(quote.asOf)}` : integrationStatusLoading ? "连接确认后才会显示真实数据" : integrationStatusError ? "请到设置检查本地 Host" : realDataMode ? liveDataLoading ? "正在查询真实行情" : "暂无已查询数据 · 点击实时数据获取" : "配置数据服务后显示真实行情"}</small></div>
         <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.[key])}</dd></dl>)}</div>

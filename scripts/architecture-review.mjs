@@ -9,6 +9,7 @@ const [packageJson, cargoToml, tauriConfig, app, errorBoundary, stockWorkspace, 
   load("src/App.jsx"), load("src/components/AppErrorBoundary.jsx"), load("src/components/StockWorkspace.jsx"), load("src/components/MarketChart.jsx"), load("src/components/CopilotPanel.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"), load("src/lib/anomalyAttribution.js"), load("src/lib/eventReminders.js"), load("src/lib/dataStatus.js"), load("src-tauri/src/capability_data.rs"), load("src/store/useLabStore.js"), load("src-tauri/src/executor.rs"),
 ]);
 const quoteFormatting = await load("src/lib/quoteFormatting.js");
+const strategies = await load("src/data/monitorStrategies.js");
 const research = await load("src/lib/research.js");
 const portfolio = await load("src/lib/portfolio.js");
 const marketBreadth = await load("src/lib/marketBreadth.js");
@@ -96,6 +97,8 @@ check("详情与图表请求主动取消", labStore.includes("cancel the obsolet
 check("Skill 备份导出闭环", settingsView.includes("installedSkillIdsForBackup") && settingsView.includes("const installedSkillIds = installedSkillIdsForBackup(skillItems)") && settingsView.includes("installedSkillIds });") && prd.includes("Stage 3BZ Skill 备份导出闭环"), "设置页备份必须保留已安装 Skill ID，并继续通过共享 schema 排除凭据和运行时内容");
 check("分层行情轮询", app.includes("LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS") && app.includes("LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS") && app.includes("refreshLiveData({ symbols: prioritySymbols })") && labStore.includes("Array.isArray(options?.symbols)") && labStore.includes("requestedSymbols") && prd.includes("Stage 3CB 分层行情轮询"), "行情轮询必须将重点标的与普通自选分层，重点 15 秒、全量 180 秒，并支持受控 symbol 子集");
 check("脱敏开发日志持久化", localHost.includes("developer-logs.ndjson") && localHost.includes("DEVELOPER_LOG_RETENTION_MS") && localHost.includes("MAX_PERSISTED_DEVELOPER_LOGS") && localHost.includes("ensureDeveloperLogsLoaded") && localHost.includes("clearDeveloperLogs") && developerPanel.includes("exportLogs") && prd.includes("Stage 3CC 脱敏开发日志持久化与导出"), "开发面板日志需脱敏持久化、保留期限有界、重启恢复并支持导出/清空");
+check("首次运行零副作用盯盘", strategies.includes("defaultMonitorRules = []") && localHost.includes("monitorRules: []") && nativeUserState.includes("monitor_rules: Vec::new()") && userState.includes("LEGACY_SEED_RULES") && nativeUserState.includes("migrate_legacy_seed_rules"), "新安装不得隐式创建可计费盯盘规则；旧未改动种子只能在无活动记录时迁移清空");
+check("首次配置清单", stockWorkspace.includes("SetupChecklist") && stockWorkspace.includes("开始使用 FolioMind") && stockWorkspace.includes("不会用演示数据代替") && prd.includes("Stage 3CD 首次运行零副作用与配置清单"), "首次运行应明确连接真实数据、主动获取行情和可选模型配置，不填充演示数值");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

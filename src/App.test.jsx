@@ -90,6 +90,23 @@ describe("FolioMind core flows", () => {
     expect(screen.queryByText("预览模式")).not.toBeInTheDocument();
   });
 
+  it("guides first-run setup without inventing a quote or background alert", () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      integrationStatusLoading: false,
+      integrationStatusError: "",
+      integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true },
+      liveQuotes: {},
+      rules: [],
+    });
+    render(<StockWorkspace />);
+    expect(screen.getByRole("region", { name: "开始使用 FolioMind" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先连接数据，再开始研究" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "开始使用 FolioMind" }).querySelectorAll("button")).toHaveLength(2);
+    expect(screen.getByText(/不会用演示数据代替/)).toBeInTheDocument();
+  });
+
   it("switches watchlist symbols and chart ranges", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /宁德时代/ }));

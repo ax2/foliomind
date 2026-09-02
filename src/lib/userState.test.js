@@ -75,6 +75,33 @@ describe("user state backups", () => {
     expect(normalizeUserState({ watchlist: [{ symbol: "AAPL", name: "Apple" }] }).installedSkillIds).toEqual(["fundamental", "monitor"]);
   });
 
+  it("removes only untouched legacy monitor seeds during onboarding migration", () => {
+    const migrated = normalizeUserState({
+      monitorRules: [
+        { id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
+        { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true },
+      ],
+    });
+    expect(migrated.monitorRules).toEqual([]);
+
+    const edited = normalizeUserState({
+      monitorRules: [
+        { id: "r1", symbol: "600519", strategyId: "price_change", threshold: 4, intervalSeconds: 300, enabled: true },
+        { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true },
+      ],
+    });
+    expect(edited.monitorRules).toHaveLength(2);
+
+    const active = normalizeUserState({
+      monitorRules: [
+        { id: "r1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
+        { id: "r2", symbol: "300750", strategyId: "news_risk", threshold: 1, intervalSeconds: 600, enabled: true },
+      ],
+      notifications: [{ id: "n1", title: "已有提醒" }],
+    });
+    expect(active.monitorRules).toHaveLength(2);
+  });
+
   it("round-trips condition combinations without exposing runtime secrets", () => {
     const raw = serializeUserStateBackup({
       watchlist: [{ symbol: "600519", name: "贵州茅台" }],

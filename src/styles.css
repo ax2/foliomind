@@ -607,6 +607,35 @@ textarea:focus-visible {
 .data-health-preview .data-health-dot,
 .data-health-empty .data-health-dot,
 .data-health-unknown .data-health-dot { background: #9ca4af; }
+.setup-checklist {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid #d9e8fb;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f7fbff 0%, #fff 72%);
+}
+.setup-checklist-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.setup-checklist-heading > div { min-width: 0; }
+.setup-checklist-heading > div > span { color: var(--blue); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.setup-checklist-heading h2 { margin: 4px 0 0; color: #26364a; font-size: 17px; }
+.setup-checklist-heading p { margin: 5px 0 0; color: #718096; font-size: 11px; line-height: 1.55; }
+.setup-checklist-heading > strong { display: grid; min-width: 44px; height: 44px; place-items: center; border-radius: 50%; color: var(--blue); background: #e8f2ff; font-size: 12px; }
+.setup-checklist ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 0; padding: 0; list-style: none; }
+.setup-checklist li { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 54px; padding: 9px 10px; border: 1px solid #e6edf5; border-radius: 9px; background: rgba(255,255,255,.88); }
+.setup-checklist li.done { border-color: #d7eee3; background: #fbfffd; }
+.setup-step-number { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #53708f; background: #eef4fb; font-size: 11px; font-weight: 700; }
+.setup-checklist li.done .setup-step-number { color: #168354; background: #e1f5eb; }
+.setup-checklist li > div { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.setup-checklist li strong { overflow: hidden; color: #34445a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.setup-checklist li small { overflow: hidden; color: #8794a5; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.setup-checklist li .secondary-button { min-height: 28px; flex: 0 0 auto; padding: 0 8px; font-size: 10px; }
 .evidence-backdrop {
   position: fixed;
   z-index: 45;
@@ -2007,6 +2036,9 @@ textarea:focus-visible {
   .data-health-action {
     align-self: center;
   }
+  .setup-checklist { padding: 13px; }
+  .setup-checklist ol { grid-template-columns: 1fr; }
+  .setup-checklist li small { white-space: normal; }
   .data-state {
     grid-template-columns: auto minmax(0, 1fr);
     margin-block: 9vh;
