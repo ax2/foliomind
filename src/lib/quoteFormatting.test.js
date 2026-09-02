@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteFreshness } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -7,6 +7,15 @@ describe("quote formatting", () => {
     expect(formatPrice(0.1234)).toBe("0.1234");
     expect(formatAmount(1612600, "volume")).toBe("161.26 万股");
     expect(formatAmount(2086000000, "turnover")).toBe("20.86 亿");
+  });
+
+  it("accepts only finite positive quote prices", () => {
+    expect(isValidQuotePrice(12.3)).toBe(true);
+    expect(isValidQuotePrice("12.3")).toBe(true);
+    expect(isValidQuotePrice(0)).toBe(false);
+    expect(isValidQuotePrice(-1)).toBe(false);
+    expect(isValidQuotePrice(" ")).toBe(false);
+    expect(isValidQuotePrice(null)).toBe(false);
   });
 
   it("normalizes signed percentages and ratio-style margins", () => {

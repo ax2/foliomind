@@ -8,6 +8,7 @@ const [packageJson, cargoToml, tauriConfig, app, errorBoundary, stockWorkspace, 
   load("package.json").then(JSON.parse), load("src-tauri/Cargo.toml"), load("src-tauri/tauri.conf.json").then(JSON.parse),
   load("src/App.jsx"), load("src/components/AppErrorBoundary.jsx"), load("src/components/StockWorkspace.jsx"), load("src/components/MarketChart.jsx"), load("src/components/CopilotPanel.jsx"), load("src/components/SecondaryViews.jsx"), load("src/lib/userStateSchema.js"), load("src/lib/userState.js"), load("src-tauri/src/user_state.rs"), load(".github/workflows/release.yml"), load("docs/prd.md"), load("README.md"), load("src/lib/watchlist.js"), load("src/lib/portfolioReview.js"), load("src/lib/briefingSchedule.js"), load("scripts/local-host.integration.test.mjs"), load("scripts/local-host.mjs"), load("src/components/DeveloperPanel.jsx"), load("src/styles.css"), load("src-tauri/src/market_calendar.rs"), load("src-tauri/src/desktop_lifecycle.rs"), load("src-tauri/src/main.rs"), load("src-tauri/src/background_scheduler.rs"), load("src/lib/anomalyAttribution.js"), load("src/lib/eventReminders.js"), load("src/lib/dataStatus.js"), load("src-tauri/src/capability_data.rs"), load("src/store/useLabStore.js"), load("src-tauri/src/executor.rs"),
 ]);
+const quoteFormatting = await load("src/lib/quoteFormatting.js");
 const research = await load("src/lib/research.js");
 const portfolio = await load("src/lib/portfolio.js");
 const marketBreadth = await load("src/lib/marketBreadth.js");
@@ -84,6 +85,7 @@ check("盯盘 CAP 回退护栏", labStore.includes("shouldBlockMonitorModelFallb
 check("成本提取可信边界", localHost.includes("function costCandidate") && localHost.includes('"qveris_cost"') && !localHost.includes('"amount"]') && capabilityData.includes('"cost"') && backgroundScheduler.includes('"cost"') && executor.includes('"data"]') && prd.includes("Stage 3BP"), "费用账本只接受显式计费字段，不能把业务 amount/价格/序列值误记为费用，缓存命中不计入上游调用分母");
 check("启动连接状态可信化", marketStore.includes("integrationStatusLoading: true") && stockWorkspace.includes('healthState = integrationStatusLoading ? "checking"') && stockWorkspace.includes("不会使用示例行情") && prd.includes("Stage 3BQ"), "连接配置未读取完成前必须保持明确读取态，不能短暂显示预览模式或触发真实行情请求");
 check("组合表现趋势", portfolio.includes("portfolioPerformanceSeries") && marketViews.includes("portfolioPerformanceSeries") && marketViews.includes("组合表现趋势") && marketViews.includes("有效盈亏比例不足两次") && prd.includes("Stage 3BR"), "组合趋势只能由有日期和真实盈亏比例的复盘快照派生，缺少两个有效点位时保持空态");
+check("行情正数门禁一致性", quoteFormatting.includes("isValidQuotePrice") && stockWorkspace.includes("isValidQuotePrice(quote?.price)") && marketViews.includes("isValidQuotePrice(liveQuotes[item.symbol]?.price)") && prd.includes("Stage 3BS"), "所有行情展示、筛选和自动复盘入口必须只接受有限正数价格，零值和负值保持空态");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

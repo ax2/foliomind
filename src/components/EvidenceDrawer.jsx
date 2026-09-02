@@ -1,6 +1,6 @@
 import { ArrowsClockwise, CheckCircle, Database, Info, ShieldCheck, X, WarningCircle } from "@phosphor-icons/react";
 import { useEffect, useRef } from "react";
-import { formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "../lib/quoteFormatting.js";
+import { formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
 
 const EVIDENCE_FIELDS = [
   ["price", "最新价"],
@@ -16,7 +16,7 @@ const EVIDENCE_FIELDS = [
 ];
 
 function evidenceState(quote) {
-  if (!quote || !Number.isFinite(Number(quote.price))) return { id: "empty", label: "暂无可核验行情", Icon: WarningCircle };
+  if (!quote || !isValidQuotePrice(quote.price)) return { id: "empty", label: "暂无可核验行情", Icon: WarningCircle };
   const freshness = quoteFreshness(quote.asOf);
   if (freshness.state === "stale") return { id: "stale", label: "行情可能已延迟", Icon: WarningCircle };
   if (freshness.state === "unknown") return { id: "unknown", label: "数据时间未知", Icon: Info };

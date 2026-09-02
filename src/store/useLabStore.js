@@ -15,6 +15,7 @@ import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
+import { isValidQuotePrice } from "../lib/quoteFormatting.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -425,7 +426,7 @@ function conditionMonitorResult(rule, item, data) {
   if (!evaluation.known) throw new Error("数据服务未返回条件所需的完整字段");
   const asOf = String(data?.asOf || "数据时间未知");
   const source = String(data?.source || "数据服务");
-  const metric = Number.isFinite(Number(data?.price)) ? `最新价 ${Number(data.price).toFixed(2)}；` : "";
+  const metric = isValidQuotePrice(data?.price) ? `最新价 ${Number(data.price).toFixed(2)}；` : "";
   return {
     triggered: evaluation.triggered,
     title: `${item?.name || rule.symbol} · ${strategyFor(rule.strategyId).name}`,
@@ -443,7 +444,7 @@ function priceMonitorResult(rule, item, quote) {
   if (!evaluation.known) throw new Error("数据服务未返回条件所需的完整字段");
   const triggered = evaluation.triggered;
   const direction = change > 0 ? "上涨" : change < 0 ? "下跌" : "持平";
-  const price = Number.isFinite(Number(quote.price)) ? `最新价 ${Number(quote.price).toFixed(2)}，` : "";
+  const price = isValidQuotePrice(quote.price) ? `最新价 ${Number(quote.price).toFixed(2)}，` : "";
   const asOf = String(quote.asOf || "数据时间未知");
   const source = String(quote.source || "数据服务");
   return {

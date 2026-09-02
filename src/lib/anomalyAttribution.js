@@ -1,3 +1,5 @@
+import { isValidQuotePrice } from "./quoteFormatting.js";
+
 const MAX_TEXT = 1_024;
 const MAX_EVIDENCE = 12;
 
@@ -47,7 +49,7 @@ function normalizeSource(value, fallback = {}) {
 export function normalizeAttributionEvidence({ quote, news, events, capitalFlow } = {}) {
   const evidence = [];
   const quoteValue = quote && typeof quote === "object" ? quote : null;
-  if (quoteValue && Number.isFinite(Number(quoteValue.price))) {
+  if (quoteValue && isValidQuotePrice(quoteValue.price)) {
     const change = Number(quoteValue.change);
     const volumeRatio = Number(quoteValue.volumeRatio);
     evidence.push({
@@ -100,13 +102,13 @@ export function portfolioAttributionContext(position, quote) {
   const quantity = Number(position.quantity);
   const averageCost = Number(position.averageCost);
   const price = Number(quote?.price);
-  const hasNumbers = Number.isFinite(quantity) && Number.isFinite(averageCost) && Number.isFinite(price);
+  const hasNumbers = Number.isFinite(quantity) && Number.isFinite(averageCost) && isValidQuotePrice(price);
   const pnl = hasNumbers ? (price - averageCost) * quantity : null;
   return {
     hasPosition: true,
     quantity: Number.isFinite(quantity) ? quantity : null,
     averageCost: Number.isFinite(averageCost) ? averageCost : null,
-    currentPrice: Number.isFinite(price) ? price : null,
+    currentPrice: isValidQuotePrice(price) ? price : null,
     unrealizedPnl: pnl,
     summary: hasNumbers
       ? `当前持仓 ${quantity}，平均成本 ${averageCost.toFixed(2)}，真实现价 ${price.toFixed(2)}，未实现盈亏 ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}。`

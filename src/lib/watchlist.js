@@ -1,3 +1,5 @@
+import { isValidQuotePrice } from "./quoteFormatting.js";
+
 export const WATCHLIST_DEFAULT_GROUP = "自选";
 
 export const WATCHLIST_SORT_OPTIONS = Object.freeze([
@@ -38,7 +40,7 @@ export function sortWatchlistItems(items, quotes = {}, sortKey = "custom", direc
   const multiplier = direction === "desc" ? -1 : 1;
   const numericValue = (item) => {
     const quote = quotes?.[item.symbol];
-    if (sortKey === "price") return Number.isFinite(Number(quote?.price)) ? Number(quote.price) : null;
+    if (sortKey === "price") return isValidQuotePrice(quote?.price) ? Number(quote.price) : null;
     if (sortKey === "change") return Number.isFinite(Number(quote?.change)) ? Number(quote.change) : null;
     return null;
   };

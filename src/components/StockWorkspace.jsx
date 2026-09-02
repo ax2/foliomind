@@ -1,7 +1,7 @@
 import { ArrowsClockwise, BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { stocks } from "../data/market.js";
-import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, quoteFreshness } from "../lib/quoteFormatting.js";
+import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
@@ -53,7 +53,7 @@ export function StockWorkspace() {
   const isWatched = watchlist.some((item) => item.symbol === symbol);
   useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && !quoteDetailsLoading[symbol] && !quoteDetailsLoaded[symbol]) void refreshQuoteDetails(symbol); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, refreshQuoteDetails, quoteDetailsLoading, quoteDetailsLoaded]);
   useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && quoteDetailsLoaded[symbol] && !quoteSeriesLoading[symbol]?.[chartRange] && !quoteSeriesLoaded[symbol]?.[chartRange]) void refreshQuoteSeries(symbol, chartRange); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, chartRange, refreshQuoteSeries, quoteDetailsLoaded, quoteSeriesLoading, quoteSeriesLoaded]);
-  const hasQuote = Number.isFinite(quote?.price);
+  const hasQuote = isValidQuotePrice(quote?.price);
   const price = hasQuote ? quote.price : null;
   const change = hasQuote && Number.isFinite(quote.change) ? quote.change : null;
   const changeAmount = hasQuote && Number.isFinite(quote.changeAmount) ? quote.changeAmount : change != null && Number.isFinite(quote.previousClose) ? price - Number(quote.previousClose) : null;

@@ -14,6 +14,7 @@ describe("watchlist organization", () => {
     expect(sortWatchlistItems(items, quotes, "change", "desc").map((item) => item.symbol)).toEqual(["A", "B", "C"]);
     expect(sortWatchlistItems(items, quotes, "change", "asc").map((item) => item.symbol)).toEqual(["B", "A", "C"]);
     expect(sortWatchlistItems(items, {}, "custom").map((item) => item.symbol)).toEqual(["A", "B", "C"]);
+    expect(sortWatchlistItems(items, { A: { price: 0 }, B: { price: 10 }, C: { price: -2 } }, "price", "asc").map((item) => item.symbol)).toEqual(["B", "A", "C"]);
   });
 
   it("round-trips the user watchlist without quotes and parses CSV/TXT imports", () => {

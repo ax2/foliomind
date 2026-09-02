@@ -18,6 +18,7 @@ describe("portfolio briefing schedule", () => {
     const positions = [{ symbol: "AAPL" }];
     expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 120, asOf: "2026-09-01T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(true);
     expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 120, asOf: "2026-08-31T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(false);
+    expect(hasFreshPortfolioQuote({ positions, liveQuotes: { AAPL: { price: 0, asOf: "2026-09-01T02:00:00Z" } }, now: "2026-09-01T08:00:00Z" })).toBe(false);
     expect(normalizeBriefingSchedule({ enabled: true, closeTime: "99:99", retryMinutes: 999 })).toMatchObject({ enabled: true, closeTime: "15:35", retryMinutes: 60, timeZone: "Asia/Shanghai" });
   });
   it("resolves mainland exchange calendars and fails closed for unsupported markets", () => {

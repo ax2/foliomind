@@ -41,6 +41,7 @@ describe("anomaly attribution", () => {
     }, { anomaly, evidence: [], portfolio });
     expect(result.drivers[0].references[0].url).toBe("https://example.com/event");
     expect(portfolio).toMatchObject({ hasPosition: true, unrealizedPnl: 200, summary: expect.stringContaining("+200.00") });
+    expect(portfolioAttributionContext({ symbol: "600519", quantity: 10, averageCost: 100 }, { price: 0 })).toMatchObject({ hasPosition: true, currentPrice: null, unrealizedPnl: null });
   });
 
   it("requires evidence in the generated prompt", () => {

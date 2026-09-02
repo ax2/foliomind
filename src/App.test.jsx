@@ -358,6 +358,19 @@ describe("FolioMind core flows", () => {
     expect(breadth).toHaveTextContent("另有 1 个标的暂未返回有效价格");
   });
 
+  it("does not treat zero or negative prices as returned real quotes", () => {
+    useLabStore.setState({
+      activeView: "market",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" }, demo: false },
+      watchlist: [{ symbol: "ZERO", name: "零值行情", market: "沪深" }, { symbol: "NEG", name: "负值行情", market: "沪深" }, { symbol: "VALID", name: "有效行情", market: "沪深" }],
+      liveQuotes: { ZERO: { price: 0, change: 2 }, NEG: { price: -1, change: -2 }, VALID: { price: 10, change: 1, asOf: new Date(Date.now() - 60_000).toISOString(), source: "真实 CAP" } },
+    });
+    render(<MarketView />);
+    const breadth = screen.getByRole("region", { name: "自选市场宽度" });
+    expect(breadth).toHaveTextContent("1/3 有行情");
+    expect(breadth).toHaveTextContent("另有 2 个标的暂未返回有效价格");
+  });
+
   it("shows field-level watchlist summary statistics from current real quotes", () => {
     window.localStorage.removeItem("foliomind.market-columns.v1");
     useLabStore.setState({

@@ -1,6 +1,12 @@
 const numberValue = (value) => Number(value);
 export const QUOTE_STALE_AFTER_MS = 15 * 60 * 1000;
 
+/** A quote price is displayable only when the provider returned a finite positive value. */
+export function isValidQuotePrice(value) {
+  const number = numberValue(value);
+  return Number.isFinite(number) && number > 0;
+}
+
 function timestampValue(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value < 10_000_000_000 ? value * 1000 : value;
   const text = String(value ?? "").trim();
