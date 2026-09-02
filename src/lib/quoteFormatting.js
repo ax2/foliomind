@@ -36,6 +36,18 @@ export function formatQuoteFreshness(value, now = Date.now()) {
   return freshness.state === "stale" ? `可能已延迟 · 数据时间 ${time}` : `数据时间 ${time}`;
 }
 
+/**
+ * Compact freshness copy for dense watchlist rows. The full timestamp remains
+ * available through the row title and the evidence drawer, while this label
+ * makes stale quotes visible without making the sidebar unreadable.
+ */
+export function formatCompactQuoteFreshness(value, now = Date.now()) {
+  const freshness = quoteFreshness(value, now);
+  if (freshness.state === "unknown") return "时间未知";
+  const time = new Date(freshness.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return `${freshness.state === "stale" ? "可能延迟" : "新鲜"} · ${time}`;
+}
+
 export function formatPrice(value) {
   const number = numberValue(value);
   if (!Number.isFinite(number)) return "—";

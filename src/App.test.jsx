@@ -322,6 +322,20 @@ describe("FolioMind core flows", () => {
     expect(quote).not.toHaveClass("down");
   });
 
+  it("makes watchlist quote freshness visible without changing the value", () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "FRESH", name: "新鲜标的", market: "沪深" }],
+      selectedSymbol: "FRESH",
+      liveQuotes: { FRESH: { price: 10, change: 0, asOf: new Date().toISOString(), source: "CAP" } },
+    });
+    const { container } = render(<WatchlistSidebar />);
+    const freshness = container.querySelector(".watch-row .quote-freshness");
+    expect(freshness).toHaveTextContent(/^新鲜 ·/);
+    expect(freshness).toHaveAttribute("title", expect.stringContaining("CAP"));
+    expect(container.querySelector(".watch-row .quote strong")).toHaveTextContent("10.00");
+  });
+
   it("saves and restores named market views without changing the data contract", () => {
     window.localStorage.removeItem("foliomind.market-columns.v1");
     window.localStorage.removeItem("foliomind.market-views.v1");

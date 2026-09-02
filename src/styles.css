@@ -430,6 +430,12 @@ textarea:focus-visible {
 .watch-row .quote {
   text-align: right;
 }
+.watch-row .quote-freshness {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+}
 .up {
   color: var(--red) !important;
 }
