@@ -16,6 +16,7 @@ const anomalyDetection = await load("src/lib/anomalyDetection.js");
 const piRuntime = await load("src/lib/piRuntime.js");
 const localHostClient = await load("src/lib/localHost.js");
 const integrations = await load("src/lib/integrations.js");
+const settingsView = await load("src/components/SecondaryViews.jsx");
 const userStateClient = await load("src/lib/userState.js");
 const labStore = await load("src/store/useLabStore.js");
 const commandPalette = await load("src/components/CommandPalette.jsx");
@@ -92,6 +93,7 @@ check("Skill 安装状态持久化", userState.includes("installedSkillIds") && 
 check("固定 CAP 页面回退护栏", labStore.includes("shouldFallbackToAgent") && labStore.includes('"TOOL_CACHE_MISS"') && labStore.includes("if (!shouldFallbackToAgent(error)) throw error") && prd.includes("Stage 3BW 固定 CAP 页面回退错误护栏"), "页面固定 CAP 只有明确能力缺失才可进入 Agent 发现，认证/限流/超时/上游故障不得追加模型调用");
 check("动态 CAP 目录会话绑定", localHost.includes("capabilityDirectorySession") && localHost.includes("sessionId: capabilityDirectorySession") && localHost.includes('sessionId = ""') && hostIntegrationTest.includes("afterRestart") && prd.includes("Stage 3BX 动态 CAP 目录会话绑定"), "动态 CAP 目录元数据可保留查看，但调用授权必须绑定当前 Host 会话，重启后需重新发现");
 check("详情与图表请求主动取消", labStore.includes("cancel the obsolete") && labStore.includes("upstream call") && labStore.includes("AbortController") && labStore.includes("abortController(detailsRequestController)") && labStore.includes("abortController(seriesRequestController)") && prd.includes("Stage 3BY 详情与图表请求主动取消"), "切换标的或图表周期必须取消失去展示价值的旧请求，避免无效等待和费用");
+check("Skill 备份导出闭环", settingsView.includes("installedSkillIdsForBackup") && settingsView.includes("const installedSkillIds = installedSkillIdsForBackup(skillItems)") && settingsView.includes("installedSkillIds });") && prd.includes("Stage 3BZ Skill 备份导出闭环"), "设置页备份必须保留已安装 Skill ID，并继续通过共享 schema 排除凭据和运行时内容");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

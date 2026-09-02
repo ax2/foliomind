@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
-import { EventsView, MarketView, NotificationsView, PortfolioView, ResearchView } from "./components/SecondaryViews.jsx";
+import { EventsView, MarketView, NotificationsView, PortfolioView, ResearchView, installedSkillIdsForBackup } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
@@ -596,6 +596,14 @@ describe("FolioMind core flows", () => {
     fireEvent.click(testButton);
     expect(await screen.findByText(/连接成功 · 600519 已返回真实行情/)).toBeInTheDocument();
     expect(integrationMocks.queryCapabilityData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519" });
+  });
+
+  it("keeps only installed Skill IDs for settings backup export", () => {
+    expect(installedSkillIdsForBackup([
+      { id: "fundamental", installed: true },
+      { id: "news", installed: false },
+      { id: "monitor", installed: true },
+    ])).toEqual(["fundamental", "monitor"]);
   });
 
   it("does not treat an empty CAP response as a successful connection", async () => {
