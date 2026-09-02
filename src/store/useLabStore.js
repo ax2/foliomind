@@ -19,7 +19,13 @@ import { isValidQuotePrice } from "../lib/quoteFormatting.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
-export const LIVE_QUOTE_REFRESH_INTERVAL_MS = 60_000;
+// Keep the polling tiers explicit: selected/held/actively monitored symbols
+// get a low-latency refresh while the rest of the watchlist is refreshed less
+// often to stay within provider rate and cost limits.
+export const LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS = 15_000;
+export const LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS = 180_000;
+// Backward-compatible alias for integrations that imported the old constant.
+export const LIVE_QUOTE_REFRESH_INTERVAL_MS = LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS;
 export const BRIEFING_RECONCILE_INTERVAL_MS = 60_000;
 const DEFAULT_LIVE_QUOTE_CONCURRENCY = 2;
 const MAX_LIVE_QUOTE_CONCURRENCY = 4;
@@ -626,10 +632,17 @@ export const useLabStore = create((set, get) => ({
     }
     return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
-  refreshLiveData: async () => {
+  refreshLiveData: async (options = {}) => {
     const state = get();
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !state.watchlist.length || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling") return false;
+    const requestedSymbols = Array.isArray(options?.symbols)
+      ? new Set(options.symbols.map((symbol) => String(symbol || "").trim().toUpperCase()).filter(Boolean))
+      : null;
+    const items = requestedSymbols
+      ? state.watchlist.filter((item) => requestedSymbols.has(String(item?.symbol || "").trim().toUpperCase()))
+      : state.watchlist;
+    if (!items.length) return false;
     const requestGeneration = ++liveRequestGeneration;
     const requestController = new AbortController();
     liveRequestController = requestController;
@@ -638,7 +651,7 @@ export const useLabStore = create((set, get) => ({
     let received = 0;
     try {
       const concurrency = resolveLiveQuoteConcurrency();
-      await mapWithConcurrency(state.watchlist, concurrency, async (item) => {
+      await mapWithConcurrency(items, concurrency, async (item) => {
         try {
           if (requestGeneration !== liveRequestGeneration) return false;
           const { quotes } = await fetchLiveQuote(item, { signal: requestController.signal });

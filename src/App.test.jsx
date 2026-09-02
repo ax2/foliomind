@@ -643,7 +643,7 @@ describe("FolioMind core flows", () => {
 
     render(<App />);
     expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
-    expect(await screen.findByText("实时行情已启用 · 每分钟更新")).toBeInTheDocument();
+    expect(await screen.findByText("实时行情已启用 · 重点15秒 / 全量3分钟")).toBeInTheDocument();
     expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
   });
 
@@ -764,7 +764,7 @@ describe("FolioMind core flows", () => {
 
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       act(() => document.dispatchEvent(new Event("visibilitychange")));
-      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledOnce());
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith({ symbols: ["600519"] }));
     } finally {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
     }
@@ -934,7 +934,7 @@ describe("FolioMind core flows", () => {
     const refreshSelectedQuote = vi.fn().mockResolvedValue(true);
     useLabStore.setState({ userStateLoaded: true, refreshLiveData: vi.fn().mockResolvedValue(true), refreshSelectedQuote });
     render(<App />);
-    await screen.findByText("实时行情已启用 · 每分钟更新");
+    await screen.findByText("实时行情已启用 · 重点15秒 / 全量3分钟");
     fireEvent.click(screen.getByRole("button", { name: "获取实时数据" }));
     expect(refreshSelectedQuote).toHaveBeenCalledWith("600519");
     expect(screen.getByRole("button", { name: "交给 Agent 查询" })).toBeInTheDocument();

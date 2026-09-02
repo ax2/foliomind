@@ -2,8 +2,8 @@ import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { ChatView, EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
-import { BRIEFING_RECONCILE_INTERVAL_MS, LIVE_QUOTE_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
-import { useEffect } from "react";
+import { BRIEFING_RECONCILE_INTERVAL_MS, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
+import { useEffect, useRef } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
@@ -26,9 +26,14 @@ export function App() {
   const userStateLoading = useLabStore((state) => state.userStateLoading);
   const userStateError = useLabStore((state) => state.userStateError);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const selectedSymbol = useLabStore((state) => state.selectedSymbol);
+  const portfolioPositions = useLabStore((state) => state.portfolioPositions);
+  const rules = useLabStore((state) => state.rules);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
   const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl].join("|");
+  const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
+  const pollingChannelRef = useRef("");
   useEffect(() => {
     void hydrateUserState();
     void hydrateIntegrationStatus();
@@ -70,23 +75,35 @@ export function App() {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured) return undefined;
     if (typeof window === "undefined" || typeof document === "undefined") return undefined;
     const isVisible = () => document.visibilityState !== "hidden";
-    const refreshWhenVisible = () => {
+    const prioritySymbols = [...new Set(priorityRefreshKey.split("|").filter(Boolean))];
+    const refreshPriority = () => {
+      if (isVisible()) void refreshLiveData({ symbols: prioritySymbols });
+    };
+    const refreshFull = () => {
       if (isVisible()) void refreshLiveData();
     };
-    refreshWhenVisible();
-    const timer = window.setInterval(refreshWhenVisible, LIVE_QUOTE_REFRESH_INTERVAL_MS);
+    // A channel change invalidates all cached quotes, so warm the complete
+    // watchlist. Selection/position/rule changes only need the low-latency
+    // priority tier and should not trigger a second full sweep.
+    const channelChanged = pollingChannelRef.current !== integrationRefreshKey;
+    pollingChannelRef.current = integrationRefreshKey;
+    if (channelChanged) refreshFull();
+    else refreshPriority();
+    const priorityTimer = window.setInterval(refreshPriority, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS);
+    const fullTimer = window.setInterval(refreshFull, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS);
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") refreshWhenVisible();
+      if (document.visibilityState === "visible") refreshPriority();
     };
-    const onWindowFocus = () => refreshWhenVisible();
+    const onWindowFocus = () => refreshPriority();
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("focus", onWindowFocus);
     return () => {
-      window.clearInterval(timer);
+      window.clearInterval(priorityTimer);
+      window.clearInterval(fullTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", onWindowFocus);
     };
-  }, [userStateLoaded, integrationRefreshKey, refreshLiveData]);
+  }, [userStateLoaded, integrationRefreshKey, priorityRefreshKey, refreshLiveData]);
   const renderView = () => {
     if (activeView === "market") return <div className="secondary-view-shell"><LiveQuotesStrip /><MarketView /></div>;
     if (activeView === "research") return <div className="secondary-view-shell"><LiveQuotesStrip /><ResearchView /></div>;

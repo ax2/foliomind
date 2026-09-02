@@ -8,7 +8,7 @@ vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) 
 vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: persistence.loadUserState, saveUserState: persistence.saveUserState }));
 vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
 
-import { initialLabState, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
+import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
 
 describe("lab store streaming lifecycle", () => {
   beforeEach(async () => {
@@ -364,6 +364,27 @@ describe("lab store streaming lifecycle", () => {
     await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
     expect(maxActive).toBe(2);
     expect(Object.keys(useLabStore.getState().liveQuotes)).toHaveLength(4);
+  });
+
+  it("supports a priority quote refresh without sweeping the full watchlist", async () => {
+    const watchlist = [
+      { symbol: "600519", name: "贵州茅台", market: "沪深" },
+      { symbol: "300750", name: "宁德时代", market: "深市" },
+      { symbol: "AAPL", name: "Apple", market: "NASDAQ" },
+    ];
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } }, userStateLoaded: true, watchlist });
+    runtime.queryCachedData.mockImplementation(async ({ symbol }) => ({ data: { quotes: [{ symbol, price: 100, asOf: "2026-09-02T09:00:00Z", source: "真实 CAP" }] }, mode: "qveris-cap", audits: [] }));
+
+    await expect(useLabStore.getState().refreshLiveData({ symbols: ["600519", "AAPL"] })).resolves.toBe(true);
+    expect(runtime.queryCachedData).toHaveBeenCalledTimes(2);
+    expect(runtime.queryCachedData.mock.calls.map(([input]) => input.symbol).sort()).toEqual(["600519.SH", "AAPL"].sort());
+    expect(useLabStore.getState().liveQuotes).toMatchObject({ "600519": { price: 100 }, AAPL: { price: 100 } });
+    expect(useLabStore.getState().liveQuotes["300750"]).toBeUndefined();
+  });
+
+  it("keeps the documented two-tier quote polling intervals", () => {
+    expect(LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS).toBe(15_000);
+    expect(LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS).toBe(180_000);
   });
 
   it("uses the selected instrument market instead of labeling every quote as A-share", async () => {
