@@ -89,7 +89,7 @@ Rust Host
 
 设置页的“本地数据备份”适合换机或在 Web 调试与桌面端之间迁移用户数据。导入会覆盖当前自选、盯盘、消息和持仓，并清空旧行情缓存，随后重新获取真实数据；正在分析或盯盘检查时会暂时禁止导入，避免覆盖进行中的任务。Host 每次保存前会保留上一份通过校验的状态快照，主文件损坏时自动恢复；若主文件和快照同时损坏，会提示导入备份，不会静默覆盖成默认数据。规则、消息已读、自选删除等状态操作也会等待 canonical Host 保存成功，失败时回滚并提供重试提示；事件提醒只有保存成功后才发送系统通知。
 
-未配置凭证和模型时，界面可能显示带有“预览模式”标识的静态布局样例；一旦配置完成，行情、指标、图表、组合和盯盘信号只使用数据服务已返回的真实数据，缺失字段显示为空并提示查询，不会用样例补齐。
+未配置凭证和模型时，界面可能显示带有“预览模式”标识的静态布局样例；一旦配置完成，行情、指标、图表、组合和盯盘信号只使用数据服务已返回的真实数据，缺失字段显示为空并提示查询，不会用样例补齐。设置页可分别测试已保存的数据连接和模型连接；模型探针只发起一次最小请求，不调用金融工具，但可能产生模型费用。
 
 ### 本地 Web 调试
 
@@ -144,10 +144,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.138`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.139`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.138 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.139 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

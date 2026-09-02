@@ -14,6 +14,7 @@ const integrationMocks = vi.hoisted(() => ({
   loadIntegrationStatus: vi.fn(),
   queryCapabilityData: vi.fn(),
 }));
+const runtimeMocks = vi.hoisted(() => ({ askPi: vi.fn() }));
 
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
@@ -33,6 +34,11 @@ vi.mock("./lib/integrations.js", async (importOriginal) => ({
   queryCapabilityData: integrationMocks.queryCapabilityData,
 }));
 
+vi.mock("./lib/piRuntime.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  askPi: runtimeMocks.askPi,
+}));
+
 // App flow tests exercise the browser preview. Local Host behavior is covered
 // by the dedicated user-state and Local Host integration suites.
 vi.mock("./lib/localHost.js", async (importOriginal) => ({
@@ -45,6 +51,7 @@ afterEach(cleanup);
 beforeEach(() => {
   integrationMocks.applyIntegrationSettings.mockReset();
   integrationMocks.queryCapabilityData.mockReset();
+  runtimeMocks.askPi.mockReset().mockResolvedValue({ text: "模型连接正常" });
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
     settings: {
@@ -638,6 +645,71 @@ describe("FolioMind core flows", () => {
     fireEvent.click(testButton);
     expect(await screen.findByText(/连接成功 · 600519 已返回真实行情/)).toBeInTheDocument();
     expect(integrationMocks.queryCapabilityData).toHaveBeenCalledWith({ kind: "quote", symbol: "600519" });
+  });
+
+  it("tests the saved model through a minimal prompt without calling financial tools", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      keyPrefix: "cap_demo…",
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        dataChannel: "qveris-cap",
+        dataProvider: "qveris_finance",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置", exact: true }));
+    const testButton = await screen.findByRole("button", { name: "测试模型" });
+    expect(testButton).toBeEnabled();
+    fireEvent.click(testButton);
+    expect(await screen.findByText(/模型连接成功 · model-a/)).toBeInTheDocument();
+    expect(runtimeMocks.askPi).toHaveBeenCalledWith("请仅回复“模型连接正常”，不要调用工具，也不要查询市场数据。", { settleTimeoutMs: 30_000 });
+  });
+
+  it("turns model gateway failures into a recoverable settings message", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    runtimeMocks.askPi.mockRejectedValue(new Error("model gateway timeout"));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "测试模型" }));
+    expect(await screen.findByText("模型响应较慢，已停止本次测试；请稍后重试")).toBeInTheDocument();
+  });
+
+  it("rejects a model probe that unexpectedly invokes a financial tool", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    });
+    runtimeMocks.askPi.mockResolvedValue({ text: "模型连接正常", audits: [{ operation: "cap-call" }] });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "设置", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "测试模型" }));
+    expect(await screen.findByText("模型测试触发了金融工具，请重试；测试不会接受工具调用结果")).toBeInTheDocument();
   });
 
   it("keeps only installed Skill IDs for settings backup export", () => {

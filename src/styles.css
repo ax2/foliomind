@@ -1933,6 +1933,10 @@ textarea:focus-visible {
 .settings-card button:disabled { opacity: .48; cursor: not-allowed; }
 .settings-card .secondary-button { border: 1px solid #d9dde4; background: #fff; color: #59616d; }
 .settings-actions { justify-content: space-between; border-top: 1px solid var(--line); padding-top: 14px; }
+.settings-action-buttons { display: flex; align-items: center; gap: 9px; }
+.model-test-status { border-radius: 7px; padding: 8px 10px; background: #f5f7fa; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.model-test-status.success { background: #eff9f3; color: #16734b; }
+.model-test-status.error { background: #fff3f1; color: #a33b32; }
 .status-pill { border-radius: 999px; padding: 4px 9px; background: #f3f4f6; color: #7b8490; font-size: 10px; }
 .status-pill.ok { background: #eaf8f2; color: #16805b; }
 .settings-notice { margin: 14px 2px; color: #526071; font-size: 11px; }
@@ -2156,6 +2160,11 @@ textarea:focus-visible {
   .settings-notice.error {
     align-items: stretch;
     flex-direction: column;
+  }
+  .settings-action-buttons {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
   }
   .settings-notice.error button {
     align-self: flex-start;

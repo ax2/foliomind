@@ -5,7 +5,7 @@ import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels } from "../lib/integrations.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
-import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
+import { friendlyDataMessage, friendlyModelMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
 import packageJson from "../../package.json";
@@ -19,7 +19,7 @@ import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, conditionsFor
 import { anomalyLabel, detectMarketAnomalies } from "../lib/anomalyDetection.js";
 import { nextBriefingLabel } from "../lib/briefingSchedule.js";
 import { loadDesktopLifecycleStatus, reconcileDesktopNow } from "../lib/desktopLifecycle.js";
-import { isDesktopRuntime } from "../lib/piRuntime.js";
+import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { marketBreadth, marketWatchlistSummary } from "../lib/marketBreadth.js";
 import { RESEARCH_SORT_OPTIONS, sortResearchItems } from "../lib/research.js";
 import { isMonitorRuleExpired, MONITOR_TRIGGER_MODES, monitorDateInputValue, monitorLifecycleLabel } from "../lib/monitorLifecycle.js";
@@ -760,6 +760,8 @@ export function SettingsView() {
   const [desktopLifecycle, setDesktopLifecycle] = useState(null);
   const [connectionTestState, setConnectionTestState] = useState("idle");
   const [connectionTestMessage, setConnectionTestMessage] = useState("");
+  const [modelTestState, setModelTestState] = useState("idle");
+  const [modelTestMessage, setModelTestMessage] = useState("");
   const backupInput = useRef(null);
   const loadRequest = useRef(0);
 
@@ -817,9 +819,9 @@ export function SettingsView() {
     }
     finally { setBusy(false); }
   };
-  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); const next = { ...status, credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next); setConnectionTestState("idle"); setConnectionTestMessage(""); }, "数据服务密钥已保存");
-  const clearKey = () => run(async () => { await clearQVerisCredential(); const next = { ...status, credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next); setConnectionTestState("idle"); setConnectionTestMessage(""); }, "数据服务密钥已清除");
-  const syncModels = () => run(async () => { const value = await syncQVerisModels(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); return value; }, "模型目录已同步");
+  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); const next = { ...status, credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next); setConnectionTestState("idle"); setConnectionTestMessage(""); setModelTestState("idle"); setModelTestMessage(""); }, "数据服务密钥已保存");
+  const clearKey = () => run(async () => { await clearQVerisCredential(); const next = { ...status, credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next); setConnectionTestState("idle"); setConnectionTestMessage(""); setModelTestState("idle"); setModelTestMessage(""); }, "数据服务密钥已清除");
+  const syncModels = () => run(async () => { const value = await syncQVerisModels(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); setModelTestState("idle"); setModelTestMessage(""); return value; }, "模型目录已同步");
   const saveAll = async () => {
     if (!beginRuntimeConfiguration()) {
       const message = "当前分析尚未结束，请等待完成或停止后再应用设置";
@@ -828,7 +830,7 @@ export function SettingsView() {
       return;
     }
     try {
-      await run(async () => { const value = await applyIntegrationSettings(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); return value; }, "设置已保存，Pi Runtime 已应用新模型", true);
+      await run(async () => { const value = await applyIntegrationSettings(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); setModelTestState("idle"); setModelTestMessage(""); return value; }, "设置已保存，Pi Runtime 已应用新模型", true);
     } finally {
       endRuntimeConfiguration();
       window.setTimeout(() => { void refreshLiveData(); }, 0);
@@ -847,6 +849,7 @@ export function SettingsView() {
   const savedCapabilityEndpoint = normalizeEndpoint(status.settings?.capabilityBaseUrl);
   const currentCapabilityEndpoint = normalizeEndpoint(form.capabilityBaseUrl);
   const capabilityEndpointChanged = savedCapabilityEndpoint !== currentCapabilityEndpoint;
+  const savedModelReady = Boolean(status.settings?.modelId && form.modelId === status.settings.modelId && selectedModelAvailable && !gatewayChanged);
   const testDataConnection = async () => {
     if (connectionTestState === "loading") return;
     if (!status.credentialConfigured || status.demo) {
@@ -877,6 +880,45 @@ export function SettingsView() {
     } catch (error) {
       setConnectionTestState("error");
       setConnectionTestMessage(friendlyDataMessage(error, "数据连接暂未返回可用行情，请检查 API Key 或稍后重试"));
+    }
+  };
+  const testModelConnection = async () => {
+    if (modelTestState === "loading") return;
+    if (!status.credentialConfigured || status.demo) {
+      setModelTestState("error");
+      setModelTestMessage("请先在本地 Host 或桌面端保存数据服务 API Key");
+      return;
+    }
+    if (analysisActive) {
+      setModelTestState("error");
+      setModelTestMessage("当前已有分析正在运行，请等待完成或停止后再测试");
+      return;
+    }
+    if (gatewayChanged) {
+      setModelTestState("error");
+      setModelTestMessage("模型网关地址已修改，请先同步模型并保存并应用后再测试");
+      return;
+    }
+    if (!savedModelReady) {
+      setModelTestState("error");
+      setModelTestMessage("请先同步模型目录并保存并应用一个可用模型");
+      return;
+    }
+    setModelTestState("loading");
+    setModelTestMessage("");
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    try {
+      const result = await askPi("请仅回复“模型连接正常”，不要调用工具，也不要查询市场数据。", { settleTimeoutMs: 30_000 });
+      if (!String(result?.text || "").trim()) throw new Error("模型没有返回可识别内容");
+      if (Array.isArray(result?.audits) && result.audits.some((audit) => ["search", "inspect", "call", "cap-call", "cached-call"].includes(audit?.operation))) {
+        throw new Error("模型测试触发了金融工具");
+      }
+      const elapsed = Math.max(0, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt));
+      setModelTestState("success");
+      setModelTestMessage(`模型连接成功 · ${status.settings.modelId} · ${elapsed}ms`);
+    } catch (error) {
+      setModelTestState("error");
+      setModelTestMessage(friendlyModelMessage(error));
     }
   };
   const currentVersion = packageJson.version;
@@ -925,7 +967,7 @@ export function SettingsView() {
     {loadError && <div className="settings-notice error" role="alert"><span>{loadError}</span><button className="secondary-button" onClick={() => { void loadSettings(); }}>重试加载</button></div>}
     <section className="settings-card"><div className="settings-card-title"><div><strong>数据与模型凭证</strong><small>{localDevHost ? "本地开发 Host 将密钥保存到用户配置目录（权限 0600）；浏览器不保存长期密钥。" : "密钥只保存在系统凭据库。FolioMind 是独立开源项目，不代表任何数据服务商。"}</small></div><span className={loadState === "ready" && status.credentialConfigured ? "status-pill ok" : "status-pill"}>{credentialLabel}</span></div><div className="settings-inline"><input type="password" autoComplete="new-password" value={apiKey} disabled={formDisabled} onChange={(event) => setApiKey(event.target.value)} placeholder="粘贴数据服务 API Key" aria-label="数据服务 API Key" /><button disabled={formDisabled || !apiKey.trim()} onClick={saveKey}>保存密钥</button>{status.credentialConfigured && <button className="secondary-button" disabled={formDisabled} onClick={clearKey}>清除</button>}</div></section>
     <section className="settings-card"><div className="settings-card-title"><div><strong>金融数据能力</strong><small>默认直连 QVeris CAP 的 qveris_finance 能力目录；首次固化后按稳定 tool schema 调用，避免每次重新搜索。</small></div><span className="status-pill ok">CAP</span></div><label>数据能力 API<input value={form.capabilityBaseUrl} disabled={formDisabled} onChange={(event) => { setForm((value) => ({ ...value, capabilityBaseUrl: event.target.value })); setConnectionTestState("idle"); setConnectionTestMessage(""); }} aria-label="数据能力 API" /></label><div className="settings-inline-note">Provider：{form.dataProvider || "qveris_finance"} · 渠道：{form.dataChannel || "qveris-cap"}</div><div className="connection-test-row"><button type="button" className="secondary-button" disabled={formDisabled || !status.credentialConfigured || status.demo || capabilityEndpointChanged || connectionTestState === "loading"} onClick={() => { void testDataConnection(); }}>{connectionTestState === "loading" ? "测试中…" : "测试数据连接"}</button><span className={`connection-test-status ${connectionTestState}`} role="status">{connectionTestMessage || (capabilityEndpointChanged ? "保存并应用新地址后可测试" : status.credentialConfigured ? "使用当前自选的第一个标的进行真实 CAP 测试" : "保存 API Key 后可测试真实数据")}</span></div></section>
-    <section className="settings-card"><div className="settings-card-title"><div><strong>Pi 模型 · 模型网关</strong><small>通过运行时短期令牌访问本机回环代理，长期 API Key 不会交给 Pi。</small></div><button className="secondary-button" disabled={formDisabled || !status.credentialConfigured} onClick={syncModels}>同步模型</button></div><label>Gateway Base URL<input value={form.modelGatewayBaseUrl} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, modelGatewayBaseUrl: event.target.value }))} aria-label="Gateway Base URL" /></label><label>默认模型<select value={form.modelId} disabled={formDisabled} onChange={(event) => setForm((value) => ({ ...value, modelId: event.target.value }))} aria-label="默认模型"><option value="">请先同步模型目录</option>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></label><div className="settings-actions"><span>{analysisActive ? "请等待当前分析结束后再应用设置" : modelStatus}</span><button disabled={formDisabled || analysisActive || status.demo || gatewayChanged || !selectedModelAvailable} onClick={() => { void saveAll(); }}>{busy || runtimeConfiguring ? "处理中…" : "保存并应用"}</button></div></section>
+    <section className="settings-card"><div className="settings-card-title"><div><strong>Pi 模型 · 模型网关</strong><small>通过运行时短期令牌访问本机回环代理，长期 API Key 不会交给 Pi。</small></div><button className="secondary-button" disabled={formDisabled || !status.credentialConfigured} onClick={syncModels}>同步模型</button></div><label>Gateway Base URL<input value={form.modelGatewayBaseUrl} disabled={formDisabled} onChange={(event) => { setForm((value) => ({ ...value, modelGatewayBaseUrl: event.target.value })); setModelTestState("idle"); setModelTestMessage(""); }} aria-label="Gateway Base URL" /></label><label>默认模型<select value={form.modelId} disabled={formDisabled} onChange={(event) => { setForm((value) => ({ ...value, modelId: event.target.value })); setModelTestState("idle"); setModelTestMessage(""); }} aria-label="默认模型"><option value="">请先同步模型目录</option>{modelOptions.map((model) => <option value={model.id} key={model.id}>{model.name || model.id}</option>)}</select></label><div className="settings-actions"><span>{analysisActive ? "请等待当前分析结束后再应用设置" : modelStatus}</span><div className="settings-action-buttons"><button type="button" className="secondary-button" disabled={formDisabled || analysisActive || status.demo || !savedModelReady || modelTestState === "loading"} onClick={() => { void testModelConnection(); }}>{modelTestState === "loading" ? "测试中…" : "测试模型"}</button><button disabled={formDisabled || analysisActive || status.demo || gatewayChanged || !selectedModelAvailable} onClick={() => { void saveAll(); }}>{busy || runtimeConfiguring ? "处理中…" : "保存并应用"}</button></div></div><div className={`model-test-status ${modelTestState}`} role="status">{modelTestMessage || (savedModelReady ? "测试会发起一次最小模型请求，不调用金融数据工具，可能产生模型费用" : "同步并保存模型后可测试对话链路")}</div></section>
     <section className="settings-card"><div className="settings-card-title"><div><strong>桌面驻留</strong><small>{isDesktopRuntime() ? "关闭主窗口后 FolioMind 会隐藏到系统托盘并继续核对已启用的自动复盘；请从托盘菜单显式退出。" : "桌面版支持关闭窗口后驻留系统托盘；Web 本地调试页面关闭后不会继续运行。"}</small></div><span className={desktopLifecycle?.residentMode ? "status-pill ok" : "status-pill"}>{desktopLifecycle?.residentMode ? desktopLifecycle.hiddenToTray ? "托盘运行中" : "已启用" : "桌面版可用"}</span></div>{isDesktopRuntime() && <div className="settings-actions"><span>托盘菜单可显示窗口、立即检查盘后复盘或完全退出。</span><button className="secondary-button" onClick={() => { void reconcileDesktopNow().then(setDesktopLifecycle); }}>立即检查</button></div>}</section>
     <section className="settings-card update-card"><div className="settings-card-title"><div><strong>应用更新</strong><small>当前版本 {currentVersion} · 从 FolioMind 官方 GitHub 发布页检查公开版本。</small></div><button className="secondary-button" disabled={updateState === "loading"} onClick={() => { void checkForUpdates(); }}>{updateLabel}</button></div><div className="update-status" aria-live="polite"><span>{updateMessage}</span>{latestRelease && compareVersions(latestRelease.version, currentVersion) > 0 && <a href={latestRelease.url || RELEASES_PAGE_URL} target="_blank" rel="noopener noreferrer">查看新版本</a>}{!latestRelease && <a href={RELEASES_PAGE_URL} target="_blank" rel="noopener noreferrer">打开发布页</a>}</div><small className="update-note">安装包更新仍需从发布页下载安装；正式自动更新还需要平台签名密钥。</small></section>
     <section className="settings-card backup-card"><div className="settings-card-title"><div><strong>本地数据备份</strong><small>迁移自选、盯盘、消息和持仓到另一台设备。凭据、模型网关、缓存和运行日志永远不会写入备份。</small></div><span className="status-pill">可导入导出</span></div><div className="backup-actions"><button className="secondary-button" disabled={formDisabled || backupBusy} onClick={exportBackup}><DownloadSimple size={15} />导出 JSON</button><button className="secondary-button" disabled={formDisabled || backupBusy} onClick={() => backupInput.current?.click()}><UploadSimple size={15} />{backupBusy ? "导入中…" : "导入 JSON"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => { void importBackup(event); }} /></div></section>
