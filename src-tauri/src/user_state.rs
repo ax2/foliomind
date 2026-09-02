@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Write, path::PathBuf, sync::Mutex};
+use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -11,6 +11,7 @@ const MAX_NOTIFICATIONS: usize = 500;
 const MAX_PORTFOLIO_POSITIONS: usize = 200;
 const MAX_MONITOR_HISTORY: usize = 500;
 const MAX_PORTFOLIO_REVIEWS: usize = 90;
+const MAX_INSTALLED_SKILLS: usize = 100;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Serialize)]
@@ -83,6 +84,10 @@ impl<'de> Deserialize<'de> for WatchItem {
 
 fn default_logic() -> String {
     "AND".into()
+}
+
+fn default_installed_skill_ids() -> Vec<String> {
+    vec!["fundamental".into(), "monitor".into()]
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -326,6 +331,8 @@ pub struct UserState {
     pub portfolio_reviews: Vec<PortfolioReview>,
     #[serde(default)]
     pub briefing_schedule: BriefingSchedule,
+    #[serde(default = "default_installed_skill_ids")]
+    pub installed_skill_ids: Vec<String>,
 }
 
 impl Default for UserState {
@@ -381,6 +388,7 @@ impl Default for UserState {
             monitor_history: Vec::new(),
             portfolio_reviews: Vec::new(),
             briefing_schedule: BriefingSchedule::default(),
+            installed_skill_ids: default_installed_skill_ids(),
         }
     }
 }
@@ -434,8 +442,21 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || state.portfolio_positions.len() > MAX_PORTFOLIO_POSITIONS
         || state.monitor_history.len() > MAX_MONITOR_HISTORY
         || state.portfolio_reviews.len() > MAX_PORTFOLIO_REVIEWS
+        || state.installed_skill_ids.len() > MAX_INSTALLED_SKILLS
     {
         return Err("user state exceeds size limit".into());
+    }
+    let mut installed_skill_ids = HashSet::new();
+    for skill_id in &state.installed_skill_ids {
+        validate_text(skill_id, "installed skill id", 64)?;
+        if !installed_skill_ids.insert(skill_id) {
+            return Err("installed skill ids contain duplicates".into());
+        }
+        if !skill_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        }) {
+            return Err("installed skill id is invalid".into());
+        }
     }
     for item in &state.watchlist {
         validate_text(&item.symbol, "watchlist symbol", 64)?;
@@ -773,6 +794,10 @@ mod tests {
     fn defaults_are_valid() {
         assert!(validate(&UserState::default()).is_ok());
         assert_eq!(UserState::default().revision, 0);
+        assert_eq!(
+            UserState::default().installed_skill_ids,
+            vec!["fundamental".to_string(), "monitor".to_string()]
+        );
     }
 
     #[test]
@@ -845,7 +870,8 @@ mod tests {
                 "topLoser": {"symbol": "600519", "name": "贵州茅台", "currentPrice": 1300, "pnl": 1000, "pnlPercent": 8.33, "weight": 100, "asOf": "2026-08-30T08:00:00Z", "source": "provider"},
                 "positions": [{"symbol": "600519", "name": "贵州茅台", "currentPrice": 1300, "pnl": 1000, "pnlPercent": 8.33, "weight": 100, "asOf": "2026-08-30T08:00:00Z", "source": "provider"}],
                 "riskSignals": [], "upcomingEvents": [], "sources": ["provider"], "disclaimer": "不构成投资建议"
-            }]
+            }],
+            "installedSkillIds": ["fundamental", "news"]
         });
         let mut state: UserState =
             serde_json::from_value(value).expect("rich state should deserialize");
@@ -870,6 +896,7 @@ mod tests {
             state.portfolio_reviews[0].positions[0].current_price,
             1300.0
         );
+        assert_eq!(state.installed_skill_ids, vec!["fundamental", "news"]);
         let encoded = serde_json::to_value(&state).expect("rich state should serialize");
         state = serde_json::from_value(encoded).expect("rich state should round trip");
         assert_eq!(state.monitor_history.len(), 1);
@@ -892,5 +919,16 @@ mod tests {
         assert_eq!(state.monitor_rules[0].logic, "AND");
         assert!(state.monitor_history.is_empty());
         assert!(state.portfolio_reviews.is_empty());
+        assert_eq!(
+            state.installed_skill_ids,
+            vec!["fundamental".to_string(), "monitor".to_string()]
+        );
+    }
+
+    #[test]
+    fn invalid_installed_skill_id_is_rejected() {
+        let mut state = UserState::default();
+        state.installed_skill_ids = vec!["../escape".into()];
+        assert!(validate(&state).is_err());
     }
 }

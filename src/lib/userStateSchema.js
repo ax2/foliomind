@@ -9,6 +9,18 @@ const finiteNumber = (value) => {
 };
 const PLAN_HORIZONS = new Set(["short", "swing", "medium", "long"]);
 const PLAN_STATUSES = new Set(["none", "active", "executed", "archived"]);
+// Skill metadata ships with the application; only the selected IDs belong in
+// the persisted, portable state. Keep legacy defaults so older state files do
+// not uninstall the two built-in skills on their first reload.
+export const DEFAULT_INSTALLED_SKILL_IDS = Object.freeze(["fundamental", "monitor"]);
+
+function sanitizeInstalledSkillIds(value) {
+  const source = Array.isArray(value) ? value : DEFAULT_INSTALLED_SKILL_IDS;
+  return [...new Set(source
+    .map((item) => text(item, 64))
+    .filter((item) => item && /^[A-Za-z0-9._-]+$/.test(item)))]
+    .slice(0, 100);
+}
 
 function sanitizeWatchlist(items) {
   return (Array.isArray(items) ? items : []).slice(0, 200).map((item) => normalizeWatchlistItem({
@@ -70,7 +82,7 @@ function sanitizeReviewPosition(value) {
 export function normalizeUserState(state = {}) {
   const value = state && typeof state === "object" ? state : {};
   const revision = Number(value.revision);
-  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule) };
+  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules: sanitizeRules(value.monitorRules ?? value.rules), notifications: sanitizeNotifications(value.notifications), portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory: sanitizeMonitorHistory(value.monitorHistory), portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills) };
 }
 
-export { sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };
+export { sanitizeInstalledSkillIds, sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };

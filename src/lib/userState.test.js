@@ -43,6 +43,7 @@ describe("user state backups", () => {
       briefingSchedule: { enabled: true, closeTime: "16:05", retryMinutes: 20, lastResult: "waiting-data", lastError: "等待行情" },
       apiKey: "sk-secret",
       settings: { modelGatewayBaseUrl: "https://secret.example" },
+      installedSkillIds: ["fundamental", "news"],
     });
     expect(raw).not.toContain("sk-secret");
     expect(raw).not.toContain("secret.example");
@@ -53,6 +54,7 @@ describe("user state backups", () => {
       notifications: [{ symbol: "AAPL", name: "Apple", ruleId: "r1", eventKey: "AAPL|2026-09-01|财报", reminderPhase: "upcoming" }],
       portfolioPositions: [{ symbol: "AAPL", quantity: 2, averageCost: 100, takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: true, planThesis: "", planActions: [] }],
       briefingSchedule: { enabled: true, closeTime: "16:05", retryMinutes: 20, timeZone: "Asia/Shanghai", lastResult: "waiting-data", lastError: "等待行情" },
+      installedSkillIds: ["fundamental", "news"],
     });
   });
 
@@ -65,6 +67,12 @@ describe("user state backups", () => {
     const data = userStateBackupData({ watchlist: [{ symbol: " aapl ", name: " Apple " }], portfolioPositions: [{ id: "p", symbol: "aapl", name: "Apple", quantity: 0, averageCost: 10 }] });
     expect(data.watchlist[0]).toEqual({ symbol: "AAPL", name: "Apple", market: "", category: "", group: "自选" });
     expect(data.portfolioPositions).toEqual([]);
+  });
+
+  it("preserves installed Skill IDs without accepting path-like values", () => {
+    const normalized = normalizeUserState({ installedSkillIds: ["fundamental", "news", "news", "../escape", "bad id"] });
+    expect(normalized.installedSkillIds).toEqual(["fundamental", "news"]);
+    expect(normalizeUserState({ watchlist: [{ symbol: "AAPL", name: "Apple" }] }).installedSkillIds).toEqual(["fundamental", "monitor"]);
   });
 
   it("round-trips condition combinations without exposing runtime secrets", () => {
@@ -139,5 +147,14 @@ describe("user state backups", () => {
     const local = normalizeUserState({ ...base, watchlist: [{ symbol: "AAPL", name: "Apple Local" }] });
     const remote = normalizeUserState({ ...base, revision: 3, watchlist: [{ symbol: "AAPL", name: "Apple Remote" }] });
     expect(() => mergeUserStateChanges(base, local, remote)).toThrow(UserStateMergeConflictError);
+  });
+
+  it("merges independent Skill installation changes", () => {
+    const base = normalizeUserState({ revision: 2, installedSkillIds: ["fundamental"] });
+    const local = normalizeUserState({ ...base, installedSkillIds: ["fundamental", "news"] });
+    const remote = normalizeUserState({ ...base, revision: 3, installedSkillIds: ["fundamental", "risk"] });
+    expect(mergeUserStateChanges(base, local, remote).installedSkillIds).toEqual(["fundamental", "news", "risk"]);
+    const sameChange = normalizeUserState({ ...base, revision: 3, installedSkillIds: ["fundamental", "news"] });
+    expect(mergeUserStateChanges(base, local, sameChange).installedSkillIds).toEqual(["fundamental", "news"]);
   });
 });

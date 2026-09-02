@@ -27,7 +27,9 @@ export function parseUserStateBackup(raw) {
     throw new Error("备份文件版本不受支持");
   }
   const data = userStateBackupData(value.data);
-  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length && !data.portfolioReviews.length && !data.briefingSchedule.enabled) {
+  const rawInstalledSkillIds = value.data.installedSkillIds ?? value.data.installedSkills;
+  const hasInstalledSkills = Array.isArray(rawInstalledSkillIds) && data.installedSkillIds.length > 0;
+  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length && !data.portfolioReviews.length && !hasInstalledSkills && !data.briefingSchedule.enabled) {
     throw new Error("备份文件中没有可恢复的数据");
   }
   return data;
@@ -113,6 +115,25 @@ function mergeObject(base, local, remote, field, conflicts) {
   return merged;
 }
 
+function mergeInstalledSkillIds(baseValues, localValues, remoteValues, conflicts) {
+  const base = new Set(baseValues);
+  const local = new Set(localValues);
+  const remote = new Set(remoteValues);
+  const order = [...new Set([...localValues, ...remoteValues, ...baseValues])];
+  const merged = [];
+  for (const id of order) {
+    const localHas = local.has(id);
+    const remoteHas = remote.has(id);
+    const baseHas = base.has(id);
+    const localChanged = localHas !== baseHas;
+    const remoteChanged = remoteHas !== baseHas;
+    if (localChanged && remoteChanged && localHas !== remoteHas) conflicts.push(`installedSkillIds.${id}`);
+    const finalHas = localChanged ? localHas : remoteHas;
+    if (finalHas) merged.push(id);
+  }
+  return merged;
+}
+
 export function mergeUserStateChanges(baseState, localState, remoteState) {
   const base = normalizeUserState(baseState);
   const local = normalizeUserState(localState);
@@ -121,6 +142,7 @@ export function mergeUserStateChanges(baseState, localState, remoteState) {
   const conflicts = [];
   for (const [field, key] of Object.entries(collectionKeys)) merged[field] = mergeCollection(base[field], local[field], remote[field], key, field, conflicts);
   merged.briefingSchedule = mergeObject(base.briefingSchedule, local.briefingSchedule, remote.briefingSchedule, "briefingSchedule", conflicts);
+  merged.installedSkillIds = mergeInstalledSkillIds(base.installedSkillIds, local.installedSkillIds, remote.installedSkillIds, conflicts);
   if (conflicts.length) throw new UserStateMergeConflictError(conflicts);
   return normalizeUserState(merged);
 }

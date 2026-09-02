@@ -54,6 +54,19 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().watchlist.map((item) => item.symbol)).toEqual(expect.arrayContaining(["LOCAL", "REMOTE"]));
   });
 
+  it("persists Skill installation changes and rolls back when saving fails", async () => {
+    persistence.saveUserState.mockClear();
+    expect(useLabStore.getState().skillItems.find((item) => item.id === "news").installed).toBe(false);
+
+    await expect(useLabStore.getState().toggleSkill("news")).resolves.toBe(true);
+    expect(useLabStore.getState().skillItems.find((item) => item.id === "news").installed).toBe(true);
+    expect(persistence.saveUserState).toHaveBeenCalledWith(expect.objectContaining({ installedSkillIds: expect.arrayContaining(["news"]) }), expect.any(Object));
+
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().toggleSkill("news")).rejects.toThrow("disk full");
+    expect(useLabStore.getState().skillItems.find((item) => item.id === "news").installed).toBe(true);
+  });
+
   it("updates one assistant placeholder in place until the final answer", async () => {
     let reportProgress;
     let finish;

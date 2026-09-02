@@ -432,13 +432,13 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState().notifications[0].read).toBe(true);
   });
 
-  it("opens Skills and toggles install state", () => {
+  it("opens Skills and toggles install state", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /^技能$/ }));
     expect(screen.getByRole("heading", { name: "Skill 市场" })).toBeInTheDocument();
     const install = screen.getAllByRole("button", { name: "安装" })[0];
     fireEvent.click(install);
-    expect(screen.getAllByRole("button", { name: "已安装" }).length).toBeGreaterThan(2);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "已安装" }).length).toBeGreaterThan(2));
   });
 
   it("filters Skills by name and reports an empty result", () => {

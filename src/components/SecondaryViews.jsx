@@ -656,11 +656,19 @@ export function NotificationsView() {
 
 export function SkillsView() {
   const [query, setQuery] = useState("");
+  const [pendingId, setPendingId] = useState("");
   const items = useLabStore((state) => state.skillItems);
   const toggleSkill = useLabStore((state) => state.toggleSkill);
+  const setSettingsNotice = useLabStore((state) => state.setSettingsNotice);
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const filteredItems = normalizedQuery ? items.filter((skill) => `${skill.name} ${skill.description} ${skill.category}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery)) : items;
-  return <div className="secondary-page"><header><div><h1>Skill 市场</h1><p>为 Pi 安装经过审核的金融研究能力</p></div><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Skills…" aria-label="搜索 Skills" /></label></header><div className="skill-grid">{filteredItems.map((skill) => <article key={skill.id}><div className="skill-icon"><CheckCircle size={24} weight={skill.installed ? "fill" : "regular"} /></div><div><span>{skill.category}</span><h2>{skill.name}</h2><p>{skill.description}</p></div><button className={skill.installed ? "installed" : ""} aria-pressed={skill.installed} onClick={() => toggleSkill(skill.id)}>{skill.installed ? "已安装" : "安装"}</button></article>)}</div>{filteredItems.length === 0 && <p className="security-note" role="status">没有匹配“{query.trim()}”的 Skill。</p>}<p className="security-note">第三方 Skill 在安装前会显示权限、来源和签名状态；工具调用由 Host 白名单控制。</p></div>;
+  const handleToggle = (id) => {
+    setPendingId(id);
+    void toggleSkill(id).catch(() => {
+      setSettingsNotice({ type: "error", action: "retry", text: "Skill 状态暂时无法保存，请稍后重试" });
+    }).finally(() => setPendingId((current) => current === id ? "" : current));
+  };
+  return <div className="secondary-page"><header><div><h1>Skill 市场</h1><p>为 Pi 安装经过审核的金融研究能力</p></div><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Skills…" aria-label="搜索 Skills" /></label></header><div className="skill-grid">{filteredItems.map((skill) => <article key={skill.id}><div className="skill-icon"><CheckCircle size={24} weight={skill.installed ? "fill" : "regular"} /></div><div><span>{skill.category}</span><h2>{skill.name}</h2><p>{skill.description}</p></div><button className={skill.installed ? "installed" : ""} aria-pressed={skill.installed} disabled={Boolean(pendingId)} onClick={() => handleToggle(skill.id)}>{pendingId === skill.id ? "保存中…" : skill.installed ? "已安装" : "安装"}</button></article>)}</div>{filteredItems.length === 0 && <p className="security-note" role="status">没有匹配“{query.trim()}”的 Skill。</p>}<p className="security-note">安装状态会保存到当前 Host，刷新或重启后保持；第三方 Skill 在安装前会显示权限、来源和签名状态，工具调用由 Host 白名单控制。</p></div>;
 }
 
 export function SettingsView() {

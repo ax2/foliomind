@@ -60,7 +60,7 @@ function abortPendingDataRequests() {
 }
 
 function persistenceState(snapshot) {
-  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule });
+  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id) });
 }
 const samePersistenceState = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 function persistSnapshot(snapshot) {
@@ -86,6 +86,10 @@ function persistSnapshot(snapshot) {
 }
 function nowIso() { return new Date().toISOString(); }
 function createId(prefix) { return `${prefix}-${typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`; }
+function skillItemsForIds(items, installedSkillIds) {
+  const installed = new Set(Array.isArray(installedSkillIds) ? installedSkillIds : items.filter((item) => item.installed).map((item) => item.id));
+  return items.map((item) => ({ ...item, installed: installed.has(item.id) }));
+}
 function qverisSymbol(value) {
   const raw = String(value || "").trim().toUpperCase();
   if (!raw) return raw;
@@ -848,7 +852,19 @@ export const useLabStore = create((set, get) => ({
   setActiveView: (activeView) => set({ activeView }),
   selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
   setChartRange: (chartRange) => set({ chartRange }),
-  toggleSkill: (id) => set((state) => ({ skillItems: state.skillItems.map((item) => item.id === id ? { ...item, installed: !item.installed } : item) })),
+  toggleSkill: async (id) => {
+    const previous = get().skillItems;
+    const next = previous.map((item) => item.id === id ? { ...item, installed: !item.installed } : item);
+    if (next.every((item, index) => item.installed === previous[index]?.installed)) return false;
+    set({ skillItems: next });
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set({ skillItems: previous });
+      throw error;
+    }
+  },
   hydrateUserState: () => {
     if (userStateHydrationPromise) return userStateHydrationPromise;
     userStateHydrationPromise = (async () => {
@@ -866,7 +882,7 @@ export const useLabStore = create((set, get) => ({
           const hydrated = localChanged ? mergeUserStateChanges(base, local, remote) : remote;
           lastPersistedState = remote;
           lastLocalSnapshot = localChanged ? base : remote;
-          set((state) => ({ watchlist: hydrated.watchlist.length ? hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), userStateLoaded: true, userStateLoading: false, userStateError: "" }));
+          set((state) => ({ watchlist: hydrated.watchlist.length ? hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" }));
           if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
         } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true, userStateLoading: false, userStateError: "" }); await persistSnapshot(get()); }
         return true;
@@ -896,7 +912,7 @@ export const useLabStore = create((set, get) => ({
     eventsRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
     anomalyAttributionGenerations.clear();
-    set({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true });
+    set((state) => ({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, skillItems: skillItemsForIds(state.skillItems, snapshot.installedSkillIds), anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
     await get().persistUserState();
     return true;
   },
