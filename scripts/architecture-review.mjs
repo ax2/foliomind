@@ -20,6 +20,7 @@ const integrations = await load("src/lib/integrations.js");
 const settingsView = await load("src/components/SecondaryViews.jsx");
 const userStateClient = await load("src/lib/userState.js");
 const labStore = await load("src/store/useLabStore.js");
+const qaPlaywright = await load("scripts/qa-playwright.py");
 const commandPalette = await load("src/components/CommandPalette.jsx");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
@@ -99,6 +100,7 @@ check("分层行情轮询", app.includes("LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_M
 check("脱敏开发日志持久化", localHost.includes("developer-logs.ndjson") && localHost.includes("DEVELOPER_LOG_RETENTION_MS") && localHost.includes("MAX_PERSISTED_DEVELOPER_LOGS") && localHost.includes("ensureDeveloperLogsLoaded") && localHost.includes("clearDeveloperLogs") && developerPanel.includes("exportLogs") && prd.includes("Stage 3CC 脱敏开发日志持久化与导出"), "开发面板日志需脱敏持久化、保留期限有界、重启恢复并支持导出/清空");
 check("首次运行零副作用盯盘", strategies.includes("defaultMonitorRules = []") && localHost.includes("monitorRules: []") && nativeUserState.includes("monitor_rules: Vec::new()") && userState.includes("LEGACY_SEED_RULES") && nativeUserState.includes("migrate_legacy_seed_rules"), "新安装不得隐式创建可计费盯盘规则；旧未改动种子只能在无活动记录时迁移清空");
 check("首次配置清单", stockWorkspace.includes("SetupChecklist") && stockWorkspace.includes("开始使用 FolioMind") && stockWorkspace.includes("不会用演示数据代替") && prd.includes("Stage 3CD 首次运行零副作用与配置清单"), "首次运行应明确连接真实数据、主动获取行情和可选模型配置，不填充演示数值");
+check("Playwright 真实数据验收可重复", qaPlaywright.includes("expected_console_errors") && qaPlaywright.includes("if await install_button.count()") && qaPlaywright.includes("移动端视口无横向溢出") && qaPlaywright.includes("pageErrors") && prd.includes("Stage 3CE 可重复的真实数据 Playwright 验收"), "本地验收需接受持久化 Skill 状态，并将预期上游错误与前端崩溃分开");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
