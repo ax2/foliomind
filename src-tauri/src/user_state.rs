@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    io::Write,
+    path::PathBuf,
+    sync::Mutex,
+};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -86,6 +92,10 @@ fn default_logic() -> String {
     "AND".into()
 }
 
+fn default_scope() -> String {
+    "symbol".into()
+}
+
 fn default_installed_skill_ids() -> Vec<String> {
     vec!["fundamental".into(), "monitor".into()]
 }
@@ -94,6 +104,8 @@ fn default_installed_skill_ids() -> Vec<String> {
 #[serde(rename_all = "camelCase")]
 pub struct MonitorRule {
     pub id: String,
+    #[serde(default = "default_scope")]
+    pub scope: String,
     pub symbol: String,
     pub strategy_id: String,
     pub threshold: f64,
@@ -107,6 +119,8 @@ pub struct MonitorRule {
     pub logic: String,
     #[serde(default)]
     pub last_signal_triggered: Option<bool>,
+    #[serde(default)]
+    pub last_signal_by_symbol: HashMap<String, bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -445,6 +459,18 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         validate_text(&rule.id, "monitor rule id", 64)?;
         validate_text(&rule.symbol, "monitor rule symbol", 64)?;
         validate_text(&rule.strategy_id, "monitor strategy", 64)?;
+        if !matches!(rule.scope.as_str(), "symbol" | "watchlist")
+            || (rule.scope == "watchlist" && rule.symbol != "*")
+            || (rule.scope == "symbol" && rule.symbol == "*")
+        {
+            return Err("monitor rule scope is invalid".into());
+        }
+        if rule.last_signal_by_symbol.len() > MAX_WATCHLIST {
+            return Err("monitor rule signal map exceeds size limit".into());
+        }
+        for symbol in rule.last_signal_by_symbol.keys() {
+            validate_text(symbol, "monitor rule signal symbol", 64)?;
+        }
         if rule.conditions.len() > 6 || !matches!(rule.logic.as_str(), "AND" | "OR") {
             return Err("monitor rule conditions are invalid".into());
         }
@@ -701,6 +727,7 @@ fn legacy_seed_rule(
             .and_then(serde_json::Value::as_f64)
             .is_some_and(|value| (value - expected_condition.2).abs() < f64::EPSILON);
     rule.id == id
+        && rule.scope == "symbol"
         && rule.symbol == symbol
         && rule.strategy_id == strategy_id
         && (rule.threshold - threshold).abs() < f64::EPSILON
@@ -709,6 +736,7 @@ fn legacy_seed_rule(
         && rule.last_checked_at.is_none()
         && rule.last_triggered_at.is_none()
         && rule.last_signal_triggered.is_none()
+        && rule.last_signal_by_symbol.is_empty()
         && rule.logic == "AND"
         && (rule.conditions.is_empty() || normalized_condition)
 }
@@ -843,6 +871,7 @@ mod tests {
             |id: &str, symbol: &str, strategy_id: &str, threshold: f64, interval_seconds: u64| {
                 MonitorRule {
                     id: id.into(),
+                    scope: "symbol".into(),
                     symbol: symbol.into(),
                     strategy_id: strategy_id.into(),
                     threshold,
@@ -853,6 +882,7 @@ mod tests {
                     conditions: Vec::new(),
                     logic: default_logic(),
                     last_signal_triggered: None,
+                    last_signal_by_symbol: HashMap::new(),
                 }
             };
         let migrated = UserState {
@@ -919,6 +949,7 @@ mod tests {
         let mut state = UserState::default();
         state.monitor_rules.push(MonitorRule {
             id: "test-rule".into(),
+            scope: "symbol".into(),
             symbol: "600519".into(),
             strategy_id: "price_change".into(),
             threshold: 3.0,
@@ -929,8 +960,30 @@ mod tests {
             conditions: Vec::new(),
             logic: default_logic(),
             last_signal_triggered: None,
+            last_signal_by_symbol: HashMap::new(),
         });
         state.monitor_rules[0].threshold = f64::NAN;
+        assert!(validate(&state).is_err());
+    }
+
+    #[test]
+    fn invalid_monitor_scope_is_rejected() {
+        let mut state = UserState::default();
+        state.monitor_rules.push(MonitorRule {
+            id: "test-rule".into(),
+            scope: "watchlist".into(),
+            symbol: "600519".into(),
+            strategy_id: "price_change".into(),
+            threshold: 3.0,
+            interval_seconds: 300,
+            enabled: true,
+            last_checked_at: None,
+            last_triggered_at: None,
+            conditions: Vec::new(),
+            logic: default_logic(),
+            last_signal_triggered: None,
+            last_signal_by_symbol: HashMap::new(),
+        });
         assert!(validate(&state).is_err());
     }
 
@@ -950,9 +1003,10 @@ mod tests {
         let value = serde_json::json!({
             "watchlist": [{"symbol": "600519", "name": "贵州茅台", "market": "沪深", "category": "白酒", "group": "核心持仓"}],
             "monitorRules": [{
-                "id": "r1", "symbol": "600519", "strategyId": "price_change", "threshold": 3.0,
+                "id": "r1", "scope": "watchlist", "symbol": "*", "strategyId": "price_change", "threshold": 3.0,
                 "intervalSeconds": 300, "enabled": true, "lastCheckedAt": null, "lastTriggeredAt": null,
                 "conditions": [{"type": "price_change", "operator": "abs_gte", "value": 3}], "logic": "OR",
+                "lastSignalBySymbol": {"600519": true, "300750": false},
                 "lastSignalTriggered": true
             }],
             "notifications": [{
@@ -990,6 +1044,11 @@ mod tests {
         assert_eq!(state.watchlist[0].group, "核心持仓");
         assert_eq!(state.monitor_rules[0].conditions.len(), 1);
         assert_eq!(state.monitor_rules[0].logic, "OR");
+        assert_eq!(state.monitor_rules[0].scope, "watchlist");
+        assert_eq!(
+            state.monitor_rules[0].last_signal_by_symbol.get("600519"),
+            Some(&true)
+        );
         assert_eq!(
             state.notifications[0].event_key,
             "600519|2026-09-01|分红|登记日"
@@ -1028,6 +1087,8 @@ mod tests {
         assert_eq!(state.watchlist[0].group, "A股");
         assert!(state.monitor_rules[0].conditions.is_empty());
         assert_eq!(state.monitor_rules[0].logic, "AND");
+        assert_eq!(state.monitor_rules[0].scope, "symbol");
+        assert!(state.monitor_rules[0].last_signal_by_symbol.is_empty());
         assert!(state.monitor_history.is_empty());
         assert!(state.portfolio_reviews.is_empty());
         assert_eq!(

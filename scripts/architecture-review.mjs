@@ -102,6 +102,7 @@ check("首次运行零副作用盯盘", strategies.includes("defaultMonitorRules
 check("首次配置清单", stockWorkspace.includes("SetupChecklist") && stockWorkspace.includes("开始使用 FolioMind") && stockWorkspace.includes("不会用演示数据代替") && prd.includes("Stage 3CD 首次运行零副作用与配置清单"), "首次运行应明确连接真实数据、主动获取行情和可选模型配置，不填充演示数值");
 check("Playwright 真实数据验收可重复", qaPlaywright.includes("expected_console_errors") && qaPlaywright.includes("for attempt in range(2)") && qaPlaywright.includes("install_button") && qaPlaywright.includes("移动端视口无横向溢出") && qaPlaywright.includes("pageErrors") && prd.includes("Stage 3CE 可重复的真实数据 Playwright 验收"), "本地验收需接受持久化 Skill 状态，并将预期上游错误与前端崩溃分开");
 check("盯盘规则管理闭环", marketViews.includes("updateRule") && marketViews.includes("搜索盯盘规则") && marketViews.includes("盯盘规则状态") && marketViews.includes("盯盘规则排序") && labStore.includes("Editing a condition invalidates") && prd.includes("Stage 3CF 盯盘规则管理闭环"), "盯盘规则必须可搜索、筛选、排序和原地编辑；编辑后重置触发边沿并保留审计历史");
+check("Web/桌面盯盘状态契约", nativeUserState.includes("pub scope: String") && nativeUserState.includes("last_signal_by_symbol") && nativeUserState.includes("monitor rule scope is invalid") && nativeUserState.includes('rule.scope == "symbol"') && prd.includes("Stage 3CG Web/桌面盯盘状态契约对齐"), "Web、Local Host 与桌面保存盯盘范围和逐标的触发边沿时不得丢字段或误迁移");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
