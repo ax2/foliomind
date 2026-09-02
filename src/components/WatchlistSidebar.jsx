@@ -1,5 +1,5 @@
 import { DownloadSimple, DotsThree, Plus, UploadSimple, X } from "@phosphor-icons/react";
-import { useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
@@ -15,6 +15,21 @@ async function readTextFile(file) {
     reader.readAsText(file);
   });
 }
+
+const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDataMode, previewMode, onSelect, onRemove }) {
+  const hasQuote = isValidQuotePrice(quote?.price);
+  const hasChange = Number.isFinite(quote?.change);
+  const market = item.market;
+  const freshness = hasQuote ? quoteFreshness(quote.asOf) : null;
+  const freshnessLabel = hasQuote ? formatQuoteFreshness(quote.asOf, Date.now(), market) : "";
+  return <div className={selected ? "watch-row selected" : "watch-row"}>
+    <button className="watch-row-main" onClick={() => onSelect(item.symbol)} title={item.name}>
+      <span><strong title={item.name}>{item.name}</strong><small>{item.symbol}{item.category ? ` · ${item.category}` : ""}</small></span>
+      <span className={`quote ${changeToneClass(quote?.change)}`}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasChange ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : previewMode ? "预览模式" : "等待配置"}</small>{hasQuote && <small className={`quote-freshness quote-source-${freshness.state}`} title={`${quote.source || "数据服务"} · ${freshnessLabel}`}>{formatCompactQuoteFreshness(quote.asOf, Date.now(), market)}</small>}</span>
+    </button>
+    <button className="watch-remove" aria-label="移除自选" title={`移除${item.name || item.symbol}自选`} onClick={() => { void onRemove(item.symbol); }}><X size={12} /></button>
+  </div>;
+});
 
 export function WatchlistSidebar() {
   const selectedSymbol = useLabStore((state) => state.selectedSymbol);
@@ -42,7 +57,9 @@ export function WatchlistSidebar() {
   const fileInput = useRef(null);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const previewMode = integrationStatus?.demo === true;
-  const groups = useMemo(() => [...new Set(watchlist.map((item) => normalizeWatchlistItem(item).group))], [watchlist]);
+  const normalizedWatchlist = useMemo(() => watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name), [watchlist]);
+  const groups = useMemo(() => [...new Set(normalizedWatchlist.map((item) => item.group))], [normalizedWatchlist]);
+  const groupCounts = useMemo(() => new Map(groups.map((group) => [group, normalizedWatchlist.filter((item) => item.group === group).length])), [groups, normalizedWatchlist]);
   const selectedAddGroup = newGroupMode ? newGroupName.trim() : groupChoice || groups[0] || "自选";
   const suggestions = useMemo(() => {
     const value = query.trim().toLocaleLowerCase("zh-CN");
@@ -50,7 +67,7 @@ export function WatchlistSidebar() {
     return Object.values(stocks).filter((item) => `${item.name} ${item.symbol}`.toLocaleLowerCase("zh-CN").includes(value) && !watchlist.some((entry) => entry.symbol === item.symbol)).slice(0, 6);
   }, [query, watchlist]);
   const groupedItems = useMemo(() => {
-    const filtered = groupFilter === "all" ? watchlist : watchlist.filter((item) => normalizeWatchlistItem(item).group === groupFilter);
+    const filtered = groupFilter === "all" ? normalizedWatchlist : normalizedWatchlist.filter((item) => item.group === groupFilter);
     const sortableQuotes = previewMode ? Object.fromEntries(filtered.map((item) => [item.symbol, liveQuotes[item.symbol] || stocks[item.symbol]])) : liveQuotes;
     const sorted = sortWatchlistItems(filtered, sortableQuotes, sortKey, sortDirection);
     const grouped = new Map();
@@ -60,7 +77,7 @@ export function WatchlistSidebar() {
       grouped.get(group).push(item);
     });
     return [...grouped.entries()];
-  }, [groupFilter, liveQuotes, previewMode, sortDirection, sortKey, watchlist]);
+  }, [groupFilter, liveQuotes, normalizedWatchlist, previewMode, sortDirection, sortKey]);
   const openDialog = () => {
     setGroupChoice(groups[0] || "自选");
     setNewGroupMode(false);
@@ -96,11 +113,12 @@ export function WatchlistSidebar() {
     }
   };
   const closeDialog = () => { setDialogOpen(false); setQuery(""); setError(""); setNewGroupMode(false); setNewGroupName(""); };
-  const removeItem = async (symbol) => {
+  const removeItem = useCallback(async (symbol) => {
     setError("");
     try { await removeWatchlist(symbol); setFeedback("已从自选移除"); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  };
+  }, [removeWatchlist]);
+  const selectItem = useCallback((symbol) => selectSymbol(symbol), [selectSymbol]);
   const addItem = async (item) => {
     if (!selectedAddGroup) { setError("请输入分组名称"); return; }
     try { await addWatchlist({ ...item, group: selectedAddGroup }); closeDialog(); } catch (value) { setError(value instanceof Error ? value.message : String(value)); }
@@ -115,12 +133,12 @@ export function WatchlistSidebar() {
   return <aside className="watchlist-sidebar">
     <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><small>支持 FolioMind CSV 或 TradingView 交易所前缀列表</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
     <div className="watchlist-controls" aria-label="自选视图控制">
-      <label><span>分组</span><select aria-label="自选分组" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}><option value="all">全部（{watchlist.length}）</option>{groups.map((group) => <option key={group} value={group}>{group}（{watchlist.filter((item) => normalizeWatchlistItem(item).group === group).length}）</option>)}</select></label>
+      <label><span>分组</span><select aria-label="自选分组" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}><option value="all">全部（{normalizedWatchlist.length}）</option>{groups.map((group) => <option key={group} value={group}>{group}（{groupCounts.get(group)}）</option>)}</select></label>
       <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
     </div>
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item) => { const normalized = normalizeWatchlistItem(item); const quote = liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null); const hasQuote = isValidQuotePrice(quote?.price); const hasChange = Number.isFinite(quote?.change); const market = normalized.market || item.market; const freshness = hasQuote ? quoteFreshness(quote.asOf) : null; const freshnessLabel = hasQuote ? formatQuoteFreshness(quote.asOf, Date.now(), market) : ""; return <div className={selectedSymbol === item.symbol ? "watch-row selected" : "watch-row"} key={item.symbol}><button className="watch-row-main" onClick={() => selectSymbol(item.symbol)}><span><strong>{item.name}</strong><small>{item.symbol}{normalized.category ? ` · ${normalized.category}` : ""}</small></span><span className={`quote ${changeToneClass(quote?.change)}`}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasChange ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : previewMode ? "预览模式" : "等待配置"}</small>{hasQuote && <small className={`quote-freshness quote-source-${freshness.state}`} title={`${quote.source || "数据服务"} · ${freshnessLabel}`}>{formatCompactQuoteFreshness(quote.asOf, Date.now(), market)}</small>}</span></button><button className="watch-remove" aria-label="移除自选" title={`移除${item.name || item.symbol}自选`} onClick={() => { void removeItem(item.symbol); }}><X size={12} /></button></div>; })}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
+      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} onSelect={selectItem} onRemove={removeItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}

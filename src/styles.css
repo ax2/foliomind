@@ -389,6 +389,8 @@ textarea:focus-visible {
   cursor: pointer;
   text-align: left;
   min-height: 51px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 51px;
 }
 .watch-row:hover {
   background: #eceff3;
@@ -408,6 +410,7 @@ textarea:focus-visible {
   text-align: left;
 }
 .watch-row-main > span { min-width: 0; display: grid; gap: 3px; }
+.watch-row-main > span:first-child { overflow: hidden; }
 .watch-remove { border: 0; background: transparent; color: #a5acb6; cursor: pointer; padding: 2px; opacity: 0; }
 .watch-row:hover .watch-remove, .watch-row.selected .watch-remove { opacity: 1; }
 .watch-row > span {
@@ -1175,6 +1178,7 @@ textarea:focus-visible {
 .live-quotes-heading span, .live-quotes-strip article small { color: var(--muted); font-size: 10px; }
 .live-quotes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
 .live-quotes-grid article { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; border: 1px solid #e6edf7; border-radius: 7px; padding: 8px; background: #fff; }
+.live-quotes-grid article { content-visibility: auto; contain-intrinsic-size: auto 74px; }
 .live-quotes-grid article > div { display: grid; gap: 2px; }
 .live-quotes-grid article b { font-size: 15px; align-self: center; }
 .live-quotes-grid article > span { font-size: 11px; text-align: right; }
@@ -1401,6 +1405,8 @@ textarea:focus-visible {
   height: 58px;
   border-bottom: 1px solid var(--line);
   font-size: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 58px;
 }
 .table-row > span:first-child {
   display: grid;
@@ -1478,10 +1484,12 @@ textarea:focus-visible {
 .research-table-head, .research-row { display: grid; grid-template-columns: minmax(210px, 1.5fr) repeat(5, minmax(110px, 1fr)); align-items: center; min-width: 780px; padding: 0 15px; }
 .research-table-head { height: 38px; background: #f7f8fa; color: #7b8490; font-size: 10px; }
 .research-row { min-height: 64px; border-top: 1px solid var(--line); color: #3f4855; font-size: 11px; font-variant-numeric: tabular-nums; }
+.research-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
 .research-row { cursor: pointer; }
 .research-row:hover { background: #f8fbff; }
 .research-row:focus-visible { z-index: 1; outline: 2px solid var(--blue); outline-offset: -2px; }
 .research-row > span:first-child { display: grid; gap: 3px; }
+.research-row > span:first-child { min-width: 0; overflow: hidden; }
 .research-row strong { color: #242b35; font-size: 12px; }
 .research-row small { color: var(--muted); font-size: 10px; }
 .research-empty { margin-top: 12vh; }

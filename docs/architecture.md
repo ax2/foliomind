@@ -78,6 +78,8 @@ Runtime 启动前由 Host 在同一把状态锁内完成 `Stopped/Crashed → St
 
 时区映射的交易所代码使用 token 边界匹配，避免 `SSE`/`US` 等短代码被自定义市场名称的子串误命中。显式但未知的市场不再落入浏览器本地时区，而以带日期的 UTC 参考加“时区未知”展示；证据抽屉、研究筛选、异动雷达和设置连接诊断均传入标的市场，保证同一 `asOf` 在不同入口语义一致。该防误判只影响展示，不改动原始时间、新鲜度、缓存、请求或费用。
 
+自选侧栏将 watchlist 先规范化为稳定对象，再以记忆化的 `WatchlistRow` 处理单行行情；名称列通过 CSS 收缩省略并保留完整 `title`，不让长名称挤压价格和操作。侧栏、实时行情条、市场表格和研究结果的长列表行启用浏览器原生 `content-visibility: auto` 与固有尺寸，延迟非可见绘制；不支持该 CSS 的 WebView 仍完整渲染，键盘顺序、分组、排序和真实数据边界不变，见 PRD Stage 3CR。
+
 ```text
 WebView (untrusted presentation)
   └─ Tauri command allowlist

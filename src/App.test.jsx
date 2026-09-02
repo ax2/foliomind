@@ -338,6 +338,19 @@ describe("FolioMind core flows", () => {
     expect(container.querySelector(".watch-row .quote strong")).toHaveTextContent("10.00");
   });
 
+  it("keeps long watchlist names bounded while exposing the full name", () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true },
+      watchlist: [{ symbol: "LONG", name: "这是一个非常长的公司名称用于验证侧栏截断和可访问提示", market: "沪深" }],
+      selectedSymbol: "LONG",
+      liveQuotes: {},
+    });
+    const { container } = render(<WatchlistSidebar />);
+    const name = container.querySelector(".watch-row-main > span:first-child strong");
+    expect(name).toHaveTextContent("这是一个非常长的公司名称用于验证侧栏截断和可访问提示");
+    expect(name).toHaveAttribute("title", "这是一个非常长的公司名称用于验证侧栏截断和可访问提示");
+  });
+
   it("saves and restores named market views without changing the data contract", () => {
     window.localStorage.removeItem("foliomind.market-columns.v1");
     window.localStorage.removeItem("foliomind.market-views.v1");
