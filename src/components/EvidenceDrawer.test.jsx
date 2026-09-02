@@ -11,6 +11,7 @@ describe("EvidenceDrawer", () => {
       quote={{ price: 1297.4, change: 0.39, asOf: "2026-08-30T10:00:00Z", source: "真实 CAP", previousClose: 1292.3 }}
       symbol="600519"
       name="贵州茅台"
+      market="沪深"
       provider="qveris_finance"
       channel="qveris-cap"
       lastRefreshAt="2026-08-30T10:01:00Z"
@@ -19,6 +20,7 @@ describe("EvidenceDrawer", () => {
 
     expect(screen.getByRole("dialog", { name: "行情证据" })).toHaveTextContent("真实 CAP");
     expect(screen.getByRole("dialog")).toHaveTextContent("MKT.L1.RT");
+    expect(screen.getByRole("dialog")).toHaveTextContent("北京时间");
     expect(screen.getByRole("dialog")).toHaveTextContent("3/10 项");
     expect(screen.getByText(/缺失字段保持为空/)).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);

@@ -10,11 +10,20 @@ const MARKET_TIME_ZONE_DEFINITIONS = [
   { patterns: ["SSE", "SZSE", "沪市", "深市", "沪深", "上交所", "深交所", "A股", "中国", "CN"], timeZone: "Asia/Shanghai", label: "北京时间" },
 ];
 
+function marketPatternMatches(value, pattern) {
+  if (/^[A-Z0-9]+$/.test(pattern)) {
+    // Exchange codes must be token-bounded. For example, the SSE in
+    // RUSSELL is not the Shanghai Stock Exchange.
+    return new RegExp(`(?:^|[^A-Z0-9])${pattern}(?:$|[^A-Z0-9])`).test(value);
+  }
+  return value === pattern || value.includes(pattern);
+}
+
 /** Return the display timezone for a known market without guessing unknown venues. */
 export function marketTimeZone(market) {
   const value = String(market ?? "").trim().toUpperCase();
   if (!value) return null;
-  return MARKET_TIME_ZONE_DEFINITIONS.find(({ patterns }) => patterns.some((pattern) => value === pattern || value.includes(pattern))) || null;
+  return MARKET_TIME_ZONE_DEFINITIONS.find(({ patterns }) => patterns.some((pattern) => marketPatternMatches(value, pattern))) || null;
 }
 
 /** A quote price is displayable only when the provider returned a finite positive value. */
@@ -47,11 +56,21 @@ export function quoteFreshness(value, now = Date.now(), staleAfterMs = QUOTE_STA
 
 function formatQuoteTimestamp(timestamp, market, compact = false) {
   const definition = marketTimeZone(market);
+  const marketText = String(market ?? "").trim();
+  if (marketText && !definition) {
+    // Do not render an unknown venue in the user's local timezone. UTC is an
+    // explicit, reproducible reference while the source venue remains unknown.
+    const unknownOptions = compact
+      ? { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }
+      : { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" };
+    const utcTime = new Intl.DateTimeFormat("zh-CN", unknownOptions).format(new Date(timestamp));
+    return `${utcTime} UTC · 时区未知`;
+  }
   const options = compact
     ? { hour: "2-digit", minute: "2-digit" }
     : { hour: "2-digit", minute: "2-digit", second: "2-digit" };
   const time = new Intl.DateTimeFormat("zh-CN", { ...options, timeZone: definition?.timeZone }).format(new Date(timestamp));
-  return String(market ?? "").trim() ? `${time} · ${definition?.label || "时区未知"}` : time;
+  return marketText ? `${time} · ${definition.label}` : time;
 }
 
 export function formatQuoteFreshness(value, now = Date.now(), market = "") {

@@ -64,6 +64,13 @@ describe("quote formatting", () => {
     expect(formatQuoteFreshness("2026-01-15T14:55:00Z", now, "自定义市场")).toContain("时区未知");
   });
 
+  it("does not infer a timezone from an embedded short market alias", () => {
+    const now = Date.parse("2026-01-15T15:00:00Z");
+    expect(marketTimeZone("RUSSELL 2000")).toBeNull();
+    expect(formatQuoteFreshness("2026-01-15T14:55:00Z", now, "RUSSELL 2000")).toMatch(/UTC.*时区未知/);
+    expect(formatCompactQuoteFreshness("2026-01-15T14:55:00Z", now, "RUSSELL 2000")).toMatch(/UTC.*时区未知/);
+  });
+
   it("accepts unix-second and unix-millisecond provider timestamps", () => {
     const now = Date.parse("2026-08-29T10:00:00Z");
     expect(quoteFreshness(String(Math.floor((now - 60_000) / 1000)), now).state).toBe("fresh");
