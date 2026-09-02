@@ -749,6 +749,11 @@ export const useLabStore = create((set, get) => ({
     const item = dataItemForSymbol(state, symbol);
     const configured = hasRealDataAccess(state.integrationStatus);
     if (!configured || !item || state.liveDataLoading || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || state.runtimeMode === "running" || state.runtimeMode === "cancelling" || state.quoteDetailsLoading[symbol] || state.quoteDetailsLoaded[symbol]) return false;
+    // Details belong to the currently selected symbol. If the user switches
+    // symbols before the previous request completes, cancel the obsolete
+    // upstream call instead of paying for a response that will be discarded.
+    abortController(detailsRequestController);
+    detailsRequestController = null;
     const requestGeneration = ++detailsRequestGeneration;
     const requestController = new AbortController();
     detailsRequestController = requestController;
@@ -780,6 +785,11 @@ export const useLabStore = create((set, get) => ({
     const configured = hasRealDataAccess(state.integrationStatus);
     const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
     if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
+    // A range change or symbol switch makes the previous chart request
+    // irrelevant. Abort it before starting the replacement to avoid wasting
+    // network time and provider credits.
+    abortController(seriesRequestController);
+    seriesRequestController = null;
     const requestGeneration = ++seriesRequestGeneration;
     const requestController = new AbortController();
     seriesRequestController = requestController;

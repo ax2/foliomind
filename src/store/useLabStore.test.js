@@ -718,6 +718,32 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.askPi).toHaveBeenCalledTimes(2);
   });
 
+  it("cancels obsolete quote detail requests when the selected symbol changes", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }, { symbol: "AAPL", name: "Apple", market: "NASDAQ" }],
+    });
+    const signals = [];
+    let resolveLatest;
+    runtime.askPi.mockImplementation((_prompt, options = {}) => {
+      signals.push(options.signal);
+      if (signals.length === 1) return new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" }))));
+      return new Promise((resolve) => { resolveLatest = resolve; });
+    });
+
+    const obsolete = useLabStore.getState().refreshQuoteDetails("600519");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const replacement = useLabStore.getState().refreshQuoteDetails("AAPL");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(signals[0]?.aborted).toBe(true);
+    resolveLatest({ text: JSON.stringify({ companyDescription: "真实公司简介" }), mode: "pi-local-host", audits: [] });
+    await expect(obsolete).resolves.toBe(false);
+    await expect(replacement).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes.AAPL.companyDescription).toBe("真实公司简介");
+  });
+
   it("hydrates detailed chart and company fields without inventing missing values", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
