@@ -239,6 +239,22 @@ function mergeLiveQuotesWithPortfolio(state, quotes) {
   }
   return { liveQuotes: { ...state.liveQuotes, ...quotes }, portfolioPositions, notifications, portfolioChanged, delivered };
 }
+
+function rollbackPortfolioAlertMutation(current, previousPositions, optimisticPositions, generatedNotifications) {
+  const previousById = new Map((previousPositions || []).map((position) => [position.id, position]));
+  const optimisticById = new Map((optimisticPositions || []).map((position) => [position.id, position]));
+  const restoredPositions = current.portfolioPositions.map((position) => {
+    const previous = previousById.get(position.id);
+    const optimistic = optimisticById.get(position.id);
+    if (previous && optimistic && JSON.stringify(position) === JSON.stringify(optimistic)) return previous;
+    return position;
+  });
+  const generatedIds = new Set((generatedNotifications || []).map((notification) => notification.id));
+  return {
+    portfolioPositions: restoredPositions,
+    notifications: generatedIds.size ? current.notifications.filter((notification) => !generatedIds.has(notification.id)) : current.notifications,
+  };
+}
 function monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluation = null, outcome = null) {
   const triggered = typeof result?.triggered === "boolean" ? result.triggered : null;
   return {
@@ -666,14 +682,25 @@ export const useLabStore = create((set, get) => ({
           received += 1;
           let delivered = [];
           let portfolioChanged = false;
+          let previousPositions = [];
+          let optimisticPositions = [];
           set((current) => {
+            previousPositions = current.portfolioPositions;
             const merged = mergeLiveQuotesWithPortfolio(current, quotes);
             delivered = merged.delivered;
             portfolioChanged = merged.portfolioChanged;
+            optimisticPositions = merged.portfolioPositions;
             return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), liveDataLastRefreshAt: nowIso() };
           });
-          for (const notification of delivered) void sendSystemNotification(notification);
-          if (portfolioChanged) await get().persistUserState();
+          if (portfolioChanged) {
+            try {
+              await get().persistUserState();
+            } catch (error) {
+              set((current) => rollbackPortfolioAlertMutation(current, previousPositions, optimisticPositions, delivered));
+              throw error;
+            }
+            for (const notification of delivered) void sendSystemNotification(notification);
+          }
           return true;
         } catch (error) {
           if (requestGeneration !== liveRequestGeneration) return false;
@@ -710,14 +737,25 @@ export const useLabStore = create((set, get) => ({
       if (requestGeneration !== selectedQuoteGenerations.get(symbol)) return false;
       let delivered = [];
       let portfolioChanged = false;
+      let previousPositions = [];
+      let optimisticPositions = [];
       set((current) => {
+        previousPositions = current.portfolioPositions;
         const merged = mergeLiveQuotesWithPortfolio(current, quotes);
         delivered = merged.delivered;
         portfolioChanged = merged.portfolioChanged;
+        optimisticPositions = merged.portfolioPositions;
         return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), selectedQuoteLoading: { ...current.selectedQuoteLoading, [symbol]: false }, liveDataError: current.liveDataLoading ? current.liveDataError : "", liveDataLastRefreshAt: nowIso() };
       });
-      for (const notification of delivered) void sendSystemNotification(notification);
-      if (portfolioChanged) await get().persistUserState();
+      if (portfolioChanged) {
+        try {
+          await get().persistUserState();
+        } catch (error) {
+          set((current) => rollbackPortfolioAlertMutation(current, previousPositions, optimisticPositions, delivered));
+          throw error;
+        }
+        for (const notification of delivered) void sendSystemNotification(notification);
+      }
       return true;
     } catch (error) {
       if (requestGeneration !== selectedQuoteGenerations.get(symbol)) return false;
@@ -942,7 +980,11 @@ export const useLabStore = create((set, get) => ({
       await get().persistUserState();
       return true;
     } catch (error) {
-      set({ skillItems: previous });
+      set((state) => ({ skillItems: state.skillItems.map((item) => {
+        const optimistic = next.find((candidate) => candidate.id === item.id);
+        const original = previous.find((candidate) => candidate.id === item.id);
+        return optimistic && original && JSON.stringify(item) === JSON.stringify(optimistic) ? original : item;
+      }) }));
       throw error;
     }
   },
@@ -993,9 +1035,29 @@ export const useLabStore = create((set, get) => ({
     eventsRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
     anomalyAttributionGenerations.clear();
-    set((state) => ({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, skillItems: skillItemsForIds(state.skillItems, snapshot.installedSkillIds), anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, selectedSymbol, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
-    await get().persistUserState();
-    return true;
+    const previous = get();
+    const nextSkillItems = skillItemsForIds(previous.skillItems, snapshot.installedSkillIds);
+    const optimistic = { watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, skillItems: nextSkillItems, selectedSymbol };
+    set((state) => ({ ...optimistic, anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set((state) => ({
+        watchlist: JSON.stringify(state.watchlist) === JSON.stringify(optimistic.watchlist) ? previous.watchlist : state.watchlist,
+        rules: JSON.stringify(state.rules) === JSON.stringify(optimistic.rules) ? previous.rules : state.rules,
+        notifications: JSON.stringify(state.notifications) === JSON.stringify(optimistic.notifications) ? previous.notifications : state.notifications,
+        portfolioPositions: JSON.stringify(state.portfolioPositions) === JSON.stringify(optimistic.portfolioPositions) ? previous.portfolioPositions : state.portfolioPositions,
+        portfolioReviews: JSON.stringify(state.portfolioReviews) === JSON.stringify(optimistic.portfolioReviews) ? previous.portfolioReviews : state.portfolioReviews,
+        briefingSchedule: JSON.stringify(state.briefingSchedule) === JSON.stringify(optimistic.briefingSchedule) ? previous.briefingSchedule : state.briefingSchedule,
+        monitorHistory: JSON.stringify(state.monitorHistory) === JSON.stringify(optimistic.monitorHistory) ? previous.monitorHistory : state.monitorHistory,
+        skillItems: JSON.stringify(state.skillItems) === JSON.stringify(optimistic.skillItems) ? previous.skillItems : state.skillItems,
+        selectedSymbol: state.selectedSymbol === optimistic.selectedSymbol ? previous.selectedSymbol : state.selectedSymbol,
+        userStateLoaded: previous.userStateLoaded,
+        ...quoteRefreshReset,
+      }));
+      throw error;
+    }
   },
   persistUserState: () => persistSnapshot(get()),
   retryPersistedUserState: async () => {
@@ -1016,7 +1078,18 @@ export const useLabStore = create((set, get) => ({
     if (!value.symbol || !value.name) throw new Error("请输入股票代码和名称");
     if (value.symbol.length > 64 || value.name.length > 128) throw new Error("股票代码或名称过长");
     if (get().watchlist.some((entry) => entry.symbol === value.symbol)) throw new Error("该标的已经在自选中");
-    set((state) => ({ watchlist: [...state.watchlist, value], selectedSymbol: value.symbol })); await get().persistUserState(); return value;
+    const previousSelectedSymbol = get().selectedSymbol;
+    set((state) => ({ watchlist: [...state.watchlist, value], selectedSymbol: value.symbol }));
+    try {
+      await get().persistUserState();
+      return value;
+    } catch (error) {
+      set((state) => ({
+        watchlist: state.watchlist.filter((entry) => !(entry.symbol === value.symbol && JSON.stringify(entry) === JSON.stringify(value))),
+        selectedSymbol: state.selectedSymbol === value.symbol ? previousSelectedSymbol : state.selectedSymbol,
+      }));
+      throw error;
+    }
   },
   importWatchlistItems: async (items) => {
     const current = get().watchlist;
@@ -1032,9 +1105,22 @@ export const useLabStore = create((set, get) => ({
       added.push(value);
     }
     if (!added.length) throw new Error("没有可导入的新标的（可能已存在或格式无效）");
+    const previousSelectedSymbol = get().selectedSymbol;
     set((state) => ({ watchlist: [...state.watchlist, ...added], selectedSymbol: added[0].symbol }));
-    await get().persistUserState();
-    return { added: added.length, skipped };
+    try {
+      await get().persistUserState();
+      return { added: added.length, skipped };
+    } catch (error) {
+      const addedBySymbol = new Map(added.map((entry) => [entry.symbol, entry]));
+      set((state) => ({
+        watchlist: state.watchlist.filter((entry) => {
+          const original = addedBySymbol.get(entry.symbol);
+          return !original || JSON.stringify(entry) !== JSON.stringify(original);
+        }),
+        selectedSymbol: state.selectedSymbol === added[0].symbol ? previousSelectedSymbol : state.selectedSymbol,
+      }));
+      throw error;
+    }
   },
   savePortfolioPosition: async (input) => {
     const normalized = normalizePortfolioPosition(input);
@@ -1057,8 +1143,17 @@ export const useLabStore = create((set, get) => ({
     }
     const portfolioPositions = exists ? current.map((position) => position.id === next.id ? next : position) : [...current, next];
     set({ portfolioPositions });
-    await get().persistUserState();
-    return next;
+    try {
+      await get().persistUserState();
+      return next;
+    } catch (error) {
+      set((state) => ({ portfolioPositions: state.portfolioPositions.map((position) => {
+        if (position.id !== next.id) return position;
+        const optimisticPosition = position.id === next.id && JSON.stringify(position) === JSON.stringify(next);
+        return optimisticPosition ? previous || null : position;
+      }).filter(Boolean) }));
+      throw error;
+    }
   },
   updatePortfolioPlanStatus: async (id, status, note = "") => {
     if (!["active", "executed", "archived"].includes(status)) throw new Error("交易计划状态无效");
@@ -1068,27 +1163,53 @@ export const useLabStore = create((set, get) => ({
     const action = status === "executed" ? "executed" : status === "archived" ? "archived" : "reopened";
     const next = appendPortfolioPlanAction(previous, action, note);
     set({ portfolioPositions: current.map((position) => position.id === id ? next : position) });
-    await get().persistUserState();
-    return next;
+    try {
+      await get().persistUserState();
+      return next;
+    } catch (error) {
+      set((state) => ({ portfolioPositions: state.portfolioPositions.map((position) => position.id === id && JSON.stringify(position) === JSON.stringify(next) ? previous : position) }));
+      throw error;
+    }
   },
   removePortfolioPosition: async (id) => {
-    const portfolioPositions = get().portfolioPositions.filter((position) => position.id !== id);
-    if (portfolioPositions.length === get().portfolioPositions.length) return false;
+    const previous = get().portfolioPositions;
+    const removedIndex = previous.findIndex((position) => position.id === id);
+    const portfolioPositions = previous.filter((position) => position.id !== id);
+    if (removedIndex < 0) return false;
     set({ portfolioPositions });
-    await get().persistUserState();
-    return true;
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      const removed = previous[removedIndex];
+      set((state) => state.portfolioPositions.some((position) => position.id === id)
+        ? {}
+        : { portfolioPositions: [...state.portfolioPositions.slice(0, removedIndex), removed, ...state.portfolioPositions.slice(removedIndex)] });
+      throw error;
+    }
   },
   createPortfolioReview: async () => {
     const state = get();
     const review = createPortfolioReviewSnapshot({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, events: state.events, createdAt: nowIso(), id: createId("portfolio-review") });
     set({ portfolioReviews: [review, ...state.portfolioReviews].slice(0, 90) });
-    await get().persistUserState();
-    return review;
+    try {
+      await get().persistUserState();
+      return review;
+    } catch (error) {
+      set((current) => ({ portfolioReviews: current.portfolioReviews.filter((candidate) => candidate.id !== review.id) }));
+      throw error;
+    }
   },
   updateBriefingSchedule: async (input) => {
-    const briefingSchedule = normalizeBriefingSchedule({ ...get().briefingSchedule, ...input, lastError: input?.enabled === false ? "" : get().briefingSchedule.lastError });
+    const previous = get().briefingSchedule;
+    const briefingSchedule = normalizeBriefingSchedule({ ...previous, ...input, lastError: input?.enabled === false ? "" : previous.lastError });
     set({ briefingSchedule });
-    await get().persistUserState();
+    try {
+      await get().persistUserState();
+    } catch (error) {
+      set((state) => ({ briefingSchedule: JSON.stringify(state.briefingSchedule) === JSON.stringify(briefingSchedule) ? previous : state.briefingSchedule }));
+      throw error;
+    }
     if (briefingSchedule.enabled && !isDesktopRuntime()) void get().runDuePortfolioReview();
     return briefingSchedule;
   },
@@ -1121,7 +1242,7 @@ export const useLabStore = create((set, get) => ({
         const sources = [...new Set(calendars.map((calendar) => String(calendar?.source || "数据服务")))];
         const toolIds = [...new Set(calendars.map((calendar) => String(calendar?.toolId || "")).filter(Boolean))];
         set((current) => ({ briefingSchedule: { ...current.briefingSchedule, calendarDate: slot.tradingDate, calendarStatus, calendarCheckedAt: attemptedAt, calendarSource: sources.join(", "), calendarToolId: toolIds.join(", "), lastResult: calendarStatus === "closed" ? "market-closed" : "waiting-data", lastError: "" } }));
-        await get().persistUserState().catch(() => null);
+        await get().persistUserState();
         if (calendarStatus === "closed") {
           set({ briefingScheduleBusy: false });
           return "market-closed";
@@ -1135,23 +1256,36 @@ export const useLabStore = create((set, get) => ({
       const state = get();
       if (!hasFreshPortfolioQuote({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, now })) {
         set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastResult: "waiting-data", lastError: "尚未取得当日真实持仓行情，将按重试间隔再次尝试" } }));
-        await get().persistUserState().catch(() => null);
+        await get().persistUserState();
         return "waiting-data";
       }
       if (state.portfolioReviews.some((review) => review.kind === "close" && review.tradingDate === slot.tradingDate)) {
         set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastSuccessKey: slot.key, lastResult: "success", lastError: "" } }));
-        await get().persistUserState().catch(() => null);
+        await get().persistUserState();
         return "completed";
       }
       const review = createPortfolioReviewSnapshot({ positions: state.portfolioPositions, liveQuotes: state.liveQuotes, events: state.events, createdAt: attemptedAt, id: createId("portfolio-review") });
       const notification = { id: createId("notification"), kind: "briefing", symbol: "", name: "", ruleId: "", eventKey: slot.key, reminderPhase: "completed", title: `${review.tradingDate} 组合复盘已生成`, body: `已使用 ${review.pricedCount}/${review.totalCount} 个持仓的当日真实行情生成复盘。`, severity: "info", createdAt: attemptedAt, read: false, source: "data-service" };
       set((current) => ({ portfolioReviews: [review, ...current.portfolioReviews].slice(0, 90), notifications: [notification, ...current.notifications].slice(0, 500), briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, lastSuccessKey: slot.key, lastResult: "success", lastError: "" } }));
-      await get().persistUserState().catch(() => null);
+      try {
+        await get().persistUserState();
+      } catch (error) {
+        set((current) => ({
+          briefingScheduleBusy: false,
+          portfolioReviews: current.portfolioReviews.filter((candidate) => candidate.id !== review.id),
+          notifications: current.notifications.filter((candidate) => candidate.id !== notification.id),
+          briefingSchedule: { ...current.briefingSchedule, lastResult: "error", lastError: friendlyDataMessage(error, "本地数据暂时无法保存，请稍后重试") },
+        }));
+        return "error";
+      }
       void sendSystemNotification(notification);
       return "success";
     } catch (error) {
       const message = friendlyDataMessage(error);
       set((current) => ({ briefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, ...(calendarQuerying ? { calendarDate: slot?.tradingDate || "", calendarStatus: "error", calendarCheckedAt: attemptedAt } : {}), lastResult: calendarQuerying ? "waiting-calendar" : "error", lastError: message } }));
+      // This is a background reconciliation path. Keep the in-memory error
+      // visible for retry, but never turn a second persistence failure into an
+      // unhandled rejection from an interval/desktop worker.
       await get().persistUserState().catch(() => null);
       return "error";
     }
@@ -1213,7 +1347,18 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
   },
-  addRule: async (input = {}) => { const strategy = strategyFor(input.strategyId); const rule = normalizeRule({ ...input, id: createId("rule"), symbol: String(input.symbol || get().selectedSymbol || "600519"), strategyId: strategy.id }); set((state) => ({ rules: [...state.rules, rule] })); await get().persistUserState(); return rule; },
+  addRule: async (input = {}) => {
+    const strategy = strategyFor(input.strategyId);
+    const rule = normalizeRule({ ...input, id: createId("rule"), symbol: String(input.symbol || get().selectedSymbol || "600519"), strategyId: strategy.id });
+    set((state) => ({ rules: [...state.rules, rule] }));
+    try {
+      await get().persistUserState();
+      return rule;
+    } catch (error) {
+      set((state) => ({ rules: state.rules.filter((candidate) => candidate.id !== rule.id || JSON.stringify(candidate) !== JSON.stringify(rule)) }));
+      throw error;
+    }
+  },
   updateRule: async (id, input = {}) => {
     const currentRules = get().rules;
     const previous = currentRules.find((rule) => rule.id === id);
@@ -1235,19 +1380,23 @@ export const useLabStore = create((set, get) => ({
       await get().persistUserState();
       return resetSignal;
     } catch (error) {
-      set({ rules: currentRules });
+      set((state) => ({ rules: state.rules.map((rule) => rule.id === id && JSON.stringify(rule) === JSON.stringify(resetSignal) ? previous : rule) }));
       throw error;
     }
   },
   deleteRule: async (id) => {
     const previous = get().rules;
     if (!previous.some((rule) => rule.id === id)) return false;
+    const removedIndex = previous.findIndex((rule) => rule.id === id);
+    const removed = previous[removedIndex];
     set({ rules: previous.filter((rule) => rule.id !== id) });
     try {
       await get().persistUserState();
       return true;
     } catch (error) {
-      set((state) => state.rules.some((rule) => rule.id === id) ? {} : { rules: [...state.rules, previous.find((rule) => rule.id === id)].filter(Boolean) });
+      set((state) => state.rules.some((rule) => rule.id === id)
+        ? {}
+        : { rules: [...state.rules.slice(0, removedIndex), removed, ...state.rules.slice(removedIndex)].filter(Boolean) });
       throw error;
     }
   },

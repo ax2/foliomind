@@ -315,6 +315,22 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications).toHaveLength(1);
   });
 
+  it("does not deliver a portfolio alert when its canonical save fails", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+      portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000, takeProfitPrice: 1200, stopLossPrice: 800, takeProfitTriggered: false, stopLossTriggered: false }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(useLabStore.getState().portfolioPositions[0].takeProfitTriggered).toBe(false);
+    expect(useLabStore.getState().notifications).toHaveLength(0);
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1200 });
+  });
+
   it("stores a reproducible portfolio close review from real quotes", async () => {
     useLabStore.setState({
       portfolioPositions: [{ id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100 }],
@@ -494,6 +510,48 @@ describe("lab store streaming lifecycle", () => {
     await expect(Promise.all([firstRetry, secondRetry])).resolves.toEqual([true, false]);
     expect(persistence.saveUserState).toHaveBeenCalledTimes(2);
     expect(useLabStore.getState().settingsNotice).toEqual({ type: "success", text: "本地数据已保存" });
+  });
+
+  it("rolls back a newly added watchlist item when the canonical save fails", async () => {
+    const previous = useLabStore.getState().watchlist;
+    const error = new Error("disk full");
+    persistence.saveUserState.mockRejectedValueOnce(error);
+
+    await expect(useLabStore.getState().addWatchlist({ symbol: "TSLA", name: "Tesla", market: "NASDAQ" })).rejects.toBe(error);
+    expect(useLabStore.getState().watchlist).toEqual(previous);
+  });
+
+  it("rolls back imported watchlist rows without removing a concurrent edit", async () => {
+    const previous = useLabStore.getState().watchlist;
+    const error = new Error("Host unavailable");
+    persistence.saveUserState.mockImplementationOnce(async () => {
+      useLabStore.setState((state) => ({ watchlist: [...state.watchlist, { symbol: "TSLA", name: "Tesla (edited)", market: "NASDAQ", category: "自选" }] }));
+      throw error;
+    });
+
+    await expect(useLabStore.getState().importWatchlistItems([{ symbol: "TSLA", name: "Tesla", market: "NASDAQ" }])).rejects.toBe(error);
+    expect(useLabStore.getState().watchlist).toEqual([...previous, { symbol: "TSLA", name: "Tesla (edited)", market: "NASDAQ", category: "自选" }]);
+  });
+
+  it("rolls back portfolio and monitor-rule additions when persistence fails", async () => {
+    const error = new Error("disk full");
+    persistence.saveUserState.mockRejectedValueOnce(error);
+    await expect(useLabStore.getState().savePortfolioPosition({ symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100 })).rejects.toBe(error);
+    expect(useLabStore.getState().portfolioPositions).toEqual([]);
+
+    useLabStore.setState({ rules: [] });
+    persistence.saveUserState.mockRejectedValueOnce(error);
+    await expect(useLabStore.getState().addRule({ symbol: "600519", strategyId: "price_change" })).rejects.toBe(error);
+    expect(useLabStore.getState().rules).toEqual([]);
+  });
+
+  it("rolls back briefing schedule edits when persistence fails", async () => {
+    const previous = useLabStore.getState().briefingSchedule;
+    const error = new Error("Host unavailable");
+    persistence.saveUserState.mockRejectedValueOnce(error);
+
+    await expect(useLabStore.getState().updateBriefingSchedule({ closeTime: "15:35" })).rejects.toBe(error);
+    expect(useLabStore.getState().briefingSchedule).toEqual(previous);
   });
 
   it("rolls back optimistic alert mutations when the canonical save fails", async () => {
