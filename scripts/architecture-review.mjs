@@ -25,6 +25,7 @@ const labStore = await load("src/store/useLabStore.js");
 const qaPlaywright = await load("scripts/qa-playwright.py");
 const commandPalette = await load("src/components/CommandPalette.jsx");
 const hostLockTest = await load("scripts/local-host.test.mjs");
+const storeTest = await load("src/store/useLabStore.test.js");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
@@ -78,6 +79,7 @@ check("自选行情新鲜度", watchlistSidebar.includes("quote-freshness") && q
 check("多市场行情时区", quoteFormatting.includes("marketTimeZone") && quoteFormatting.includes("America/New_York") && quoteFormatting.includes("Asia/Hong_Kong") && quoteFormatting.includes("formatQuoteTimestamp") && stockWorkspace.includes("stock.market") && liveQuotes.includes("item.market") && marketViews.includes("item.market") && prd.includes("Stage 3CP 多市场行情时区标签"), "跨市场行情时间必须按交易所时区展示，未知市场不得猜测时区，所有主要行情入口需共享该格式化边界");
 check("未知市场时区防误判", quoteFormatting.includes("token-bounded") && quoteFormatting.includes("UTC · 时区未知") && stockWorkspace.includes("market={stock.market}") && marketViews.includes("anomaly.market") && marketViews.includes("formatQuoteFreshness(quote.asOf, Date.now(), item.market)") && prd.includes("Stage 3CQ 未知市场时间与证据入口一致性"), "未知市场必须使用明确 UTC 参考，交易所短代码不能被子串误命中，证据/研究/异动入口需传递市场上下文");
 check("大规模自选渲染", watchlistSidebar.includes("const WatchlistRow = memo") && watchlistSidebar.includes("normalizedWatchlist") && liveQuotes.includes("const LiveQuoteCard = memo") && marketViews.includes('title={item.name}') && styles.includes("content-visibility: auto") && styles.includes("contain-intrinsic-size") && prd.includes("Stage 3CR 大规模自选渲染与长名称可用性") && prd.includes("Stage 3CS 跨行情入口名称可访问性与大列表回归"), "大规模自选必须复用稳定规范化与记忆化行组件，长列表延迟非可见绘制且所有行情入口保留完整名称");
+check("大规模自选完整刷新", storeTest.includes("large watchlist") && storeTest.includes("requestedSymbols") && storeTest.includes("toHaveLength(watchlist.length)") && storeTest.includes("Object.keys(useLabStore.getState().liveQuotes)"), "大规模自选完整刷新必须验证所有请求和真实报价均不静默丢失");
 check("过期行情统计门禁", marketBreadth.includes("quoteFreshness") && marketBreadth.includes('freshness.state === "stale"') && marketBreadth.includes("staleCount") && anomalyDetection.includes("freshness.state === \"stale\"") && prd.includes("Stage 3AY 过期行情统计门禁"), "市场宽度和异动雷达不得把已明确过期的行情当作当前信号，过期数量需与缺失数量分开");
 check("数据请求取消与资源回收", localHostClient.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && marketStore.includes("abortPendingDataRequests") && marketStore.includes("new AbortController()") && piRuntime.includes("signal") && prd.includes("Stage 3AZ 数据请求取消与资源回收"), "渠道切换时应取消 Local Host 数据请求并保留代次保护，主动取消不得误报超时");
 check("Local Host 启动故障可恢复状态", integrations.includes("localHostRequest(\"/api/integration/status\")") && integrations.includes("environment: \"local-host\"") && !integrations.includes("catch { return { credentialConfigured: false, settings: defaultIntegrationSettings, demo: true;"), "集成状态读取必须传播 Host 故障，不能伪装成浏览器预览");

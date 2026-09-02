@@ -396,6 +396,28 @@ describe("lab store streaming lifecycle", () => {
     expect(Object.keys(useLabStore.getState().liveQuotes)).toHaveLength(4);
   });
 
+  it("refreshes every item in a large watchlist without silently dropping symbols", async () => {
+    const watchlist = Array.from({ length: 200 }, (_, index) => ({
+      symbol: `6${String(index).padStart(5, "0")}`,
+      name: `测试标的 ${index + 1}`,
+      market: "沪深",
+      category: "回归测试",
+    }));
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } }, userStateLoaded: true, watchlist });
+    const requestedSymbols = [];
+    runtime.queryCachedData.mockImplementation(async ({ symbol }) => {
+      requestedSymbols.push(symbol);
+      return { data: { quotes: [{ symbol, price: 100, asOf: "2026-09-03T09:00:00Z", source: "真实 CAP" }] }, mode: "qveris-cap", audits: [] };
+    });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+
+    expect(requestedSymbols).toHaveLength(watchlist.length);
+    expect(new Set(requestedSymbols).size).toBe(watchlist.length);
+    expect(Object.keys(useLabStore.getState().liveQuotes)).toHaveLength(watchlist.length);
+    expect(useLabStore.getState().liveDataError).toBe("");
+  });
+
   it("supports a priority quote refresh without sweeping the full watchlist", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深" },
