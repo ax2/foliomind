@@ -96,6 +96,12 @@ fn payload(value: &Value) -> Value {
         .unwrap_or_else(|| value.clone())
 }
 
+fn numeric_value(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|item| item.parse::<f64>().ok()))
+}
+
 fn cost(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let unit = || {
