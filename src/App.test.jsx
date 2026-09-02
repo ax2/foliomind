@@ -343,6 +343,32 @@ describe("FolioMind core flows", () => {
     expect(breadth).toHaveTextContent("另有 1 个标的暂未返回有效价格");
   });
 
+  it("shows field-level watchlist summary statistics from current real quotes", () => {
+    window.localStorage.removeItem("foliomind.market-columns.v1");
+    useLabStore.setState({
+      activeView: "market",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" }, demo: false },
+      watchlist: [{ symbol: "AAA", name: "甲", market: "沪深" }, { symbol: "BBB", name: "乙", market: "沪深" }, { symbol: "CCC", name: "丙", market: "沪深" }],
+      liveQuotes: {
+        AAA: { price: 10, change: 1, volume: 100, pe: 8, asOf: new Date(Date.now() - 60_000).toISOString() },
+        BBB: { price: 20, change: -1, volume: 300, pe: 12, asOf: new Date(Date.now() - 60_000).toISOString() },
+        CCC: { price: 30, change: 3, volume: 200, asOf: new Date(Date.now() - 60_000).toISOString() },
+      },
+    });
+    render(<MarketView />);
+    const summary = screen.getByRole("region", { name: "自选汇总统计" });
+    expect(summary).toHaveTextContent("3/3 个标的");
+    expect(summary).toHaveTextContent("最新价");
+    expect(summary).toHaveTextContent("最小");
+    expect(summary).toHaveTextContent("平均");
+    expect(summary).toHaveTextContent("中位");
+    expect(summary).toHaveTextContent("最大");
+    expect(summary).toHaveTextContent("10.00");
+    expect(summary).toHaveTextContent("20.00");
+    expect(summary).toHaveTextContent("30.00");
+    expect(summary).toHaveTextContent("8.00");
+  });
+
   it("retries the events request after the background quote refresh settles", async () => {
     const refreshEvents = vi.fn().mockResolvedValue(false);
     useLabStore.setState({

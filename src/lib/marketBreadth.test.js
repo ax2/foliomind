@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { marketBreadth } from "./marketBreadth.js";
+import { marketBreadth, marketWatchlistSummary } from "./marketBreadth.js";
 
 describe("marketBreadth", () => {
   it("counts only priced real quotes and keeps missing changes out of breadth", () => {
@@ -30,5 +30,42 @@ describe("marketBreadth", () => {
       },
       { now },
     )).toMatchObject({ pricedCount: 2, staleCount: 1, missingCount: 0, upCount: 2, downCount: 0 });
+  });
+});
+
+describe("marketWatchlistSummary", () => {
+  it("summarizes each numeric field from current quotes", () => {
+    const result = marketWatchlistSummary(
+      [{ symbol: "AAA" }, { symbol: "BBB" }, { symbol: "CCC" }],
+      {
+        AAA: { price: 10, change: 1, volume: 100, pe: 8 },
+        BBB: { price: 20, change: -1, volume: 300, pe: 12 },
+        CCC: { price: 30, change: 3, volume: 200 },
+      },
+    );
+    expect(result.eligibleCount).toBe(3);
+    expect(result.fields.price).toMatchObject({ count: 3, min: 10, max: 30, average: 20, median: 20 });
+    expect(result.fields.change).toMatchObject({ count: 3, min: -1, max: 3, average: 1, median: 1 });
+    expect(result.fields.volume).toMatchObject({ count: 3, min: 100, max: 300, average: 200, median: 200 });
+    expect(result.fields.pe).toMatchObject({ count: 2, min: 8, max: 12, average: 10, median: 10 });
+  });
+
+  it("excludes stale, invalid-price, and missing field values without inventing data", () => {
+    const now = Date.parse("2026-09-02T10:00:00Z");
+    const result = marketWatchlistSummary(
+      [{ symbol: "AAA" }, { symbol: "BBB" }, { symbol: "CCC" }, { symbol: "DDD" }],
+      {
+        AAA: { price: 10, change: 2, turnoverRate: 1, asOf: "2026-09-02T09:55:00Z" },
+        BBB: { price: 20, change: 4, turnoverRate: 3, asOf: "2026-09-02T09:30:00Z" },
+        CCC: { price: 0, change: 9, turnoverRate: 5 },
+        DDD: { price: 30 },
+      },
+      { now },
+    );
+    expect(result).toMatchObject({ eligibleCount: 2, staleCount: 1 });
+    expect(result.fields.price).toMatchObject({ count: 2, min: 10, max: 30, average: 20, median: 20 });
+    expect(result.fields.change).toMatchObject({ count: 1, min: 2, max: 2, average: 2, median: 2 });
+    expect(result.fields.turnoverRate).toMatchObject({ count: 1, min: 1, max: 1, average: 1, median: 1 });
+    expect(result.fields.pe).toMatchObject({ count: 0, min: null, max: null, average: null, median: null });
   });
 });
