@@ -24,6 +24,8 @@ const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
 const settingsFile = join(dataDir, "integration-settings.json");
 const credentialFile = join(dataDir, "qveris-api-key");
 const stateFile = join(dataDir, "user-state.json");
+const stateBackupFile = join(dataDir, "user-state.json.backup");
+const MAX_USER_STATE_BYTES = 4 * 1024 * 1024;
 const STATE_LOCK_FILE_NAME = ".user-state.json.lock";
 export const STATE_FILE_LOCK_TIMEOUT_MS = 5_000;
 export const STATE_FILE_LOCK_STALE_MS = 30_000;
@@ -696,6 +698,46 @@ const cacheWarmupGate = createCacheWarmupGate();
 async function readJson(path, fallback) {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return fallback; }
 }
+async function readPersistedUserState(path) {
+  const size = await stat(path).then((metadata) => metadata.size).catch(() => 0);
+  if (size > MAX_USER_STATE_BYTES) throw Object.assign(new Error("用户状态文件超过大小限制"), { code: "USER_STATE_CORRUPTED" });
+  let parsed;
+  try { parsed = JSON.parse(await readFile(path, "utf8")); }
+  catch (cause) { throw Object.assign(new Error("用户状态文件无法解析"), { code: "USER_STATE_CORRUPTED", cause }); }
+  const normalized = normalizeUserState(parsed);
+  if (!normalized.watchlist.length) throw Object.assign(new Error("用户状态文件缺少自选数据"), { code: "USER_STATE_CORRUPTED" });
+  return normalized;
+}
+async function readUserStateUnlocked() {
+  const primaryExists = await stat(stateFile).then(() => true).catch(() => false);
+  if (primaryExists) {
+    try { return await readPersistedUserState(stateFile); }
+    catch (primaryError) {
+      try {
+        const backup = await readPersistedUserState(stateBackupFile);
+        await atomicJson(stateFile, backup);
+        return backup;
+      } catch (backupError) {
+        const error = new Error("本地用户数据损坏，且没有可用的恢复快照，请导入备份文件");
+        error.code = "USER_STATE_CORRUPTED";
+        error.cause = backupError || primaryError;
+        throw error;
+      }
+    }
+  }
+  try {
+    const backup = await readPersistedUserState(stateBackupFile);
+    await atomicJson(stateFile, backup);
+    return backup;
+  } catch {
+    return normalizeUserState(defaultState);
+  }
+}
+async function readUserState() {
+  const release = await acquireStateFileLock(stateFile);
+  try { return await readUserStateUnlocked(); }
+  finally { await release(); }
+}
 export async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -783,7 +825,7 @@ function saveUserStateIfRevision(input) {
   const task = userStateMutationQueue.catch(() => {}).then(async () => {
     const release = await acquireStateFileLock(stateFile);
     try {
-      const current = normalizeUserState(await readJson(stateFile, defaultState));
+      const current = await readUserStateUnlocked();
       const expectedRevision = Number(input?.expectedRevision);
       const state = normalizeUserState(input?.state || defaultState);
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || state.revision !== expectedRevision || current.revision !== expectedRevision) {
@@ -794,6 +836,8 @@ function saveUserStateIfRevision(input) {
       }
       if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
       const next = { ...state, revision: expectedRevision + 1 };
+      const primaryExists = await stat(stateFile).then(() => true).catch(() => false);
+      if (primaryExists) await atomicJson(stateBackupFile, current);
       await atomicJson(stateFile, next);
       return next;
     } finally {
@@ -1241,7 +1285,7 @@ async function route(req, body, requestSignal) {
     }
     finally { scope.close(); }
   }
-  if (method === "GET" && path === "/api/user-state") return normalizeUserState(await readJson(stateFile, defaultState));
+  if (method === "GET" && path === "/api/user-state") return await readUserState();
   if (method === "POST" && path === "/api/user-state") {
     return saveUserStateIfRevision(body);
   }

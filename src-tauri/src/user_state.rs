@@ -425,6 +425,59 @@ fn path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(FILE_NAME))
 }
 
+fn backup_path(file: &Path) -> PathBuf {
+    file.with_file_name(format!("{FILE_NAME}.backup"))
+}
+
+fn read_state_file(file: &Path) -> Result<UserState, String> {
+    let size = fs::metadata(file)
+        .map_err(|error| format!("cannot inspect user state: {error}"))?
+        .len();
+    if size > MAX_BYTES {
+        return Err("user state exceeds size limit".into());
+    }
+    let bytes = fs::read(file).map_err(|error| format!("cannot read user state: {error}"))?;
+    let state = serde_json::from_slice::<UserState>(&bytes)
+        .map_err(|_| "user state is invalid".to_string())?;
+    validate(&state)?;
+    Ok(migrate_legacy_seed_rules(state))
+}
+
+fn write_private_atomic(file: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
+    let parent = file.parent().ok_or("user state directory is unavailable")?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create user state directory: {error}"))?;
+    let name = file
+        .file_name()
+        .ok_or("user state file name is unavailable")?
+        .to_string_lossy();
+    let temp = parent.join(format!(".{name}.{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut handle = options
+            .open(&temp)
+            .map_err(|error| format!("cannot create {label} temp file: {error}"))?;
+        handle
+            .write_all(bytes)
+            .map_err(|error| format!("cannot write {label}: {error}"))?;
+        handle
+            .sync_all()
+            .map_err(|error| format!("cannot sync {label}: {error}"))?;
+        #[cfg(unix)]
+        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("cannot protect {label}: {error}"))?;
+        fs::rename(&temp, file).map_err(|error| format!("cannot replace {label}: {error}"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
 fn state_lock_path(file: &Path) -> PathBuf {
     file.parent()
         .unwrap_or_else(|| std::path::Path::new("."))
@@ -785,20 +838,36 @@ pub fn validate(state: &UserState) -> Result<(), String> {
 
 fn load_unlocked(app: &AppHandle) -> Result<UserState, String> {
     let file = path(app)?;
-    if !file.is_file() {
-        return Ok(UserState::default());
+    if file.is_file() {
+        match read_state_file(&file) {
+            Ok(state) => return Ok(state),
+            Err(primary_error) => {
+                let backup = backup_path(&file);
+                if backup.is_file() {
+                    return read_state_file(&backup)
+                        .and_then(|state| {
+                            let bytes = fs::read(&backup)
+                                .map_err(|error| format!("cannot read user state backup: {error}"))?;
+                            write_private_atomic(&file, &bytes, "user state recovery")?;
+                            Ok(state)
+                        })
+                        .map_err(|backup_error| {
+                            format!("user state is invalid and recovery backup is unavailable: {backup_error}; primary error: {primary_error}")
+                        });
+                }
+                return Err(primary_error);
+            }
+        }
     }
-    let size = fs::metadata(&file)
-        .map_err(|error| format!("cannot inspect user state: {error}"))?
-        .len();
-    if size > MAX_BYTES {
-        return Err("user state exceeds size limit".into());
+    let backup = backup_path(&file);
+    if backup.is_file() {
+        let state = read_state_file(&backup)?;
+        let bytes =
+            fs::read(&backup).map_err(|error| format!("cannot read user state backup: {error}"))?;
+        write_private_atomic(&file, &bytes, "user state recovery")?;
+        return Ok(state);
     }
-    let bytes = fs::read(&file).map_err(|error| format!("cannot read user state: {error}"))?;
-    let state = serde_json::from_slice::<UserState>(&bytes)
-        .map_err(|_| "user state is invalid".to_string())?;
-    validate(&state)?;
-    Ok(migrate_legacy_seed_rules(state))
+    Ok(UserState::default())
 }
 
 fn legacy_seed_rule(
@@ -867,6 +936,8 @@ pub fn load(app: &AppHandle) -> Result<UserState, String> {
     let _guard = STATE_IO_LOCK
         .lock()
         .map_err(|_| "user state I/O lock poisoned")?;
+    let file = path(app)?;
+    let _file_lock = acquire_state_file_lock(&file)?;
     load_unlocked(app)
 }
 
@@ -878,32 +949,12 @@ fn save_unlocked(app: &AppHandle, state: &UserState) -> Result<UserState, String
         return Err("user state exceeds size limit".into());
     }
     let file = path(app)?;
-    let parent = file.parent().ok_or("user state directory is unavailable")?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("cannot create user state directory: {error}"))?;
-    let temp = parent.join(format!(".{FILE_NAME}.{}.tmp", Uuid::new_v4()));
-    {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut handle = options
-            .open(&temp)
-            .map_err(|error| format!("cannot create user state temp file: {error}"))?;
-        handle
-            .write_all(&bytes)
-            .map_err(|error| format!("cannot write user state: {error}"))?;
-        handle
-            .sync_all()
-            .map_err(|error| format!("cannot sync user state: {error}"))?;
+    if file.is_file() {
+        let previous =
+            fs::read(&file).map_err(|error| format!("cannot read previous user state: {error}"))?;
+        write_private_atomic(&backup_path(&file), &previous, "user state backup")?;
     }
-    #[cfg(unix)]
-    fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("cannot protect user state: {error}"))?;
-    fs::rename(&temp, &file).map_err(|error| {
-        let _ = fs::remove_file(&temp);
-        format!("cannot replace user state: {error}")
-    })?;
+    write_private_atomic(&file, &bytes, "user state")?;
     Ok(state.clone())
 }
 
@@ -1081,6 +1132,19 @@ mod tests {
         });
         state.monitor_rules[0].threshold = f64::NAN;
         assert!(validate(&state).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_atomic_state_writes_use_restricted_permissions() {
+        let directory =
+            std::env::temp_dir().join(format!("foliomind-state-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let file = directory.join(FILE_NAME);
+        write_private_atomic(&file, br"{}", "user state").unwrap();
+        let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

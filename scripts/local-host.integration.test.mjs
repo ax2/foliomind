@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +143,42 @@ test("two Local Hosts sharing a data directory serialize user-state CAS writes",
   assert.equal(winner.payload.revision, 1);
   const loser = results.find(({ response }) => response.status === 409);
   assert.equal(loser.payload.code, "USER_STATE_CONFLICT");
+});
+
+test("Local Host recovers user state from the last valid backup", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-recovery-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const backup = {
+    revision: 7,
+    watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    monitorRules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [],
+  };
+  await writeFile(join(dataDir, "user-state.json"), "{broken", "utf8");
+  await writeFile(join(dataDir, "user-state.json.backup"), JSON.stringify(backup), "utf8");
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const restored = await hostRequest(host, "/api/user-state");
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.payload.revision, 7);
+  assert.equal(restored.payload.watchlist[0].symbol, "600519");
+  assert.equal((await stat(join(dataDir, "user-state.json"))).isFile(), true);
+  const restoredPrimary = JSON.parse(await readFile(join(dataDir, "user-state.json"), "utf8"));
+  assert.equal(restoredPrimary.revision, 7);
+});
+
+test("Local Host reports a recoverable error when user state and backup are both corrupt", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-corrupt-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  await writeFile(join(dataDir, "user-state.json"), "{broken", "utf8");
+  await writeFile(join(dataDir, "user-state.json.backup"), "[]", "utf8");
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const response = await hostRequest(host, "/api/user-state");
+  assert.equal(response.response.status, 400);
+  assert.equal(response.payload.code, "USER_STATE_CORRUPTED");
+  assert.match(response.payload.error, /导入备份/);
 });
 
 test("Local Host serializes prompt requests, aborts the owner, and releases runtime state", async (context) => {
