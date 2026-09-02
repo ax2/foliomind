@@ -155,3 +155,5 @@ CAP 数据访问与模型推理访问在状态层明确解耦：有效 API Key �
 Local Web Host 与桌面 Rust Host 共享出站地址信任边界：保存配置和发起模型/CAP 请求前，地址必须是无用户名密码、无查询参数/片段的 HTTP(S) URL；远程地址强制 HTTPS，仅 `localhost`、`127.0.0.0/8` 与 `::1` 允许 HTTP 本地 mock。每次读取已保存配置时再次校验，检测到手动篡改或损坏即进入可恢复错误，不向该地址发送凭据，见 PRD Stage 3BT。
 
 动态 CAP 目录测试也受 Host 授权边界保护。Local Host 只允许测试最近一次目录搜索返回且已规范化的 `toolId/searchId` 组合；目录刷新会替换旧绑定，目录外或过期组合在出站请求前返回 `CAPABILITY_NOT_VERIFIED`。固定 CAP 产品链路与 Pi 的 Search → Inspect → Call 阶段约束保持独立，开发面板的动态测试不会扩大 Skill 或固化工具白名单，见 PRD Stage 3BU。
+
+页面固定 CAP 的恢复也保持错误分类。行情、详情、序列和事件请求只有在收到明确的工具缓存缺失、能力不存在或 HTTP 404 能力失效信号时才进入 Agent 发现；认证、限流、超时、网络和服务端错误直接沿用 CAP 的可恢复状态，避免无意义的 Search → Inspect → Call 与重复计费。前端层对 Local Host 和原生 Host 的返回再做一次防御性判断，缺少明确错误码时默认不回退，见 PRD Stage 3BW。

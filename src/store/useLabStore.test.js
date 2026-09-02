@@ -8,7 +8,7 @@ vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) 
 vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: persistence.loadUserState, saveUserState: persistence.saveUserState }));
 vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
 
-import { initialLabState, useLabStore } from "./useLabStore.js";
+import { initialLabState, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
 
 describe("lab store streaming lifecycle", () => {
   beforeEach(async () => {
@@ -24,6 +24,14 @@ describe("lab store streaming lifecycle", () => {
       messages: initialLabState.messages.map((message) => ({ ...message })),
     });
     await useLabStore.getState().hydrateUserState();
+  });
+
+  it("only allows explicit capability misses to enter the Agent discovery path", () => {
+    expect(shouldFallbackToAgent(Object.assign(new Error("缓存未命中"), { code: "TOOL_CACHE_MISS", status: 404 }))).toBe(true);
+    expect(shouldFallbackToAgent(Object.assign(new Error("能力不存在"), { code: "CAPABILITY_NOT_FOUND", status: 404 }))).toBe(true);
+    expect(shouldFallbackToAgent(Object.assign(new Error("金融数据凭据无效"), { status: 401 }))).toBe(false);
+    expect(shouldFallbackToAgent(Object.assign(new Error("请求较多"), { status: 429 }))).toBe(false);
+    expect(shouldFallbackToAgent(new Error("金融数据渠道暂时不可用"))).toBe(false);
   });
 
   it("keeps user state unloaded and exposes a retry after a Host read failure", async () => {
@@ -123,6 +131,19 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.queryCachedData).toHaveBeenCalledOnce();
     expect(runtime.askPi).not.toHaveBeenCalled();
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, source: "真实 CAP" });
+  });
+
+  it("does not invoke the Agent again after a direct CAP authentication failure", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockRejectedValueOnce(Object.assign(new Error("金融数据凭据无效"), { status: 401, code: "UPSTREAM_AUTH" }));
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(false);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().liveDataError).toContain("凭据");
   });
 
   it("rejects empty prices and preserves missing change fields as empty", async () => {

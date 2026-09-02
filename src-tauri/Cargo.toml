@@ -1,6 +1,6 @@
 [package]
 name = "foliomind"
-version = "0.1.121"
+version = "0.1.122"
 description = "FolioMind financial agent desktop host"
 authors = ["ax2"]
 edition = "2021"

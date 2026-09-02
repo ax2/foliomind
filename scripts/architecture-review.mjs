@@ -89,6 +89,7 @@ check("行情正数门禁一致性", quoteFormatting.includes("isValidQuotePrice
 check("Local Host 地址安全边界", localHost.includes("validateEndpointUrl") && localHost.includes("validateIntegrationSettings") && localHost.includes("仅允许回环地址使用 HTTP") && hostIntegrationTest.includes("insecureSettings") && prd.includes("Stage 3BT"), "本地 Web Host 必须拒绝不安全远程 HTTP、URL 凭据、查询参数和片段，并与桌面端保持一致");
 check("动态 CAP 目录授权边界", localHost.includes("validateDiscoveredCapabilitySelection") && localHost.includes("CAPABILITY_NOT_VERIFIED") && hostIntegrationTest.includes("动态 CAP 测试只允许当前目录已验证的工具") && prd.includes("Stage 3BU"), "动态 CAP 调用测试必须绑定当前已发现的 tool/search，不能由浏览器任意提交未验证工具");
 check("Skill 安装状态持久化", userState.includes("installedSkillIds") && userStateTransport.includes("mergeInstalledSkillIds") && labStore.includes("skillItemsForIds") && labStore.includes("toggleSkill: async") && nativeUserState.includes("installed_skill_ids") && prd.includes("Stage 3BV"), "Skill 安装偏好必须跨 Web/桌面 Host、刷新和备份恢复持久化，失败时回滚且不同窗口的独立变更不互相覆盖");
+check("固定 CAP 页面回退护栏", labStore.includes("shouldFallbackToAgent") && labStore.includes('"TOOL_CACHE_MISS"') && labStore.includes("if (!shouldFallbackToAgent(error)) throw error") && prd.includes("Stage 3BW 固定 CAP 页面回退错误护栏"), "页面固定 CAP 只有明确能力缺失才可进入 Agent 发现，认证/限流/超时/上游故障不得追加模型调用");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

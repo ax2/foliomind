@@ -490,15 +490,37 @@ async function askFinancialData(prompt, kind, symbol, range, options) {
       const requestOptions = { timeoutMs: options?.settleTimeoutMs || 90_000 };
       if (options?.signal) requestOptions.signal = options.signal;
       const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol), range }, requestOptions);
+      // A test double or a malformed native response must not silently turn a
+      // successful transport into an Agent fallback. Treat a missing result as
+      // an explicit cache miss so the fallback policy below remains narrow.
+      if (!cached || typeof cached !== "object") {
+        const error = new Error("金融能力缓存未返回结果");
+        error.code = "TOOL_CACHE_MISS";
+        throw error;
+      }
       return { text: JSON.stringify(cached.data ?? cached), mode: cached.mode || "pi-local-host", audits: cached.audits || [{ operation: "cached-call", outcome: "success" }], cacheHit: cached.cacheHit === true };
     } catch (error) {
-      if (error?.code !== "TOOL_CACHE_MISS") {
-        // A stale tool is discarded by the Host; one normal Pi run below will
-        // rediscover and solidify a replacement tool.
-      }
+      if (!shouldFallbackToAgent(error)) throw error;
+      // A missing/invalidated solidified tool can be rediscovered once by the
+      // managed Agent. Authentication, rate limits, timeouts and upstream
+      // outages stay on the direct CAP error path and never add a billable
+      // Search → Inspect → Call round.
     }
   }
   return askPi(prompt, options);
+}
+
+/**
+ * Keep page-level CAP recovery aligned with the Host fallback guard. Only an
+ * explicit cache miss or capability-not-found response may enter the Agent
+ * discovery path; generic errors are user-visible and retryable in place.
+ */
+export function shouldFallbackToAgent(error) {
+  const code = String(error?.code || "").toUpperCase();
+  if (["TOOL_CACHE_MISS", "CAPABILITY_NOT_FOUND"].includes(code)) return true;
+  if (Number(error?.status) === 404) return true;
+  const text = String(error?.message ?? error ?? "").toLowerCase();
+  return /tool[_ -]?cache[_ -]?miss|尚未固化|没有对应的金融能力|capability[^\n]{0,24}not[^\n]{0,24}found/.test(text);
 }
 
 function liveQuotePrompt(item) {
