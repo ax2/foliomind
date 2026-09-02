@@ -80,6 +80,7 @@ check("对话 CAP 回退错误分类", localHost.includes("shouldFallbackForData
 check("跨市场交易日门禁", marketCalendar.includes("marketcodes_for_positions") && marketCalendar.includes("无法根据") && backgroundScheduler.includes("all_markets_trading") && labStore.includes("marketCodesForPositions") && prd.includes("Stage 3BK 跨市场交易日门禁"), "自动复盘必须按持仓交易所核对真实日历；不支持或无法判定的市场应 fail closed，不得默认为上交所");
 check("Local Host 断开回收", localHost.includes("linkAbortSignal") && localHost.includes("clientDisconnectedError") && localHost.includes("status: 499") && hostIntegrationTest.includes("客户端断开") && prd.includes("Stage 3BL Local Host 客户端断开回收"), "客户端断开必须取消所属上游请求、阻止关闭连接后的写入并保留受控诊断，不得继续消耗网络和费用");
 check("持久化失败可恢复", labStore.includes('action: error?.code === "USER_STATE_MERGE_CONFLICT" ? "reload" : "retry"') && labStore.includes("retryPersistedUserState") && labStore.includes("throw error") && app.includes("重新读取") && prd.includes("Stage 3BM 持久化失败显式反馈"), "用户状态保存失败必须传播、提供去重恢复入口并区分 CAS 冲突，不得静默报告成功");
+check("盯盘 CAP 回退护栏", labStore.includes("shouldBlockMonitorModelFallback") && labStore.includes("directFailures") && labStore.includes("directFailures.some(shouldBlockMonitorModelFallback)") && prd.includes("Stage 3BO 盯盘 CAP 错误分类与回退护栏"), "盯盘固定 CAP 遇认证/限流/超时/服务端失败时不得追加模型 Search，能力缺失才允许受控回退");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

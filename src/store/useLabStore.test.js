@@ -514,6 +514,24 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "triggered", triggered: true, conditionResults: [true], asOf: "2026-08-29" });
   });
 
+  it("does not fall back to model Search after a monitor CAP authentication failure", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "rule-auth", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    const error = Object.assign(new Error("上游认证失败"), { status: 401 });
+    runtime.queryCachedData.mockRejectedValue(error);
+
+    await expect(useLabStore.getState().runMonitorCheck("rule-auth")).resolves.toBe(false);
+    expect(runtime.queryCachedData).toHaveBeenCalledOnce();
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "error", symbol: "600519" });
+    expect(useLabStore.getState().notifications[0].body).toContain("数据服务暂时繁忙");
+    expect(useLabStore.getState().notifications[0].body).not.toContain("上游认证失败");
+  });
+
   it("loads real company events for the watchlist with truthful empty results", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },

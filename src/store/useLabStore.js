@@ -403,9 +403,21 @@ async function queryMonitorData(kind, symbol) {
     const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 });
     const text = JSON.stringify(cached?.data ?? cached ?? {});
     return { fields: monitorFieldsFromReply(text, symbol), mode: cached?.mode || "pi-local-host", audits: cached?.audits || [{ operation: "cap-call", outcome: "success", kind }] };
-  } catch {
-    return null;
+  } catch (error) {
+    // Do not hide authentication, throttling, timeout, or Host cancellation
+    // failures.  Swallowing them here would make executeMonitorForItem fall
+    // through to a model Search, causing another slow/chargeable request even
+    // though the fixed CAP path already gave a definitive failure.
+    return { error, fields: {}, mode: "pi-local-host", audits: [] };
   }
+}
+
+function shouldBlockMonitorModelFallback(error) {
+  const status = Number(error?.status);
+  if ([401, 403, 408, 425, 429].includes(status) || status >= 500) return true;
+  const code = String(error?.code || "").toUpperCase();
+  if (["LOCAL_HOST_UNAVAILABLE", "LOCAL_HOST_ABORTED", "CLIENT_DISCONNECTED", "ABORT_ERR"].includes(code)) return true;
+  return /超时|timeout|限流|请求过多|认证|权限|断开|无法连接|network/i.test(String(error?.message || ""));
 }
 
 function conditionMonitorResult(rule, item, data) {
@@ -515,7 +527,10 @@ async function executeMonitorForItem(rule, item) {
   const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${item?.symbol || rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
   if ((isLocalWebRuntime() || isDesktopRuntime()) && typeof queryCapabilityData === "function") {
     const kinds = [...new Set(conditionsForRule(rule).map((condition) => monitorDataKind(condition.type)))];
-    const directResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, item?.symbol || rule.symbol)))).filter(Boolean);
+    const queryResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, item?.symbol || rule.symbol)))).filter(Boolean);
+    const directFailures = queryResults.map((current) => current.error).filter(Boolean);
+    if (directFailures.some(shouldBlockMonitorModelFallback)) throw directFailures.find(shouldBlockMonitorModelFallback);
+    const directResults = queryResults.filter((current) => !current.error);
     const monitorData = directResults.reduce((merged, current) => ({ ...merged, ...current.fields, asOf: current.fields.asOf || merged.asOf, source: current.fields.source || merged.source }), {});
     reply = { text: JSON.stringify(monitorData), mode: directResults[0]?.mode || "pi-local-host", audits: directResults.flatMap((current) => current.audits || []) };
     const evaluation = evaluateRuleConditions(rule, monitorData);
