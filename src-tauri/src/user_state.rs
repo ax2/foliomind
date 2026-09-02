@@ -1154,7 +1154,10 @@ mod tests {
         assert_eq!(state.monitor_rules[0].logic, "OR");
         assert_eq!(state.monitor_rules[0].scope, "watchlist");
         assert_eq!(state.monitor_rules[0].trigger_mode, "once");
-        assert_eq!(state.monitor_rules[0].expires_at.as_deref(), Some("2026-09-10T23:59:59Z"));
+        assert_eq!(
+            state.monitor_rules[0].expires_at.as_deref(),
+            Some("2026-09-10T23:59:59Z")
+        );
         assert_eq!(
             state.monitor_rules[0].last_signal_by_symbol.get("600519"),
             Some(&true)
