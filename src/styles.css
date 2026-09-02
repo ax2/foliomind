@@ -602,6 +602,8 @@ textarea:focus-visible {
 .data-health-stale .data-health-dot { background: #bf7a2d; box-shadow: 0 0 0 3px #fcf0e2; }
 .data-health-loading .data-health-dot { background: var(--blue); box-shadow: 0 0 0 3px #e7f0fb; }
 .data-health-error .data-health-dot { background: #bd5960; box-shadow: 0 0 0 3px #f9e9ea; }
+.data-health-checking .data-health-dot { background: var(--blue); box-shadow: 0 0 0 3px #e7f0fb; }
+.data-health-connection-error .data-health-dot { background: #bd5960; box-shadow: 0 0 0 3px #f9e9ea; }
 .data-health-preview .data-health-dot,
 .data-health-empty .data-health-dot,
 .data-health-unknown .data-health-dot { background: #9ca4af; }

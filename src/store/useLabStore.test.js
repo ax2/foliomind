@@ -37,6 +37,11 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ userStateLoaded: true, userStateLoading: false, userStateError: "", watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
   });
 
+  it("starts with an explicit integration hydration state", () => {
+    useLabStore.setState({ ...initialLabState });
+    expect(useLabStore.getState()).toMatchObject({ integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "" });
+  });
+
   it("preserves edits made while a slow Host snapshot is loading", async () => {
     let release;
     persistence.loadUserState.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));

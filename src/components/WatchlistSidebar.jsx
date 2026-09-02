@@ -21,6 +21,8 @@ export function WatchlistSidebar() {
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
+  const integrationStatusLoading = useLabStore((state) => state.integrationStatusLoading);
+  const integrationStatusError = useLabStore((state) => state.integrationStatusError);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const selectSymbol = useLabStore((state) => state.selectSymbol);
   const addWatchlist = useLabStore((state) => state.addWatchlist);
@@ -122,7 +124,7 @@ export function WatchlistSidebar() {
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}
-    <div className="sidebar-status"><span className="status-dot" />{liveDataLoading ? "正在获取实时行情…" : realDataMode ? "实时行情已启用 · 每分钟更新" : "等待配置真实数据"}</div>
+    <div className="sidebar-status"><span className="status-dot" />{integrationStatusLoading ? "正在读取数据连接…" : integrationStatusError ? "数据连接暂不可用 · 去设置重试" : liveDataLoading ? "正在获取实时行情…" : realDataMode ? "实时行情已启用 · 每分钟更新" : "等待配置真实数据"}</div>
     {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card sidebar-modal" onSubmit={submit}><div className="modal-heading"><h2>添加自选标的</h2><button type="button" className="icon-button" aria-label="关闭" onClick={closeDialog}><X size={18} /></button></div><p className="modal-help">输入名称或代码即可，选择推荐项可自动补齐市场信息；自定义输入只需填写一个字段。</p><label>搜索名称或代码<input autoFocus required value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如 茅台、600519、AAPL" aria-label="搜索名称或代码" /></label><label>添加到分组<select aria-label="添加到分组" value={newGroupMode ? "__new__" : groupChoice} onChange={(event) => { if (event.target.value === "__new__") { setNewGroupMode(true); setNewGroupName(""); } else { setNewGroupMode(false); setGroupChoice(event.target.value); } }}><option value="">选择分组</option>{groups.map((group) => <option key={group} value={group}>{group}</option>)}<option value="__new__">新建分组…</option></select></label>{newGroupMode && <label>新分组名称<input autoFocus value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} maxLength={64} placeholder="例如 核心持仓" aria-label="新分组名称" /></label>}{suggestions.length > 0 && <div className="watch-suggestions" role="listbox" aria-label="自选推荐">{suggestions.map((item) => <button type="button" key={item.symbol} onClick={() => { void chooseSuggestion(item); }}><span><strong>{item.name}</strong><small>{item.symbol} · {item.market}</small></span><Plus size={15} /></button>)}</div>}{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-action" type="submit">添加到自选</button></form></div>}
   </aside>;
 }

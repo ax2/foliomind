@@ -4,6 +4,7 @@ import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { EventsView, MarketView, NotificationsView, ResearchView } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
+import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
@@ -73,6 +74,20 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("本地数据暂时无法读取");
     fireEvent.click(screen.getByRole("button", { name: "重新读取本地数据" }));
     expect(retryHydration).toHaveBeenCalled();
+  });
+
+  it("does not call an unhydrated data connection browser preview", () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      integrationStatus: null,
+      integrationStatusLoading: true,
+      integrationStatusError: "",
+    });
+    render(<StockWorkspace />);
+    expect(screen.getAllByText("正在读取数据连接").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("正在读取本地 Host 配置，不会使用示例行情")).toBeInTheDocument();
+    expect(screen.queryByText("预览模式")).not.toBeInTheDocument();
   });
 
   it("switches watchlist symbols and chart ranges", () => {

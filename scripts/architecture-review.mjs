@@ -82,6 +82,7 @@ check("Local Host 断开回收", localHost.includes("linkAbortSignal") && localH
 check("持久化失败可恢复", labStore.includes('action: error?.code === "USER_STATE_MERGE_CONFLICT" ? "reload" : "retry"') && labStore.includes("retryPersistedUserState") && labStore.includes("throw error") && app.includes("重新读取") && prd.includes("Stage 3BM 持久化失败显式反馈"), "用户状态保存失败必须传播、提供去重恢复入口并区分 CAS 冲突，不得静默报告成功");
 check("盯盘 CAP 回退护栏", labStore.includes("shouldBlockMonitorModelFallback") && labStore.includes("directFailures") && labStore.includes("directFailures.some(shouldBlockMonitorModelFallback)") && prd.includes("Stage 3BO 盯盘 CAP 错误分类与回退护栏"), "盯盘固定 CAP 遇认证/限流/超时/服务端失败时不得追加模型 Search，能力缺失才允许受控回退");
 check("成本提取可信边界", localHost.includes("function costCandidate") && localHost.includes('"qveris_cost"') && !localHost.includes('"amount"]') && capabilityData.includes('"cost"') && backgroundScheduler.includes('"cost"') && executor.includes('"data"]') && prd.includes("Stage 3BP"), "费用账本只接受显式计费字段，不能把业务 amount/价格/序列值误记为费用，缓存命中不计入上游调用分母");
+check("启动连接状态可信化", marketStore.includes("integrationStatusLoading: true") && stockWorkspace.includes('healthState = integrationStatusLoading ? "checking"') && stockWorkspace.includes("不会使用示例行情") && prd.includes("Stage 3BQ"), "连接配置未读取完成前必须保持明确读取态，不能短暂显示预览模式或触发真实行情请求");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
