@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { appendFile, chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
@@ -24,6 +24,10 @@ const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
 const settingsFile = join(dataDir, "integration-settings.json");
 const credentialFile = join(dataDir, "qveris-api-key");
 const stateFile = join(dataDir, "user-state.json");
+const STATE_LOCK_FILE_NAME = ".user-state.json.lock";
+export const STATE_FILE_LOCK_TIMEOUT_MS = 5_000;
+export const STATE_FILE_LOCK_STALE_MS = 30_000;
+const STATE_FILE_LOCK_RETRY_MS = 25;
 const toolCacheFile = join(dataDir, "tool-selection-cache.json");
 const developerLogFile = join(dataDir, "developer-logs.ndjson");
 export const DEVELOPER_LOG_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
@@ -698,6 +702,68 @@ async function atomicJson(path, value) {
   await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tmp, path);
 }
+
+function stateLockPath(path) { return join(dirname(path), STATE_LOCK_FILE_NAME); }
+
+function stateLockBusyError() {
+  const error = new Error("用户状态正在被其它 FolioMind 进程保存，请稍后重试");
+  error.status = 409;
+  error.code = "USER_STATE_BUSY";
+  return error;
+}
+
+async function removeStaleStateLock(lockPath) {
+  try {
+    const metadata = await stat(lockPath);
+    if (Date.now() - metadata.mtimeMs < STATE_FILE_LOCK_STALE_MS) return false;
+    await unlink(lockPath);
+    return true;
+  } catch (error) {
+    // A concurrent owner may have released or replaced the lock. Re-check on
+    // the next loop rather than treating that race as a save failure.
+    if (error?.code === "ENOENT") return true;
+    return false;
+  }
+}
+
+/**
+ * Acquire the lock shared by the standalone Host and the native desktop Host.
+ * The lock file is deliberately tiny and token-owned so a stale-owner cleanup
+ * cannot remove a newer owner's lock during a release race.
+ */
+export async function acquireStateFileLock(path = stateFile, { timeoutMs = STATE_FILE_LOCK_TIMEOUT_MS, retryMs = STATE_FILE_LOCK_RETRY_MS } = {}) {
+  const lockPath = stateLockPath(path);
+  const token = `${process.pid}:${randomUUID()}`;
+  const startedAt = Date.now();
+  await mkdir(dirname(lockPath), { recursive: true });
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(token, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        try {
+          if ((await readFile(lockPath, "utf8")) === token) await unlink(lockPath);
+        } catch {
+          // The lock may have been recovered after a process crash. Never
+          // allow cleanup races to turn a completed save into a failure.
+        }
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (await removeStaleStateLock(lockPath)) continue;
+      if (Date.now() - startedAt >= timeoutMs) throw stateLockBusyError();
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
+    }
+  }
+}
 async function readKey() {
   try { const value = (await readFile(credentialFile, "utf8")).trim(); if (value) return value; } catch { /* first run */ }
   return String(process.env.QVERIS_API_KEY || "").trim() || null;
@@ -711,19 +777,24 @@ async function deleteKey() { try { await unlink(credentialFile); } catch { /* id
 function apiKeyPrefix(value) { const key = String(value || "").trim(); return key ? `${key.slice(0, 8)}${key.length > 8 ? "…" : ""}` : ""; }
 function saveUserStateIfRevision(input) {
   const task = userStateMutationQueue.catch(() => {}).then(async () => {
-    const current = normalizeUserState(await readJson(stateFile, defaultState));
-    const expectedRevision = Number(input?.expectedRevision);
-    const state = normalizeUserState(input?.state || defaultState);
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || state.revision !== expectedRevision || current.revision !== expectedRevision) {
-      const error = new Error(`用户数据已在其他窗口更新（当前版本 ${current.revision}）`);
-      error.status = 409;
-      error.code = "USER_STATE_CONFLICT";
-      throw error;
+    const release = await acquireStateFileLock(stateFile);
+    try {
+      const current = normalizeUserState(await readJson(stateFile, defaultState));
+      const expectedRevision = Number(input?.expectedRevision);
+      const state = normalizeUserState(input?.state || defaultState);
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || state.revision !== expectedRevision || current.revision !== expectedRevision) {
+        const error = new Error(`用户数据已在其他窗口更新（当前版本 ${current.revision}）`);
+        error.status = 409;
+        error.code = "USER_STATE_CONFLICT";
+        throw error;
+      }
+      if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
+      const next = { ...state, revision: expectedRevision + 1 };
+      await atomicJson(stateFile, next);
+      return next;
+    } finally {
+      await release();
     }
-    if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
-    const next = { ...state, revision: expectedRevision + 1 };
-    await atomicJson(stateFile, next);
-    return next;
   });
   userStateMutationQueue = task.catch(() => {});
   return task;

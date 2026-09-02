@@ -120,6 +120,31 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(emptyOverview.payload.logs.length, 0);
 });
 
+test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-lock-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const first = await startHost(dataDir);
+  const second = await startHost(dataDir);
+  context.after(async () => {
+    await stopHost(first.child);
+    await stopHost(second.child);
+  });
+  const state = {
+    revision: 0,
+    watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    monitorRules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [],
+  };
+  const results = await Promise.all([
+    hostRequest(first, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } }),
+    hostRequest(second, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } }),
+  ]);
+  assert.deepEqual(results.map(({ response }) => response.status).sort((a, b) => a - b), [200, 409]);
+  const winner = results.find(({ response }) => response.status === 200);
+  assert.equal(winner.payload.revision, 1);
+  const loser = results.find(({ response }) => response.status === 409);
+  assert.equal(loser.payload.code, "USER_STATE_CONFLICT");
+});
+
 test("Local Host serializes prompt requests, aborts the owner, and releases runtime state", async (context) => {
   let resolveRequest;
   const firstRequest = new Promise((resolve) => { resolveRequest = resolve; });

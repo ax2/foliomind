@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const localHost = vi.hoisted(() => ({ isLocalWebRuntime: vi.fn(() => false), localHostRequest: vi.fn() }));
 vi.mock("./localHost.js", () => localHost);
 
-import { loadUserState, mergeUserStateChanges, normalizeUserState, parseUserStateBackup, serializeUserStateBackup, userStateBackupData, UserStateMergeConflictError } from "./userState.js";
+import { loadUserState, mergeUserStateChanges, normalizeUserState, parseUserStateBackup, saveUserState, serializeUserStateBackup, userStateBackupData, UserStateMergeConflictError } from "./userState.js";
 
 describe("user state backups", () => {
   beforeEach(() => {
@@ -32,6 +32,18 @@ describe("user state backups", () => {
     localHost.localHostRequest.mockResolvedValue({ revision: 3, watchlist: [{ symbol: "AAPL", name: "Apple" }] });
 
     await expect(loadUserState()).resolves.toMatchObject({ revision: 3, watchlist: [{ symbol: "AAPL", name: "Apple" }] });
+  });
+
+  it("does not turn a cross-process state lock into a CAS merge", async () => {
+    localHost.isLocalWebRuntime.mockReturnValue(true);
+    const busy = new Error("用户状态正在被其它 FolioMind 进程保存，请稍后重试");
+    busy.status = 409;
+    busy.code = "USER_STATE_BUSY";
+    localHost.localHostRequest.mockRejectedValue(busy);
+    const state = normalizeUserState({ revision: 2, watchlist: [{ symbol: "AAPL", name: "Apple" }] });
+
+    await expect(saveUserState(state)).rejects.toBe(busy);
+    expect(localHost.localHostRequest).toHaveBeenCalledTimes(1);
   });
 
   it("exports portable data while excluding runtime configuration", () => {

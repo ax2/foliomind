@@ -22,6 +22,7 @@ const userStateClient = await load("src/lib/userState.js");
 const labStore = await load("src/store/useLabStore.js");
 const qaPlaywright = await load("scripts/qa-playwright.py");
 const commandPalette = await load("src/components/CommandPalette.jsx");
+const hostLockTest = await load("scripts/local-host.test.mjs");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
@@ -103,6 +104,7 @@ check("首次配置清单", stockWorkspace.includes("SetupChecklist") && stockWo
 check("Playwright 真实数据验收可重复", qaPlaywright.includes("expected_console_errors") && qaPlaywright.includes("for attempt in range(2)") && qaPlaywright.includes("install_button") && qaPlaywright.includes("移动端视口无横向溢出") && qaPlaywright.includes("pageErrors") && prd.includes("Stage 3CE 可重复的真实数据 Playwright 验收"), "本地验收需接受持久化 Skill 状态，并将预期上游错误与前端崩溃分开");
 check("盯盘规则管理闭环", marketViews.includes("updateRule") && marketViews.includes("搜索盯盘规则") && marketViews.includes("盯盘规则状态") && marketViews.includes("盯盘规则排序") && labStore.includes("Editing a condition invalidates") && prd.includes("Stage 3CF 盯盘规则管理闭环"), "盯盘规则必须可搜索、筛选、排序和原地编辑；编辑后重置触发边沿并保留审计历史");
 check("Web/桌面盯盘状态契约", nativeUserState.includes("pub scope: String") && nativeUserState.includes("last_signal_by_symbol") && nativeUserState.includes("monitor rule scope is invalid") && nativeUserState.includes('rule.scope == "symbol"') && prd.includes("Stage 3CG Web/桌面盯盘状态契约对齐"), "Web、Local Host 与桌面保存盯盘范围和逐标的触发边沿时不得丢字段或误迁移");
+check("跨进程用户状态锁", localHost.includes("acquireStateFileLock") && localHost.includes(".user-state.json.lock") && localHost.includes("USER_STATE_BUSY") && nativeUserState.includes("acquire_state_file_lock") && nativeUserState.includes("STATE_LOCK_STALE_AFTER") && nativeUserState.includes("USER_STATE_BUSY") && prd.includes("Stage 3CH Web/桌面跨进程用户状态锁") && hostLockTest.includes("token-owned cross-process user-state lock"), "Web Host 与桌面 Host 共享用户状态文件时必须有一致的跨进程独占锁、有限等待、过期回收和 token 安全释放");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

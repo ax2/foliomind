@@ -1,10 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
+import { mkdtemp, readFile, rm, unlink, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
+
+test("uses a token-owned cross-process user-state lock and recovers stale owners", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-state-lock-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const stateFile = join(dataDir, "user-state.json");
+  const release = await acquireStateFileLock(stateFile);
+  await assert.rejects(
+    acquireStateFileLock(stateFile, { timeoutMs: 40, retryMs: 5 }),
+    (error) => error?.code === "USER_STATE_BUSY" && error?.status === 409,
+  );
+  const lockPath = join(dataDir, ".user-state.json.lock");
+  await writeFile(lockPath, "new-owner", "utf8");
+  await release();
+  assert.equal(await readFile(lockPath, "utf8"), "new-owner");
+  await unlink(lockPath);
+  await writeFile(lockPath, "crashed-owner", "utf8");
+  const staleAt = new Date(Date.now() - STATE_FILE_LOCK_STALE_MS - 1_000);
+  await utimes(lockPath, staleAt, staleAt);
+  const recoveredRelease = await acquireStateFileLock(stateFile, { timeoutMs: 100, retryMs: 5 });
+  await recoveredRelease();
 });
 
 test("keeps Local Host endpoint validation aligned with the desktop security boundary", () => {

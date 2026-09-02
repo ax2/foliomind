@@ -1,15 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Mutex,
+    thread,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 const FILE_NAME: &str = "user-state.json";
+const STATE_LOCK_FILE_NAME: &str = ".user-state.json.lock";
+const STATE_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+const STATE_LOCK_STALE_AFTER: Duration = Duration::from_secs(30);
+const STATE_LOCK_RETRY: Duration = Duration::from_millis(25);
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_WATCHLIST: usize = 200;
 const MAX_RULES: usize = 200;
@@ -19,6 +25,22 @@ const MAX_MONITOR_HISTORY: usize = 500;
 const MAX_PORTFOLIO_REVIEWS: usize = 90;
 const MAX_INSTALLED_SKILLS: usize = 100;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
+
+struct StateFileLock {
+    path: PathBuf,
+    token: String,
+}
+
+impl Drop for StateFileLock {
+    fn drop(&mut self) {
+        if fs::read_to_string(&self.path)
+            .map(|contents| contents == self.token)
+            .unwrap_or(false)
+        {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -389,6 +411,64 @@ fn path(app: &AppHandle) -> Result<PathBuf, String> {
         .app_config_dir()
         .map_err(|error| format!("cannot resolve app config directory: {error}"))?
         .join(FILE_NAME))
+}
+
+fn state_lock_path(file: &Path) -> PathBuf {
+    file.parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(STATE_LOCK_FILE_NAME)
+}
+
+fn acquire_state_file_lock(file: &Path) -> Result<StateFileLock, String> {
+    let parent = file.parent().ok_or("user state directory is unavailable")?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create user state directory: {error}"))?;
+    let lock_path = state_lock_path(file);
+    let token = format!("{}:{}", std::process::id(), Uuid::new_v4());
+    let started_at = Instant::now();
+    loop {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut handle) => {
+                if let Err(error) = handle
+                    .write_all(token.as_bytes())
+                    .and_then(|_| handle.sync_all())
+                {
+                    let _ = fs::remove_file(&lock_path);
+                    return Err(format!("cannot initialize user state lock: {error}"));
+                }
+                return Ok(StateFileLock {
+                    path: lock_path,
+                    token,
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let stale = fs::metadata(&lock_path)
+                    .and_then(|metadata| metadata.modified())
+                    .map(|modified| {
+                        modified
+                            .elapsed()
+                            .map(|age| age >= STATE_LOCK_STALE_AFTER)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if stale {
+                    let _ = fs::remove_file(&lock_path);
+                    continue;
+                }
+                if started_at.elapsed() >= STATE_LOCK_TIMEOUT {
+                    return Err(
+                        "USER_STATE_BUSY: 用户状态正在被其它 FolioMind 进程保存，请稍后重试".into(),
+                    );
+                }
+                thread::sleep(STATE_LOCK_RETRY);
+            }
+            Err(error) => return Err(format!("cannot create user state lock: {error}")),
+        }
+    }
 }
 
 fn validate_text(value: &str, label: &str, max: usize) -> Result<(), String> {
@@ -806,6 +886,8 @@ pub fn save_if_revision(
     let _guard = STATE_IO_LOCK
         .lock()
         .map_err(|_| "user state I/O lock poisoned")?;
+    let file = path(app)?;
+    let _file_lock = acquire_state_file_lock(&file)?;
     let current = load_unlocked(app)?;
     let next = advance_revision(&current, state, expected_revision)?;
     save_unlocked(app, &next)
@@ -822,6 +904,8 @@ where
     let _guard = STATE_IO_LOCK
         .lock()
         .map_err(|_| "user state I/O lock poisoned")?;
+    let file = path(app)?;
+    let _file_lock = acquire_state_file_lock(&file)?;
     let mut state = load_unlocked(app)?;
     operation(&mut state)?;
     state.revision = state

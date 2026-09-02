@@ -148,7 +148,7 @@ export function mergeUserStateChanges(baseState, localState, remoteState) {
 }
 
 function isConflict(error) {
-  return error?.status === 409 || String(error?.message || error).includes("USER_STATE_CONFLICT");
+  return error?.code === "USER_STATE_CONFLICT" || String(error?.message || error).includes("USER_STATE_CONFLICT");
 }
 
 async function saveOnce(normalized) {
