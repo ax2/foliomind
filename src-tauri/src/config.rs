@@ -12,7 +12,10 @@ use url::{Host, Url};
 use uuid::Uuid;
 
 #[cfg(unix)]
-use std::fs::File;
+use std::{
+    fs::File,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+};
 
 pub const DEFAULT_CAPABILITY_URL: &str = "https://qveris.ai/api/v1";
 pub const DEFAULT_MODEL_GATEWAY_URL: &str = "https://aigateway.qveris.ai/v1";
@@ -285,15 +288,20 @@ fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
     let temporary = sibling_with_suffix(path, &format!(".tmp-{}", Uuid::new_v4()))?;
     let backup = backup_path(path)?;
     let write_result = (|| -> Result<(), String> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
             .open(&temporary)
             .map_err(|error| format!("cannot create temporary {label}: {error}"))?;
         file.write_all(bytes)
             .and_then(|_| file.sync_all())
             .map_err(|error| format!("cannot write temporary {label}: {error}"))?;
         drop(file);
+        #[cfg(unix)]
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("cannot protect temporary {label}: {error}"))?;
 
         if backup.exists() {
             fs::remove_file(&backup)
@@ -344,6 +352,9 @@ fn sync_directory(_path: &Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn defaults_point_to_distinct_qveris_services() {
@@ -437,6 +448,20 @@ mod tests {
         atomic_write(&path, b"second", "test config").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"second");
         assert!(!backup_path(&path).unwrap().exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_protects_private_configuration_files() {
+        let directory =
+            std::env::temp_dir().join(format!("foliomind-config-mode-{}", Uuid::new_v4()));
+        let path = directory.join("integrations.json");
+        atomic_write(&path, b"{}", "test config").unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

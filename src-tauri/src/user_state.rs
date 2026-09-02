@@ -12,6 +12,9 @@ use std::{
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 const FILE_NAME: &str = "user-state.json";
 const STATE_LOCK_FILE_NAME: &str = ".user-state.json.lock";
 const STATE_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -880,7 +883,12 @@ fn save_unlocked(app: &AppHandle, state: &UserState) -> Result<UserState, String
         .map_err(|error| format!("cannot create user state directory: {error}"))?;
     let temp = parent.join(format!(".{FILE_NAME}.{}.tmp", Uuid::new_v4()));
     {
-        let mut handle = fs::File::create(&temp)
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut handle = options
+            .open(&temp)
             .map_err(|error| format!("cannot create user state temp file: {error}"))?;
         handle
             .write_all(&bytes)
@@ -889,6 +897,9 @@ fn save_unlocked(app: &AppHandle, state: &UserState) -> Result<UserState, String
             .sync_all()
             .map_err(|error| format!("cannot sync user state: {error}"))?;
     }
+    #[cfg(unix)]
+    fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("cannot protect user state: {error}"))?;
     fs::rename(&temp, &file).map_err(|error| {
         let _ = fs::remove_file(&temp);
         format!("cannot replace user state: {error}")

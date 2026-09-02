@@ -74,7 +74,7 @@ Rust Host
 
 在桌面端打开“设置”：
 
-1. 保存数据服务 API Key。该密钥优先进入操作系统凭据库；Linux 本地调试若未运行 Secret Service，则使用权限为 `0600` 的用户配置文件回退，避免设置页保存失败。
+1. 保存数据服务 API Key。该密钥优先进入操作系统凭据库；Linux 本地调试若未运行 Secret Service，则使用权限为 `0600` 的用户配置文件回退，避免设置页保存失败。用户状态、集成设置和固化工具缓存也会在 POSIX 系统按 `0600` 保存，避免依赖机器默认 `umask`。
 2. 可使用内置的 QVeris 兼容配置（工具地址 `https://qveris.ai/api/v1`、模型地址 `https://aigateway.qveris.ai/v1`），也可以按部署环境替换为兼容服务。
 3. 点击“同步模型”，从网关的 `/models` 原子读取并保存当前可用模型，再选择 Pi 默认模型并应用。更换网关地址后必须重新同步，已下线的默认模型会安全回退到目录中的首个可用模型。
 4. 在自选股页面点击“获取实时数据”可直接刷新当前标的；需要解释时再点击“交给 Agent”。行情卡会根据 provider 时间标记“数据时间未知”或“可能已延迟”，不会把缺少时间戳的数据冒充实时数据；没有可识别真实价格的数据不会进入行情、组合或盯盘结果。
@@ -144,10 +144,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.135`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.136`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.135 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.136 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

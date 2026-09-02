@@ -696,11 +696,15 @@ const cacheWarmupGate = createCacheWarmupGate();
 async function readJson(path, fallback) {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return fallback; }
 }
-async function atomicJson(path, value) {
+export async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await rename(tmp, path);
+  // Keep private portfolio/configuration metadata protected after every
+  // atomic replacement. Windows ignores POSIX mode bits and uses the
+  // per-user config directory ACL instead.
+  if (process.platform !== "win32") await chmod(path, 0o600);
 }
 
 function stateLockPath(path) { return join(dirname(path), STATE_LOCK_FILE_NAME); }
