@@ -914,7 +914,17 @@ export const useLabStore = create((set, get) => ({
       return { notifications: [...reminders, ...state.notifications].slice(0, 500) };
     });
     if (!delivered.length) return 0;
-    await get().persistUserState().catch(() => null);
+    const deliveredIds = new Set(delivered.map((notification) => notification.id));
+    try {
+      await get().persistUserState();
+    } catch {
+      // Keep any unrelated concurrent notification edits, but remove only the
+      // reminders that never reached the canonical state. System notifications
+      // are sent only after persistence succeeds so a retry cannot duplicate a
+      // reminder for data that was not actually saved.
+      set((state) => ({ notifications: state.notifications.filter((notification) => !deliveredIds.has(notification.id)) }));
+      return 0;
+    }
     for (const notification of delivered) void sendSystemNotification(notification);
     return delivered.length;
   },
@@ -1145,17 +1155,62 @@ export const useLabStore = create((set, get) => ({
     }
   },
   removePortfolioReview: async (id) => {
-    const portfolioReviews = get().portfolioReviews.filter((review) => review.id !== id);
-    if (portfolioReviews.length === get().portfolioReviews.length) return false;
-    set({ portfolioReviews });
-    await get().persistUserState();
-    return true;
+    const previous = get().portfolioReviews;
+    const removed = previous.find((review) => review.id === id);
+    if (!removed) return false;
+    set({ portfolioReviews: previous.filter((review) => review.id !== id) });
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      // Do not overwrite a newer edit made while the write was in flight.
+      set((state) => state.portfolioReviews.some((review) => review.id === id)
+        ? {}
+        : { portfolioReviews: [...state.portfolioReviews, removed] });
+      throw error;
+    }
   },
   removeWatchlist: async (symbol) => {
-    const next = get().watchlist.filter((item) => item.symbol !== symbol); if (!next.length) throw new Error("至少保留一个自选标的");
-    set((state) => ({ watchlist: next, selectedSymbol: state.selectedSymbol === symbol ? next[0].symbol : state.selectedSymbol })); await get().persistUserState();
+    const previous = get().watchlist;
+    const next = previous.filter((item) => item.symbol !== symbol);
+    if (next.length === previous.length) return false;
+    if (!next.length) throw new Error("至少保留一个自选标的");
+    const removedIndex = previous.findIndex((item) => item.symbol === symbol);
+    const previousSelectedSymbol = get().selectedSymbol;
+    const optimisticSelectedSymbol = previousSelectedSymbol === symbol ? next[0].symbol : previousSelectedSymbol;
+    set((state) => ({ watchlist: next, selectedSymbol: state.selectedSymbol === symbol ? next[0].symbol : state.selectedSymbol }));
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      // A concurrent add/edit is preserved; restore the removed row only when
+      // it is still absent from the current list.
+      set((state) => {
+        if (state.watchlist.some((item) => item.symbol === symbol)) return {};
+        const restored = [...state.watchlist];
+        const removed = previous.find((item) => item.symbol === symbol);
+        if (removed) restored.splice(Math.min(Math.max(removedIndex, 0), restored.length), 0, removed);
+        return { watchlist: restored, selectedSymbol: state.selectedSymbol === optimisticSelectedSymbol ? previousSelectedSymbol : state.selectedSymbol };
+      });
+      throw error;
+    }
   },
-  toggleRule: (id) => { set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? { ...rule, enabled: !rule.enabled } : rule) })); void get().persistUserState().catch(() => {}); },
+  toggleRule: async (id) => {
+    const previous = get().rules;
+    const previousRule = previous.find((rule) => rule.id === id);
+    if (!previousRule) return false;
+    const nextRule = { ...previousRule, enabled: !previousRule.enabled };
+    set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? nextRule : rule) }));
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set((state) => state.rules.some((rule) => rule.id === id && JSON.stringify(rule) !== JSON.stringify(nextRule))
+        ? {}
+        : { rules: state.rules.map((rule) => rule.id === id ? previousRule : rule) });
+      throw error;
+    }
+  },
   addRule: async (input = {}) => { const strategy = strategyFor(input.strategyId); const rule = normalizeRule({ ...input, id: createId("rule"), symbol: String(input.symbol || get().selectedSymbol || "600519"), strategyId: strategy.id }); set((state) => ({ rules: [...state.rules, rule] })); await get().persistUserState(); return rule; },
   updateRule: async (id, input = {}) => {
     const currentRules = get().rules;
@@ -1182,14 +1237,60 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
   },
-  deleteRule: async (id) => { set((state) => ({ rules: state.rules.filter((rule) => rule.id !== id) })); await get().persistUserState(); },
-  addNotification: (notification) => { set((state) => ({ notifications: [{ ...notification, id: notification.id || createId("notification"), createdAt: notification.createdAt || nowIso(), read: false }, ...state.notifications].slice(0, 500) })); void get().persistUserState().catch(() => {}); },
-  markNotificationRead: (id) => { set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); void get().persistUserState().catch(() => {}); },
-  markAllNotificationsRead: () => { set((state) => ({ notifications: state.notifications.map((item) => ({ ...item, read: true })) })); void get().persistUserState().catch(() => {}); },
+  deleteRule: async (id) => {
+    const previous = get().rules;
+    if (!previous.some((rule) => rule.id === id)) return false;
+    set({ rules: previous.filter((rule) => rule.id !== id) });
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set((state) => state.rules.some((rule) => rule.id === id) ? {} : { rules: [...state.rules, previous.find((rule) => rule.id === id)].filter(Boolean) });
+      throw error;
+    }
+  },
+  addNotification: async (notification) => {
+    const value = { ...notification, id: notification.id || createId("notification"), createdAt: notification.createdAt || nowIso(), read: false };
+    set((state) => ({ notifications: [value, ...state.notifications].slice(0, 500) }));
+    try {
+      await get().persistUserState();
+      return value;
+    } catch (error) {
+      set((state) => ({ notifications: state.notifications.filter((item) => item.id !== value.id) }));
+      throw error;
+    }
+  },
+  markNotificationRead: async (id) => {
+    const previous = get().notifications.find((item) => item.id === id);
+    if (!previous || previous.read) return false;
+    set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) }));
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set((state) => ({ notifications: state.notifications.map((item) => item.id === id && item.read === true ? previous : item) }));
+      throw error;
+    }
+  },
+  markAllNotificationsRead: async () => {
+    const previous = get().notifications;
+    if (!previous.some((item) => !item.read)) return false;
+    const unreadIds = new Set(previous.filter((item) => !item.read).map((item) => item.id));
+    set((state) => ({ notifications: state.notifications.map((item) => unreadIds.has(item.id) ? { ...item, read: true } : item) }));
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      const previousById = new Map(previous.map((item) => [item.id, item]));
+      set((state) => ({ notifications: state.notifications.map((item) => unreadIds.has(item.id) && item.read === true ? previousById.get(item.id) || item : item) }));
+      throw error;
+    }
+  },
   runMonitorCheck: async (ruleId) => {
-    let acquired = false; let expired = false; let rule; let items = [];
+    let acquired = false; let expired = false; let rule; let previousRule = null; let items = [];
     set((state) => {
       rule = state.rules.find((candidate) => candidate.id === ruleId);
+      previousRule = rule ? { ...rule, lastSignalBySymbol: { ...(rule.lastSignalBySymbol || {}) } } : null;
       items = rule?.scope === "watchlist" ? state.watchlist : state.watchlist.filter((candidate) => candidate.symbol === rule?.symbol);
       if (rule?.enabled && isMonitorRuleExpired(rule)) {
         expired = true;
@@ -1201,7 +1302,11 @@ export const useLabStore = create((set, get) => ({
       return { monitorBusy: true, monitorLastRunAt: checkedAt, rules: state.rules.map((candidate) => candidate.id === rule.id ? { ...candidate, lastCheckedAt: checkedAt } : candidate) };
     });
     if (expired) {
-      await get().persistUserState().catch(() => null);
+      try {
+        await get().persistUserState();
+      } catch {
+        set((state) => ({ rules: state.rules.map((candidate) => candidate.id === rule?.id && candidate.enabled === false && previousRule?.enabled === true ? previousRule : candidate) }));
+      }
       return false;
     }
     if (!acquired) return false;
@@ -1217,6 +1322,9 @@ export const useLabStore = create((set, get) => ({
       }
     });
     const deliveredNotifications = [];
+    const createdNotificationIds = new Set();
+    const createdHistoryIds = new Set();
+    let committedRule = null;
     const checkedAt = nowIso();
     set((state) => {
       const currentRule = state.rules.find((candidate) => candidate.id === rule.id) || rule;
@@ -1250,15 +1358,30 @@ export const useLabStore = create((set, get) => ({
         notifications.push(notification);
         deliveredNotifications.push(notification);
       }
+      histories.forEach((history) => createdHistoryIds.add(history.id));
+      notifications.forEach((notification) => { createdNotificationIds.add(notification.id); });
+      committedRule = { ...currentRule, enabled: onceTriggered ? false : currentRule.enabled, lastTriggeredAt, lastSignalTriggered, lastSignalBySymbol: signalBySymbol };
       return {
         monitorBusy: false,
-        rules: state.rules.map((candidate) => candidate.id === currentRule.id ? { ...candidate, enabled: onceTriggered ? false : candidate.enabled, lastTriggeredAt, lastSignalTriggered, lastSignalBySymbol: signalBySymbol } : candidate),
+        rules: state.rules.map((candidate) => candidate.id === currentRule.id ? committedRule : candidate),
         notifications: notifications.length ? [...notifications, ...state.notifications].slice(0, 500) : state.notifications,
         monitorHistory: [...histories, ...state.monitorHistory].slice(0, MAX_MONITOR_HISTORY),
       };
     });
+    try {
+      await get().persistUserState();
+    } catch {
+      // A failed save must not leave a successful-looking check or send a
+      // system notification that cannot be recovered from the canonical state.
+      set((state) => ({
+        monitorBusy: false,
+        rules: state.rules.map((candidate) => candidate.id === rule?.id && committedRule && JSON.stringify(candidate) === JSON.stringify(committedRule) ? previousRule : candidate),
+        notifications: state.notifications.filter((notification) => !createdNotificationIds.has(notification.id)),
+        monitorHistory: state.monitorHistory.filter((history) => !createdHistoryIds.has(history.id)),
+      }));
+      return false;
+    }
     for (const notification of deliveredNotifications) void sendSystemNotification(notification);
-    await get().persistUserState().catch(() => null);
     return outcomes.some((outcome) => !outcome.error);
   },
   runDueMonitorChecks: async () => {
@@ -1269,8 +1392,17 @@ export const useLabStore = create((set, get) => ({
     const now = Date.now();
     const expiredIds = state.rules.filter((rule) => rule.enabled && isMonitorRuleExpired(rule, now)).map((rule) => rule.id);
     if (expiredIds.length) {
+      const previousRules = state.rules;
       set((current) => ({ rules: current.rules.map((rule) => expiredIds.includes(rule.id) ? { ...rule, enabled: false } : rule) }));
-      await get().persistUserState().catch(() => null);
+      try {
+        await get().persistUserState();
+      } catch {
+        set((current) => ({ rules: current.rules.map((rule) => {
+          const previous = previousRules.find((candidate) => candidate.id === rule.id);
+          return previous && expiredIds.includes(rule.id) && rule.enabled === false ? previous : rule;
+        }) }));
+        return false;
+      }
       state = get();
     }
     const due = state.rules.find((rule) => {

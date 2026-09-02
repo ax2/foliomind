@@ -474,6 +474,31 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().settingsNotice).toEqual({ type: "success", text: "本地数据已保存" });
   });
 
+  it("rolls back optimistic alert mutations when the canonical save fails", async () => {
+    const rule = { id: "persist-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true };
+    useLabStore.setState({
+      rules: [rule],
+      notifications: [{ id: "persist-notification", title: "待保存消息", body: "内容", read: false }],
+    });
+    const error = new Error("disk full");
+
+    persistence.saveUserState.mockRejectedValueOnce(error);
+    await expect(useLabStore.getState().toggleRule(rule.id)).rejects.toBe(error);
+    expect(useLabStore.getState().rules[0]).toEqual(rule);
+
+    persistence.saveUserState.mockRejectedValueOnce(error);
+    await expect(useLabStore.getState().markNotificationRead("persist-notification")).rejects.toBe(error);
+    expect(useLabStore.getState().notifications[0].read).toBe(false);
+  });
+
+  it("does not send or retain event reminders that failed to persist", async () => {
+    persistence.saveUserState.mockRejectedValueOnce(new Error("Host unavailable"));
+    await expect(useLabStore.getState().notifyDueEventReminders([
+      { id: "event-1", symbol: "600519", name: "贵州茅台", date: "2099-09-08", type: "财报", title: "财报披露" },
+    ], new Date("2099-09-01T00:00:00Z"))).resolves.toBe(0);
+    expect(useLabStore.getState().notifications).toEqual([]);
+  });
+
   it("normalizes a custom watchlist group when adding a symbol", async () => {
     const saved = await useLabStore.getState().addWatchlist({ symbol: "tsla", name: "Tesla", market: "NASDAQ", group: "成长观察" });
     expect(saved).toMatchObject({ symbol: "TSLA", group: "成长观察" });
