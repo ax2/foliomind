@@ -77,6 +77,16 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(credential.payload.configured, true);
   assert.equal(credential.payload.keyPrefix, "sk_contr…");
 
+  const insecureSettings = await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { modelGatewayBaseUrl: "http://gateway.example.com/v1" } } });
+  assert.equal(insecureSettings.response.status, 400);
+  assert.match(insecureSettings.payload.error, /HTTPS/);
+  const querySettings = await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl: "https://api.example.com/v1?token=secret" } } });
+  assert.equal(querySettings.response.status, 400);
+  assert.match(querySettings.payload.error, /查询参数/);
+  const whitespaceSettings = await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { modelGatewayBaseUrl: " https://gateway.example.com/v1" } } });
+  assert.equal(whitespaceSettings.response.status, 400);
+  assert.match(whitespaceSettings.payload.error, /首尾空格/);
+
   const state = {
     revision: 0,
     watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],

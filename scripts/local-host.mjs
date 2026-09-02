@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { normalizeUserState } from "../src/lib/userStateSchema.js";
@@ -265,6 +266,40 @@ function logInvocation(event) {
 function safeSettings(settings) {
   return { capabilityBaseUrl: redact(settings?.capabilityBaseUrl || DEFAULT_CAPABILITY), modelGatewayBaseUrl: redact(settings?.modelGatewayBaseUrl || DEFAULT_GATEWAY), modelId: redact(settings?.modelId || ""), dataChannel: String(settings?.dataChannel || "qveris-cap"), dataProvider: String(settings?.dataProvider || DEFAULT_DATA_PROVIDER), modelCount: Array.isArray(settings?.models) ? settings.models.length : 0 };
 }
+export function validateEndpointUrl(value, label = "服务地址") {
+  const raw = String(value ?? "");
+  if (!raw || raw !== raw.trim()) throw new Error(`${label}无效：不能包含首尾空格`);
+  let parsed;
+  try { parsed = new URL(raw); } catch { throw new Error(`${label}无效`); }
+  if (!(["http:", "https:"].includes(parsed.protocol)) || !parsed.hostname || parsed.username || parsed.password) {
+    throw new Error(`${label}必须是不含凭据的 HTTP(S) 地址`);
+  }
+  if (parsed.search || parsed.hash) throw new Error(`${label}不能包含查询参数或片段`);
+  const hostname = parsed.hostname.toLowerCase();
+  const loopback = hostname === "localhost"
+    || (isIP(hostname) === 4 && hostname.startsWith("127."))
+    || hostname === "[::1]";
+  if (parsed.protocol !== "https:" && !loopback) throw new Error(`${label}必须使用 HTTPS；仅允许回环地址使用 HTTP`);
+  return parsed;
+}
+
+export function validateIntegrationSettings(value = {}) {
+  const settings = { ...defaultSettings, ...(value && typeof value === "object" ? value : {}) };
+  validateEndpointUrl(settings.capabilityBaseUrl, "数据能力地址");
+  validateEndpointUrl(settings.modelGatewayBaseUrl, "模型网关地址");
+  return settings;
+}
+
+function endpointInput(input, key, fallback, label) {
+  const hasValue = Object.hasOwn(input || {}, key) && input[key] !== undefined && input[key] !== null && String(input[key]) !== "";
+  const value = hasValue ? String(input[key]) : fallback;
+  // Do not silently trim a user-supplied endpoint: a pasted space should be
+  // visible as a configuration error, not turn into a different URL.
+  validateEndpointUrl(value, label);
+  return value.replace(/\/$/, "");
+}
+
+async function readSettings() { return validateIntegrationSettings(await readJson(settingsFile, defaultSettings)); }
 async function readToolCache() { return await readJson(toolCacheFile, {}); }
 async function writeToolCache(value) { await atomicJson(toolCacheFile, value); }
 async function clearToolCache() { directDataCacheGeneration += 1; directDataCache.clear(); abortInFlightRequests(directDataInFlight, "configuration-changed"); try { await unlink(toolCacheFile); } catch { /* idempotent */ } }
@@ -950,12 +985,13 @@ async function route(req, body, requestSignal) {
   if (method === "GET" && path === "/api/health") return { ok: true, service: "foliomind-dev-host", mode: "standalone" };
   if (method === "GET" && path === "/api/session") return { token, service: "foliomind-dev-host", mode: "standalone" };
   requireSession(req);
-  if (method === "GET" && path === "/api/integration/status") { const key = await readKey(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: await readJson(settingsFile, defaultSettings) }; }
+  if (method === "GET" && path === "/api/integration/status") { const key = await readKey(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: await readSettings() }; }
   if (method === "POST" && path === "/api/integration/credential") { if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) throw new Error("API Key 无效"); await saveKey(body.apiKey); await clearToolCache(); return { configured: true, keyPrefix: apiKeyPrefix(body.apiKey) }; }
   if (method === "DELETE" && path === "/api/integration/credential") { await deleteKey(); await clearToolCache(); return { configured: false, keyPrefix: "" }; }
   if (method === "POST" && path === "/api/integration/models/sync") {
     const input = body.input || {}; const key = await readKey(); if (!key) throw new Error("QVeris credential is not configured");
-    const settings = { ...(await readJson(settingsFile, defaultSettings)), capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || DEFAULT_DATA_PROVIDER) };
+    const previous = await readSettings();
+    const settings = validateIntegrationSettings({ ...previous, capabilityBaseUrl: endpointInput(input, "capabilityBaseUrl", previous.capabilityBaseUrl, "数据能力地址"), modelGatewayBaseUrl: endpointInput(input, "modelGatewayBaseUrl", previous.modelGatewayBaseUrl, "模型网关地址"), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || DEFAULT_DATA_PROVIDER) });
     const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
     try {
       settings.models = normalizeModels((await upstream(endpoint(settings.modelGatewayBaseUrl, "models"), { headers: { authorization: `Bearer ${key}` } }, scope.signal)).data);
@@ -963,19 +999,19 @@ async function route(req, body, requestSignal) {
       await atomicJson(settingsFile, settings); await clearToolCache(); return settings;
     } finally { scope.close(); }
   }
-  if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const previous = await readJson(settingsFile, defaultSettings); const settings = { ...previous, capabilityBaseUrl: String(input.capabilityBaseUrl || DEFAULT_CAPABILITY).trim().replace(/\/$/, ""), modelGatewayBaseUrl: String(input.modelGatewayBaseUrl || DEFAULT_GATEWAY).trim().replace(/\/$/, ""), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || previous.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || previous.dataProvider || DEFAULT_DATA_PROVIDER), models: Array.isArray(input.models) ? input.models : previous.models || [] }; await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
+  if (method === "POST" && path === "/api/integration/settings") { const input = body.input || {}; const previous = await readSettings(); const settings = validateIntegrationSettings({ ...previous, capabilityBaseUrl: endpointInput(input, "capabilityBaseUrl", previous.capabilityBaseUrl, "数据能力地址"), modelGatewayBaseUrl: endpointInput(input, "modelGatewayBaseUrl", previous.modelGatewayBaseUrl, "模型网关地址"), modelId: String(input.modelId || "").trim(), dataChannel: String(input.dataChannel || previous.dataChannel || "qveris-cap"), dataProvider: String(input.dataProvider || previous.dataProvider || DEFAULT_DATA_PROVIDER), models: Array.isArray(input.models) ? input.models : previous.models || [] }); await atomicJson(settingsFile, settings); await clearToolCache(); return settings; }
   if (method === "GET" && path === "/api/dev/overview") {
-    const settings = await readJson(settingsFile, defaultSettings); const key = await readKey();
+    const settings = await readSettings(); const key = await readKey();
     const cache = await readToolCache();
     return { logs: devLogs.slice(-200), costSummary: costSummary(devLogs), state: { runtimeState, activeRequest: Boolean(runtimeGate.current()), pid: process.pid, credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: safeSettings(settings), toolCache: cacheSummary(cache), capabilityCatalog: cache.__catalog || capabilityCatalog(settings), capabilityDirectory: cache.__directory || null }, variables: { ...devVariables } };
   }
   if (method === "GET" && path === "/api/dev/capabilities") {
-    const settings = await readJson(settingsFile, defaultSettings);
+    const settings = await readSettings();
     return capabilityCatalog(settings);
   }
   if (method === "POST" && path === "/api/dev/capabilities/discover") {
     const key = await readKey(); if (!key) return { available: false, errorMessage: "请先在设置中配置 API Key" };
-    const settings = await readJson(settingsFile, defaultSettings);
+    const settings = await readSettings();
     const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
     try { return await discoverCapabilityDirectory(body.input || {}, settings, key, scope.signal); }
     catch (error) {
@@ -988,7 +1024,7 @@ async function route(req, body, requestSignal) {
   }
   if (method === "POST" && path === "/api/dev/capabilities/test") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
-    const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
+    const settings = await readSettings(); const input = body.input || {};
     if (input.toolId || input.searchId) {
       const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
       try { return await testDiscoveredCapability(input, settings, key, scope.signal); }
@@ -1010,7 +1046,7 @@ async function route(req, body, requestSignal) {
   }
   if (method === "POST" && path === "/api/data/query") {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
-    const settings = await readJson(settingsFile, defaultSettings); const input = body.input || {};
+    const settings = await readSettings(); const input = body.input || {};
     const kind = String(input.kind || "");
     if (!["quote", "details", "series", "core_event", "capital_flow", "sentiment", "trading_calendar"].includes(kind) || (kind !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("数据查询参数无效");
     const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
@@ -1049,7 +1085,7 @@ async function route(req, body, requestSignal) {
     let timeout;
     try {
       const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
-      const settings = await readJson(settingsFile, defaultSettings);
+      const settings = await readSettings();
       const timeoutMs = Math.max(5_000, Math.min(180_000, Number(body.timeoutMs) || devVariables.requestTimeoutMs));
       timeout = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
       return { ...(await promptAgent(body.message.trim(), settings, key, controller.signal)), mode: "standalone-dev-host" };

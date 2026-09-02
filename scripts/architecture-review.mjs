@@ -86,6 +86,7 @@ check("成本提取可信边界", localHost.includes("function costCandidate") &
 check("启动连接状态可信化", marketStore.includes("integrationStatusLoading: true") && stockWorkspace.includes('healthState = integrationStatusLoading ? "checking"') && stockWorkspace.includes("不会使用示例行情") && prd.includes("Stage 3BQ"), "连接配置未读取完成前必须保持明确读取态，不能短暂显示预览模式或触发真实行情请求");
 check("组合表现趋势", portfolio.includes("portfolioPerformanceSeries") && marketViews.includes("portfolioPerformanceSeries") && marketViews.includes("组合表现趋势") && marketViews.includes("有效盈亏比例不足两次") && prd.includes("Stage 3BR"), "组合趋势只能由有日期和真实盈亏比例的复盘快照派生，缺少两个有效点位时保持空态");
 check("行情正数门禁一致性", quoteFormatting.includes("isValidQuotePrice") && stockWorkspace.includes("isValidQuotePrice(quote?.price)") && marketViews.includes("isValidQuotePrice(liveQuotes[item.symbol]?.price)") && prd.includes("Stage 3BS"), "所有行情展示、筛选和自动复盘入口必须只接受有限正数价格，零值和负值保持空态");
+check("Local Host 地址安全边界", localHost.includes("validateEndpointUrl") && localHost.includes("validateIntegrationSettings") && localHost.includes("仅允许回环地址使用 HTTP") && hostIntegrationTest.includes("insecureSettings") && prd.includes("Stage 3BT"), "本地 Web Host 必须拒绝不安全远程 HTTP、URL 凭据、查询参数和片段，并与桌面端保持一致");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

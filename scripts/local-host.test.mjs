@@ -1,10 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry } from "./local-host.mjs";
+import { abortInFlightRequests, adaptParameters, allDataCacheHit, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, subscribeToSharedRequest, upstreamWithRetry, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
+
+test("keeps Local Host endpoint validation aligned with the desktop security boundary", () => {
+  for (const value of ["https://api.example.com/v1", "http://localhost:43123", "http://127.0.0.1:43123", "http://127.12.0.9:43123", "http://[::1]:43123"]) {
+    assert.doesNotThrow(() => validateEndpointUrl(value));
+  }
+  for (const value of ["http://api.example.com/v1", "http://169.254.1.1/v1", "ftp://api.example.com/v1", "https://user:pass@api.example.com/v1", "https://api.example.com/v1?token=secret", " https://api.example.com/v1 "]) {
+    assert.throws(() => validateEndpointUrl(value));
+  }
+  assert.doesNotThrow(() => validateIntegrationSettings({ capabilityBaseUrl: "https://api.example.com/v1", modelGatewayBaseUrl: "https://gateway.example.com/v1" }));
+  assert.throws(() => validateIntegrationSettings({ capabilityBaseUrl: "http://api.example.com/v1" }));
 });
 
 test("extracts provider and model gateway costs without inventing missing charges", () => {
