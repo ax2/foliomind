@@ -163,3 +163,5 @@ Local Web Host 与桌面 Rust Host 共享出站地址信任边界：保存配置
 详情与图表请求遵循当前展示上下文的生命周期。切换标的或图表周期时，Local Web/桌面 Host 会收到主动取消信号，旧请求即使晚到也会被代次保护丢弃，不写入新上下文；独立实时行情、其它标的刷新和共享 CAP 等待者不会被连带取消，见 PRD Stage 3BY。
 
 设置页备份导出从当前 Skill 元数据只提取已安装的稳定 ID，再交给统一用户状态备份 schema 归一化；因此 Web、Local Host 与桌面导入导出保持一致，同时不把 Skill 内容、凭据、模型配置、CAP 缓存或运行日志带出 Host 边界。备份仍不携带 revision，导入继续使用既有 CAS 持久化路径，见 PRD Stage 3BZ。
+
+详情与图表的取消不仅终止上游 signal，也同步释放被替换请求的本地 loading/error 槽位。请求上下文分别绑定详情 symbol 与序列 symbol/range，旧请求的迟到 finally 不能清除新请求状态；因此快速切换后旧上下文可重新加载，新上下文立即获得唯一请求槽位，见 PRD Stage 3CA。

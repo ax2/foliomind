@@ -740,8 +740,37 @@ describe("lab store streaming lifecycle", () => {
     expect(signals[0]?.aborted).toBe(true);
     resolveLatest({ text: JSON.stringify({ companyDescription: "真实公司简介" }), mode: "pi-local-host", audits: [] });
     await expect(obsolete).resolves.toBe(false);
+    expect(useLabStore.getState().quoteDetailsLoading["600519"]).toBe(false);
     await expect(replacement).resolves.toBe(true);
     expect(useLabStore.getState().liveQuotes.AAPL.companyDescription).toBe("真实公司简介");
+  });
+
+  it("cancels obsolete chart ranges and releases their loading state", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      quoteDetailsLoaded: { "600519": true },
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }],
+    });
+    const signals = [];
+    let resolveLatest;
+    runtime.queryCachedData.mockImplementation((_input, options = {}) => {
+      signals.push(options.signal);
+      if (signals.length === 1) return new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" }))));
+      return new Promise((resolve) => { resolveLatest = resolve; });
+    });
+
+    const obsolete = useLabStore.getState().refreshQuoteSeries("600519", "日K");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const replacement = useLabStore.getState().refreshQuoteSeries("600519", "周K");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(signals[0]?.aborted).toBe(true);
+    expect(useLabStore.getState().quoteSeriesLoading["600519"]["日K"]).toBe(false);
+    resolveLatest({ data: { series: [{ time: "2026-08-28", close: 1297.4 }] }, mode: "pi-local-host", audits: [] });
+    await expect(obsolete).resolves.toBe(false);
+    await expect(replacement).resolves.toBe(true);
+    expect(useLabStore.getState().quoteSeriesLoaded["600519"]["周K"]).toBe(true);
   });
 
   it("hydrates detailed chart and company fields without inventing missing values", async () => {

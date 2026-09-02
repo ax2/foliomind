@@ -35,8 +35,10 @@ const selectedQuoteGenerations = new Map();
 const selectedQuoteControllers = new Map();
 let detailsRequestGeneration = 0;
 let detailsRequestController = null;
+let detailsRequestSymbol = "";
 let seriesRequestGeneration = 0;
 let seriesRequestController = null;
+let seriesRequestContext = null;
 let eventsRequestGeneration = 0;
 let eventsRequestController = null;
 const anomalyAttributionGenerations = new Map();
@@ -53,8 +55,10 @@ function abortPendingDataRequests() {
   selectedQuoteControllers.clear();
   abortController(detailsRequestController);
   detailsRequestController = null;
+  detailsRequestSymbol = "";
   abortController(seriesRequestController);
   seriesRequestController = null;
+  seriesRequestContext = null;
   abortController(eventsRequestController);
   eventsRequestController = null;
 }
@@ -752,8 +756,13 @@ export const useLabStore = create((set, get) => ({
     // Details belong to the currently selected symbol. If the user switches
     // symbols before the previous request completes, cancel the obsolete
     // upstream call instead of paying for a response that will be discarded.
+    const obsoleteSymbol = detailsRequestSymbol;
     abortController(detailsRequestController);
     detailsRequestController = null;
+    if (obsoleteSymbol && obsoleteSymbol !== symbol) {
+      set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [obsoleteSymbol]: false }, quoteDetailsError: { ...current.quoteDetailsError, [obsoleteSymbol]: "" } }));
+    }
+    detailsRequestSymbol = symbol;
     const requestGeneration = ++detailsRequestGeneration;
     const requestController = new AbortController();
     detailsRequestController = requestController;
@@ -772,7 +781,10 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: false }, quoteDetailsLoaded: { ...current.quoteDetailsLoaded, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: friendlyDataMessage(error) } }));
       return false;
     } finally {
-      if (detailsRequestController === requestController) detailsRequestController = null;
+      if (detailsRequestController === requestController) {
+        detailsRequestController = null;
+        detailsRequestSymbol = "";
+      }
     }
   },
   retryQuoteDetails: async (symbol) => {
@@ -783,13 +795,17 @@ export const useLabStore = create((set, get) => ({
     const state = get();
     const item = dataItemForSymbol(state, symbol);
     const configured = hasRealDataAccess(state.integrationStatus);
-    const seriesBusy = Object.values(state.quoteSeriesLoading[symbol] || {}).some(Boolean);
-    if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || seriesBusy || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
+    if (!configured || !item || !range || state.liveDataLoading || state.quoteDetailsLoading[symbol] || state.runtimeConfiguring || state.runtimeCancelPending || state.monitorBusy || ["running", "cancelling"].includes(state.runtimeMode) || state.quoteSeriesLoading[symbol]?.[range] || state.quoteSeriesLoaded[symbol]?.[range]) return false;
     // A range change or symbol switch makes the previous chart request
     // irrelevant. Abort it before starting the replacement to avoid wasting
     // network time and provider credits.
+    const obsoleteSeries = seriesRequestContext;
     abortController(seriesRequestController);
     seriesRequestController = null;
+    if (obsoleteSeries && (obsoleteSeries.symbol !== symbol || obsoleteSeries.range !== range)) {
+      set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [obsoleteSeries.symbol]: { ...(current.quoteSeriesLoading[obsoleteSeries.symbol] || {}), [obsoleteSeries.range]: false } }, quoteSeriesError: { ...current.quoteSeriesError, [obsoleteSeries.symbol]: { ...(current.quoteSeriesError[obsoleteSeries.symbol] || {}), [obsoleteSeries.range]: "" } } }));
+    }
+    seriesRequestContext = { symbol, range };
     const requestGeneration = ++seriesRequestGeneration;
     const requestController = new AbortController();
     seriesRequestController = requestController;
@@ -807,7 +823,10 @@ export const useLabStore = create((set, get) => ({
       set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: friendlyDataMessage(error) } } }));
       return false;
     } finally {
-      if (seriesRequestController === requestController) seriesRequestController = null;
+      if (seriesRequestController === requestController) {
+        seriesRequestController = null;
+        seriesRequestContext = null;
+      }
     }
   },
   retryQuoteSeries: async (symbol, range) => {
