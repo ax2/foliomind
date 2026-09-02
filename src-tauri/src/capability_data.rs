@@ -98,9 +98,18 @@ fn payload(value: &Value) -> Value {
 
 fn cost(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
+    let unit = || {
+        object
+            .get("currency")
+            .or_else(|| object.get("unit"))
+            .or_else(|| object.get("cost_unit"))
+            .and_then(Value::as_str)
+            .unwrap_or("credits")
+    };
     for key in [
         "qveris_cost",
         "qverisCost",
+        "cost",
         "charged_credits",
         "credits_used",
         "fee",
@@ -115,8 +124,25 @@ fn cost(value: &Value) -> Option<Value> {
             if amount.is_finite() && amount >= 0.0 {
                 return Some(json!({
                     "amount": amount,
-                    "unit": object.get("currency").or_else(|| object.get("unit")).and_then(Value::as_str).unwrap_or("credits"),
+                    "unit": unit(),
                 }));
+            }
+        }
+        if let Some(candidate) = candidate.as_object() {
+            let amount = candidate
+                .get("amount")
+                .or_else(|| candidate.get("value"))
+                .or_else(|| candidate.get("credits"))
+                .or_else(|| candidate.get("chargedCredits"))
+                .and_then(numeric_value);
+            if let Some(amount) = amount.filter(|item| item.is_finite() && *item >= 0.0) {
+                let candidate_unit = candidate
+                    .get("currency")
+                    .or_else(|| candidate.get("unit"))
+                    .or_else(|| candidate.get("cost_unit"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(unit);
+                return Some(json!({"amount": amount, "unit": candidate_unit}));
             }
         }
     }
@@ -340,5 +366,17 @@ mod tests {
             range: None,
         };
         assert!(parameters(&input, "quote").is_err());
+    }
+
+    #[test]
+    fn extracts_explicit_structured_cost_only() {
+        assert_eq!(
+            cost(&json!({"result": {"cost": {"value": "0.2", "cost_unit": "credits"}}})),
+            Some(json!({"amount": 0.2, "unit": "credits"}))
+        );
+        assert_eq!(
+            cost(&json!({"data": {"amount": 99.0, "price": 12.3}})),
+            None
+        );
     }
 }

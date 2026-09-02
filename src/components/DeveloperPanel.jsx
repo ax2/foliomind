@@ -60,9 +60,10 @@ export function desktopCostSummary(logs) {
   const entries = Array.isArray(logs) ? logs : [];
   const summarize = (kind) => {
     const selected = entries.filter((entry) => entry.kind === kind || entry.type === kind);
-    const costs = selected.map((entry) => normalizeCost(entry.cost ?? entry.response?.cost, entry.costUnit ?? entry.cost_unit)).filter(Boolean);
+    const upstreamCalls = selected.filter((entry) => entry.cacheHit !== true);
+    const costs = upstreamCalls.map((entry) => normalizeCost(entry.cost ?? entry.response?.cost, entry.costUnit ?? entry.cost_unit)).filter(Boolean);
     const units = [...new Set(costs.map((cost) => cost.unit))];
-    return { calls: selected.length, cost: costs.reduce((total, cost) => total + cost.amount, 0), costKnown: costs.length, units };
+    return { calls: upstreamCalls.length, cost: costs.reduce((total, cost) => total + cost.amount, 0), costKnown: costs.length, units };
   };
   const cap = summarize("qveris");
   const model = summarize("model");

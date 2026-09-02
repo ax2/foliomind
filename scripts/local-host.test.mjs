@@ -11,7 +11,11 @@ test("extracts provider and model gateway costs without inventing missing charge
   assert.deepEqual(costFrom({ qveris_cost: 0.012, currency: "credits" }), { amount: 0.012, unit: "credits" });
   assert.deepEqual(costFrom({ usage: { cost: { amount: "0.4", unit: "USD" } } }), { amount: 0.4, unit: "USD" });
   assert.equal(costFrom({ usage: { prompt_tokens: 10 } }), null);
+  assert.equal(costFrom({ data: { amount: 999, price: 12.3 } }), null);
+  assert.equal(costFrom({ data: [12.3, 11.8] }), null);
+  assert.deepEqual(costFrom({ result: { cost: { value: "0.2", cost_unit: "credits" } } }), { amount: 0.2, unit: "credits" });
   assert.deepEqual(costSummary([{ type: "qveris", cost: { amount: 0.1, unit: "credits" } }, { type: "cap", cost: { amount: 0.05, unit: "credits" } }, { type: "model", cost: { amount: 0.2, unit: "usd" } }, { type: "model" }]), { qverisCalls: 2, qverisCost: 0.15, qverisCostKnown: 2, modelCalls: 2, modelCost: 0.2, modelCostKnown: 1, units: ["credits", "usd"], qverisUnits: ["credits"], modelUnits: ["usd"] });
+  assert.deepEqual(costSummary([{ type: "cap", cacheHit: true }, { type: "cap", cacheHit: false, cost: { amount: 0.1, unit: "credits" } }]), { qverisCalls: 1, qverisCost: 0.1, qverisCostKnown: 1, modelCalls: 0, modelCost: 0, modelCostKnown: 0, units: ["credits"], qverisUnits: ["credits"], modelUnits: [] });
 });
 
 test("keeps the qveris_finance CAP contract local and normalizes real envelopes", () => {

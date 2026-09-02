@@ -1050,10 +1050,7 @@ fn redact(value: &str) -> String {
 }
 
 fn extract_cost(value: &Value) -> Option<f64> {
-    fn walk(value: &Value, depth: usize) -> Option<f64> {
-        if depth > 4 {
-            return None;
-        }
+    fn candidate(value: &Value) -> Option<f64> {
         match value {
             Value::Number(number) => number
                 .as_f64()
@@ -1062,26 +1059,32 @@ fn extract_cost(value: &Value) -> Option<f64> {
                 .parse::<f64>()
                 .ok()
                 .filter(|value| value.is_finite() && *value >= 0.0),
-            Value::Array(items) => items.iter().find_map(|item| walk(item, depth + 1)),
-            Value::Object(map) => {
-                for key in [
-                    "qveris_cost",
-                    "qverisCost",
-                    "cost",
-                    "charged_credits",
-                    "credits_used",
-                    "fee",
-                ] {
-                    if let Some(found) = map.get(key).and_then(|item| walk(item, depth + 1)) {
-                        return Some(found);
-                    }
-                }
-                ["usage", "billing", "meta", "metadata", "result"]
-                    .iter()
-                    .find_map(|key| map.get(*key).and_then(|item| walk(item, depth + 1)))
-            }
-            Value::Null | Value::Bool(_) => None,
+            Value::Object(map) => ["amount", "value", "credits", "chargedCredits"]
+                .iter()
+                .find_map(|key| map.get(*key).and_then(candidate)),
+            Value::Array(_) | Value::Null | Value::Bool(_) => None,
         }
+    }
+    fn walk(value: &Value, depth: usize) -> Option<f64> {
+        if depth > 4 {
+            return None;
+        }
+        let map = value.as_object()?;
+        for key in [
+            "qveris_cost",
+            "qverisCost",
+            "cost",
+            "charged_credits",
+            "credits_used",
+            "fee",
+        ] {
+            if let Some(found) = map.get(key).and_then(candidate) {
+                return Some(found);
+            }
+        }
+        ["usage", "billing", "meta", "metadata", "result", "data"]
+            .iter()
+            .find_map(|key| map.get(*key).and_then(|item| walk(item, depth + 1)))
     }
     walk(value, 0)
 }
@@ -1459,6 +1462,17 @@ mod tests {
         assert!(is_event_stream("Text/Event-Stream; charset=utf-8"));
         assert!(!is_event_stream("application/json"));
         assert!(!is_event_stream("text/event-streaming"));
+    }
+    #[test]
+    fn extracts_explicit_cost_without_business_amounts() {
+        assert_eq!(
+            extract_cost(&json!({"result": {"cost": {"credits": "0.2"}}})),
+            Some(0.2)
+        );
+        assert_eq!(
+            extract_cost(&json!({"data": {"amount": 99.0, "price": 12.3}})),
+            None
+        );
     }
     #[test]
     fn streams_and_flushes_with_a_hard_size_limit() {

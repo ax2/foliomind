@@ -205,23 +205,35 @@ function debugPayload(value, max = 3_000) {
     return redact(encoded, max);
   } catch { return redact(value).slice(0, max); }
 }
-export function costFrom(value, depth = 0) {
-  if (depth > 4 || value == null) return null;
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return { amount: value, unit: "credits" };
-  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)) && Number(value) >= 0) return { amount: Number(value), unit: "credits" };
-  if (Array.isArray(value)) { for (const item of value) { const found = costFrom(item, depth + 1); if (found) return found; } return null; }
-  if (typeof value !== "object") return null;
-  const keys = ["qveris_cost", "qverisCost", "cost", "charged_credits", "credits_used", "fee", "amount"];
-  for (const key of keys) {
-    const candidate = value[key];
-    if (candidate && typeof candidate === "object") {
-      const nested = costFrom(candidate, depth + 1);
-      if (nested) return { ...nested, unit: String(candidate.currency || candidate.unit || candidate.cost_unit || nested.unit) };
-    }
-    const numeric = Number(candidate);
-    if (candidate != null && Number.isFinite(numeric) && numeric >= 0) return { amount: numeric, unit: String(value.currency || value.unit || value.cost_unit || "credits") };
+function costCandidate(value, unitHint = "credits") {
+  if (value == null || Array.isArray(value)) return null;
+  if (typeof value === "number" || typeof value === "string") {
+    const amount = Number(value);
+    return Number.isFinite(amount) && amount >= 0 ? { amount, unit: unitHint } : null;
   }
-  for (const key of ["usage", "billing", "meta", "metadata", "result", "data"]) { const found = costFrom(value[key], depth + 1); if (found) return found; }
+  if (typeof value !== "object") return null;
+  const rawAmount = value.amount ?? value.value ?? value.cost ?? value.credits ?? value.chargedCredits;
+  const amount = Number(rawAmount);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  return { amount, unit: String(value.currency || value.unit || value.costUnit || value.cost_unit || unitHint) };
+}
+
+/**
+ * Extract only explicit billing fields. Never treat arbitrary response fields
+ * such as a transaction `amount` or a numeric series value as a charge.
+ */
+export function costFrom(value, depth = 0) {
+  if (depth > 4 || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  const unitHint = String(value.currency || value.unit || value.costUnit || value.cost_unit || "credits");
+  const keys = ["qveris_cost", "qverisCost", "cost", "charged_credits", "credits_used", "fee"];
+  for (const key of keys) {
+    const found = costCandidate(value[key], unitHint);
+    if (found) return found;
+  }
+  for (const key of ["usage", "billing", "meta", "metadata", "result", "data"]) {
+    const found = costFrom(value[key], depth + 1);
+    if (found) return found;
+  }
   return null;
 }
 export function costSummary(logs) {
@@ -231,7 +243,11 @@ export function costSummary(logs) {
     // Direct CAP calls are the fast-path QVeris provider calls and must be
     // included alongside the older search/inspect/call audit events.
     const isQveris = entry.type === "qveris" || entry.type === "cap";
-    if (isModel) summary.modelCalls += 1; else if (isQveris) summary.qverisCalls += 1;
+    // Cache reuse is visible in the log but is not an upstream provider call
+    // and must not inflate the cost-call denominator.
+    if (!entry.cacheHit && isModel) summary.modelCalls += 1;
+    else if (!entry.cacheHit && isQveris) summary.qverisCalls += 1;
+    if (entry.cacheHit === true) continue;
     const amount = Number(entry.cost?.amount);
     if (!Number.isFinite(amount)) continue;
     const unit = String(entry.cost.unit || "credits");
