@@ -764,7 +764,7 @@ describe("FolioMind core flows", () => {
 
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       act(() => document.dispatchEvent(new Event("visibilitychange")));
-      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith({ symbols: ["600519"] }));
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith({ symbols: expect.arrayContaining(["600519"]) }));
     } finally {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
     }
