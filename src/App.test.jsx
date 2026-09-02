@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
-import { EventsView, MarketView, NotificationsView, PortfolioView, ResearchView, installedSkillIdsForBackup } from "./components/SecondaryViews.jsx";
+import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, installedSkillIdsForBackup } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
@@ -465,7 +465,7 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("heading", { name: "组合风险" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "宏观日历" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "搜索 Skills" }), { target: { value: "不存在的能力" } });
-    expect(screen.getByRole("status")).toHaveTextContent("没有匹配");
+    expect(screen.getAllByRole("status").find((element) => element.textContent.includes("没有匹配"))).toBeTruthy();
   });
 
   it("creates and toggles a monitor rule", () => {
@@ -486,6 +486,31 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));
     await waitFor(() => expect(useLabStore.getState().rules.some((rule) => rule.scope === "watchlist" && rule.symbol === "*")).toBe(true));
     expect(screen.getByText(/整个自选（动态）/)).toBeInTheDocument();
+  });
+
+  it("searches, filters, sorts, and edits an existing monitor rule", async () => {
+    useLabStore.setState({
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }, { symbol: "AAPL", name: "Apple", market: "NASDAQ" }],
+      rules: [
+        { id: "rule-edit", symbol: "600519", strategyId: "price_change", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }], logic: "AND", intervalSeconds: 300, enabled: true, lastCheckedAt: "2026-08-31T08:00:00Z", lastSignalTriggered: true },
+        { id: "rule-paused", symbol: "AAPL", strategyId: "volume_spike", conditions: [{ type: "volume_spike", operator: "gte", value: 2 }], logic: "AND", intervalSeconds: 600, enabled: false },
+      ],
+    });
+    render(<MonitorView />);
+    expect(screen.getByText((content) => content.includes("显示") && content.includes("2/2 条"))).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "盯盘规则状态" }), { target: { value: "disabled" } });
+    expect(screen.getByText((content) => content.includes("显示") && content.includes("1/2 条"))).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "盯盘规则排序" }), { target: { value: "name" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "盯盘规则状态" }), { target: { value: "all" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索盯盘规则" }), { target: { value: "不存在" } });
+    expect(screen.getAllByRole("status").find((element) => element.textContent.includes("没有匹配"))).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索盯盘规则" }), { target: { value: "600519" } });
+    fireEvent.click(screen.getByRole("button", { name: /编辑/ }));
+    expect(screen.getByRole("heading", { name: "编辑盯盘条件" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "条件1数值" }), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(useLabStore.getState().rules[0]).toMatchObject({ intervalSeconds: 300, lastSignalTriggered: null, lastCheckedAt: null, conditions: [{ value: 5 }] }));
   });
 
   it("builds an OR rule from multiple real-data conditions", async () => {

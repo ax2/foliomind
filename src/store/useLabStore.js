@@ -75,7 +75,11 @@ function persistenceState(snapshot) {
 const samePersistenceState = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 function persistSnapshot(snapshot) {
   persistenceQueue = persistenceQueue.catch(() => {}).then(async () => {
-    const local = persistenceState(snapshot);
+    // Read at execution time instead of persisting the caller's stale snapshot.
+    // Background refreshes can enqueue a save immediately before a user action
+    // (for example installing a skill); writing that captured snapshot later
+    // would otherwise overwrite the newer action in the Host state file.
+    const local = persistenceState(useLabStore.getState());
     const candidate = lastPersistedState && lastLocalSnapshot ? mergeUserStateChanges(lastLocalSnapshot, local, lastPersistedState) : local;
     try {
       const saved = await saveUserState(candidate, { baseState: lastPersistedState || candidate });
@@ -1152,6 +1156,31 @@ export const useLabStore = create((set, get) => ({
   },
   toggleRule: (id) => { set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? { ...rule, enabled: !rule.enabled } : rule) })); void get().persistUserState().catch(() => {}); },
   addRule: async (input = {}) => { const strategy = strategyFor(input.strategyId); const rule = normalizeRule({ ...input, id: createId("rule"), symbol: String(input.symbol || get().selectedSymbol || "600519"), strategyId: strategy.id }); set((state) => ({ rules: [...state.rules, rule] })); await get().persistUserState(); return rule; },
+  updateRule: async (id, input = {}) => {
+    const currentRules = get().rules;
+    const previous = currentRules.find((rule) => rule.id === id);
+    if (!previous) throw new Error("找不到要编辑的盯盘规则");
+    const strategy = strategyFor(input.strategyId || previous.strategyId);
+    const next = normalizeRule({ ...previous, ...input, id, strategyId: strategy.id });
+    // Editing a condition invalidates the previous edge state. Keep the
+    // timeline for audit, but require one fresh real-data evaluation before a
+    // notification can fire again.
+    const resetSignal = {
+      ...next,
+      lastCheckedAt: null,
+      lastTriggeredAt: null,
+      lastSignalTriggered: null,
+      lastSignalBySymbol: {},
+    };
+    set((state) => ({ rules: state.rules.map((rule) => rule.id === id ? resetSignal : rule) }));
+    try {
+      await get().persistUserState();
+      return resetSignal;
+    } catch (error) {
+      set({ rules: currentRules });
+      throw error;
+    }
+  },
   deleteRule: async (id) => { set((state) => ({ rules: state.rules.filter((rule) => rule.id !== id) })); await get().persistUserState(); },
   addNotification: (notification) => { set((state) => ({ notifications: [{ ...notification, id: notification.id || createId("notification"), createdAt: notification.createdAt || nowIso(), read: false }, ...state.notifications].slice(0, 500) })); void get().persistUserState().catch(() => {}); },
   markNotificationRead: (id) => { set((state) => ({ notifications: state.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); void get().persistUserState().catch(() => {}); },

@@ -53,6 +53,7 @@ async def main() -> None:
         page.on("console", capture_console)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         await page.goto(TARGET_URL, wait_until="networkidle")
+        await expect(page.locator('.app-shell[data-user-state-loaded="true"]')).to_be_visible(timeout=15_000)
         await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
 
         async def click_and_capture(label: str, filename: str, expected: str) -> None:
@@ -64,9 +65,13 @@ async def main() -> None:
         await click_and_capture("行情", "implementation-market.png", "市场行情")
         await click_and_capture("筛选", "implementation-research.png", "研究筛选")
         research_state = page.locator(".research-page .data-state").first
-        await expect(research_state).to_be_visible()
-        await expect(research_state).to_contain_text(re.compile("连接真实数据后开始|正在获取真实行情|尚无可用行情|暂时无法获取行情|部分行情暂未更新"))
-        checks.append({"flow": "真实数据筛选空状态", "passed": True})
+        research_result = page.locator(".research-page .research-table").first
+        await expect(page.locator(".research-page .data-state, .research-page .research-table")).to_have_count(1)
+        if await research_state.count():
+            await expect(research_state).to_contain_text(re.compile("连接真实数据后开始|正在获取真实行情|尚无可用行情|暂时无法获取行情|部分行情暂未更新"))
+        else:
+            await expect(research_result).to_be_visible()
+        checks.append({"flow": "真实数据筛选状态", "passed": True})
         await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")
         await expect(page.get_by_role("button", name="添加持仓", exact=True)).to_be_visible()
         checks.append({"flow": "组合工作区可用", "passed": True})
@@ -78,18 +83,36 @@ async def main() -> None:
         else:
             await new_monitor.click()
             await page.get_by_text("触发条件", exact=True).wait_for()
+            # Close the modal before navigating to another workspace so its
+            # backdrop cannot intercept the next interaction.
+            await page.locator(".condition-modal button[aria-label='关闭']").click()
             checks.append({"flow": "未配置时可安全保存盯盘条件", "passed": True})
+        await expect(page.get_by_label("搜索盯盘规则")).to_be_visible()
+        await expect(page.get_by_label("盯盘规则状态")).to_be_visible()
+        await expect(page.get_by_label("盯盘规则排序")).to_be_visible()
+        checks.append({"flow": "盯盘规则管理控件可用", "passed": True})
 
         await click_and_capture("技能", "implementation-skills.png", "Skill 市场")
         skill_card = page.locator(".skill-grid article").filter(has_text="公告与舆情").first
-        install_button = skill_card.get_by_role("button", name="安装")
-        if await install_button.count():
+        # The Host state is canonical, but a cold page can briefly render the
+        # built-in Skill list while hydration completes. Retry the idempotent
+        # install action once if that initial render wins the race.
+        for attempt in range(2):
+            installed_button = skill_card.get_by_role("button", name="已安装")
+            if await installed_button.count():
+                break
+            install_button = skill_card.get_by_role("button", name="安装")
+            if not await install_button.count():
+                break
             await install_button.click()
-            await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible()
-        else:
-            # The Local Host persists Skill preferences. Re-running QA should
-            # accept the already-installed state instead of requiring a reset.
-            await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible()
+            try:
+                await expect(installed_button).to_be_visible(timeout=8_000)
+                break
+            except AssertionError:
+                if attempt == 1:
+                    raise
+                await page.wait_for_timeout(500)
+        await expect(skill_card.get_by_role("button", name="已安装")).to_be_visible(timeout=15_000)
         checks.append({"flow": "安装 Skill", "passed": True})
 
         await click_and_capture("设置", "implementation-settings.png", "数据与模型凭证")

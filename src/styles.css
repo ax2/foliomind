@@ -1565,9 +1565,15 @@ textarea:focus-visible {
 .monitor-outcome.not_triggered { background: #eaf7ef; color: #35734c; }
 .monitor-outcome.error { background: #fff0f0; color: #b54b4b; }
 .monitor-history-empty { display: block; margin-top: 6px; }
-.rule-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px 4px; }
+.rule-list-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 16px 4px; }
+.rule-list-heading > div:first-child { display: grid; gap: 4px; min-width: 0; }
 .rule-list-heading h2 { margin: 0; }
 .rule-list-heading small, .rule-empty { color: var(--muted); font-size: 10px; }
+.rule-list-controls { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.rule-list-controls > label:not(.search-box) { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.rule-list-controls select { height: 31px; min-width: 86px; border: 1px solid #dfe5ee; border-radius: 6px; padding: 0 7px; background: #fff; color: #26384e; font-size: 10px; }
+.rule-list-controls .search-box { min-width: min(240px, 100%); }
+.rule-list-controls .search-box input { font-size: 11px; }
 .rule-empty { margin: 0; padding: 18px 16px 22px; }
 .toggle {
   border: 0;
@@ -1635,6 +1641,7 @@ textarea:focus-visible {
 .strategy-strip span { border: 1px solid #dce8fb; border-radius: 999px; padding: 5px 9px; background: #f6f9ff; color: #3573bf; }
 .rule-run, .icon-button { border: 0; background: transparent; color: #697586; cursor: pointer; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; }
 .rule-run:hover, .icon-button:hover { background: #f0f2f5; color: var(--blue); }
+.rule-edit { width: auto; min-width: 34px; padding: 0 5px; font-size: 10px; }
 .rule-run:disabled { opacity: .45; cursor: not-allowed; }
 .secondary-button { border: 1px solid #d9dde4; border-radius: 7px; padding: 8px 11px; background: #fff; color: #59616d; cursor: pointer; font-size: 11px; }
 .secondary-button:disabled { opacity: .45; cursor: not-allowed; }
@@ -2001,6 +2008,9 @@ textarea:focus-visible {
     overflow-x: auto;
   }
   .risk-metrics { grid-template-columns: 1fr; }
+  .rule-list-heading { align-items: stretch; flex-direction: column; }
+  .rule-list-controls { justify-content: flex-start; }
+  .rule-list-controls .search-box { flex: 1 1 100%; }
   .table-head,
   .table-row {
     min-width: 700px;

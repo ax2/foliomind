@@ -117,7 +117,7 @@ export function App() {
     return <><WatchlistSidebar /><StockWorkspace /><CopilotPanel /></>;
   };
   const showGlobalNotice = settingsNotice && activeView !== "settings";
-  return <AppErrorBoundary><div className={`app-shell view-${activeView}`}>
+  return <AppErrorBoundary><div className={`app-shell view-${activeView}`} data-user-state-loaded={userStateLoaded ? "true" : "false"}>
     <ActivityRail />
     {userStateError && <div className="global-notice error" role="alert" aria-live="assertive"><span>{userStateLoading ? "正在重新读取本地数据…" : userStateError}</span><button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取本地数据"}</button></div>}
     {showGlobalNotice && <div className={`global-notice ${settingsNotice.type === "error" ? "error" : "success"}`} role={settingsNotice.type === "error" ? "alert" : "status"} aria-live={settingsNotice.type === "error" ? "assertive" : "polite"}><span>{settingsNotice.text}</span>{settingsNotice.action === "retry" && <button disabled={persistenceRetrying} onClick={() => { void retryPersistedUserState(); }}>{persistenceRetrying ? "保存中…" : "重试保存"}</button>}{settingsNotice.action === "reload" && <button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取"}</button>}<button onClick={clearSettingsNotice} aria-label="关闭通知">关闭</button></div>}

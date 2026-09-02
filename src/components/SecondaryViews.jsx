@@ -15,7 +15,7 @@ import { useLabStore } from "../store/useLabStore.js";
 import { buildMonthGrid, eventDateKey, eventsByDate, monthCursorFromKey, monthKey, monthLabel, shiftMonth } from "../lib/eventCalendar.js";
 import { CopilotPanel } from "./CopilotPanel.jsx";
 import { DataState } from "./DataState.jsx";
-import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
+import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, conditionsForRule, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { anomalyLabel, detectMarketAnomalies } from "../lib/anomalyDetection.js";
 import { nextBriefingLabel } from "../lib/briefingSchedule.js";
 import { loadDesktopLifecycleStatus, reconcileDesktopNow } from "../lib/desktopLifecycle.js";
@@ -452,6 +452,7 @@ export function MonitorView() {
   const watchlist = useLabStore((state) => state.watchlist);
   const toggleRule = useLabStore((state) => state.toggleRule);
   const addRule = useLabStore((state) => state.addRule);
+  const updateRule = useLabStore((state) => state.updateRule);
   const deleteRule = useLabStore((state) => state.deleteRule);
   const runMonitorCheck = useLabStore((state) => state.runMonitorCheck);
   const monitorBusy = useLabStore((state) => state.monitorBusy);
@@ -459,31 +460,75 @@ export function MonitorView() {
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
   const [actionError, setActionError] = useState("");
+  const [ruleQuery, setRuleQuery] = useState("");
+  const [ruleFilter, setRuleFilter] = useState("all");
+  const [ruleSort, setRuleSort] = useState("recent");
   const [form, setForm] = useState(() => ({ scope: "symbol", symbol: watchlist[0]?.symbol || "600519", conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300 }));
   useEffect(() => { if (form.scope === "symbol" && !watchlist.some((item) => item.symbol === form.symbol) && watchlist[0]) setForm((value) => ({ ...value, symbol: watchlist[0].symbol })); }, [watchlist, form.scope, form.symbol]);
   const selectedStrategy = strategyFor(conditionTypeFor(form.conditions[0]?.type).strategyId);
-  const createRule = async (event) => { event.preventDefault(); setActionError(""); try { await addRule({ scope: form.scope, symbol: form.scope === "watchlist" ? "*" : form.symbol, strategyId: selectedStrategy.id, conditions: normalizeConditions(form.conditions, selectedStrategy.id), logic: form.logic, threshold: Number(form.conditions[0]?.value) || selectedStrategy.defaultThreshold, intervalSeconds: Number(form.intervalSeconds) }); setDialogOpen(false); } catch (cause) { setActionError(errorMessage(cause)); } };
+  const openCreate = () => {
+    setEditingRule(null);
+    setForm({ scope: "symbol", symbol: watchlist[0]?.symbol || "600519", conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300 });
+    setActionError("");
+    setDialogOpen(true);
+  };
+  const openEdit = (rule) => {
+    setEditingRule(rule);
+    setForm({ scope: rule.scope === "watchlist" ? "watchlist" : "symbol", symbol: rule.symbol === "*" ? watchlist[0]?.symbol || "600519" : rule.symbol, conditions: conditionsForRule(rule), logic: rule.logic === "OR" ? "OR" : "AND", intervalSeconds: rule.intervalSeconds || 300 });
+    setActionError("");
+    setDialogOpen(true);
+  };
+  const saveRule = async (event) => {
+    event.preventDefault();
+    setActionError("");
+    const payload = { scope: form.scope, symbol: form.scope === "watchlist" ? "*" : form.symbol, strategyId: selectedStrategy.id, conditions: normalizeConditions(form.conditions, selectedStrategy.id), logic: form.logic, threshold: Number(form.conditions[0]?.value) || selectedStrategy.defaultThreshold, intervalSeconds: Number(form.intervalSeconds) };
+    try {
+      if (editingRule) await updateRule(editingRule.id, payload);
+      else await addRule(payload);
+      setDialogOpen(false);
+      setEditingRule(null);
+    } catch (cause) { setActionError(errorMessage(cause)); }
+  };
   const removeRule = (id) => { setActionError(""); void deleteRule(id).catch((cause) => setActionError(errorMessage(cause))); };
   const updateCondition = (index, next) => setForm((value) => ({ ...value, conditions: value.conditions.map((condition, position) => position === index ? next : condition) }));
   const removeCondition = (index) => setForm((value) => ({ ...value, conditions: value.conditions.filter((_, position) => position !== index) }));
   const addCondition = () => setForm((value) => ({ ...value, conditions: [...value.conditions, defaultConditionFor("price_change")] }));
   const applyTemplate = (template) => setForm((value) => ({ ...value, conditions: normalizeConditions(template.conditions), logic: template.logic, intervalSeconds: template.intervalSeconds }));
+  const normalizedRuleQuery = ruleQuery.trim().toLocaleLowerCase("zh-CN");
+  const visibleRules = useMemo(() => {
+    const filtered = rules.filter((rule) => {
+      const statusMatch = ruleFilter === "all" || (ruleFilter === "enabled" ? rule.enabled : !rule.enabled);
+      if (!statusMatch) return false;
+      if (!normalizedRuleQuery) return true;
+      const strategy = strategyFor(rule.strategyId);
+      const haystack = `${ruleConditionSummary(rule)} ${rule.symbol === "*" ? "整个自选" : rule.symbol} ${strategy.name}`.toLocaleLowerCase("zh-CN");
+      return haystack.includes(normalizedRuleQuery);
+    });
+    return [...filtered].sort((left, right) => {
+      if (ruleSort === "name") return ruleConditionSummary(left).localeCompare(ruleConditionSummary(right), "zh-CN");
+      if (ruleSort === "status") return Number(right.enabled) - Number(left.enabled) || ruleConditionSummary(left).localeCompare(ruleConditionSummary(right), "zh-CN");
+      const leftTime = Date.parse(left.lastTriggeredAt || left.lastCheckedAt || "") || 0;
+      const rightTime = Date.parse(right.lastTriggeredAt || right.lastCheckedAt || "") || 0;
+      return rightTime - leftTime;
+    });
+  }, [normalizedRuleQuery, ruleFilter, ruleSort, rules]);
   return <div className="secondary-page monitor-page">
-    <header><div><h1>个股盯盘</h1><p>用条件组合监控真实市场数据，并在触发边沿提醒</p></div><button className="primary-action" onClick={() => setDialogOpen(true)}><Plus size={17} />新建盯盘</button></header>
+    <header><div><h1>个股盯盘</h1><p>用条件组合监控真实市场数据，并在触发边沿提醒</p></div><button className="primary-action" onClick={openCreate}><Plus size={17} />新建盯盘</button></header>
     {!realDataMode ? <LiveDataState compact state={DATA_STATES.NO_CREDENTIAL} totalCount={watchlist.length} onSettings={() => setActiveView("settings")} /> : null}
     <section className="strategy-strip"><strong>条件类型</strong>{CONDITION_TYPES.map((type) => <span key={type.id} title={type.description}>{type.name}</span>)}</section>
     <section className="rule-list">
-      <div className="rule-list-heading"><h2>运行中的规则</h2><small>{rules.length} 条 · 每条规则独立检查，重复触发自动去重</small></div>
-      {rules.length === 0 ? <p className="rule-empty">还没有规则；创建第一条条件后，运行状态和触发记录会显示在这里。</p> : rules.map((rule) => {
+      <div className="rule-list-heading"><div><h2>盯盘规则</h2><small>显示 {visibleRules.length}/{rules.length} 条 · 每条规则独立检查，重复触发自动去重</small></div><div className="rule-list-controls"><label className="search-box"><MagnifyingGlass size={16} /><input value={ruleQuery} onChange={(event) => setRuleQuery(event.target.value)} placeholder="搜索规则、标的或条件…" aria-label="搜索盯盘规则" /></label><label><span>状态</span><select aria-label="盯盘规则状态" value={ruleFilter} onChange={(event) => setRuleFilter(event.target.value)}><option value="all">全部</option><option value="enabled">运行中</option><option value="disabled">已停用</option></select></label><label><span>排序</span><select aria-label="盯盘规则排序" value={ruleSort} onChange={(event) => setRuleSort(event.target.value)}><option value="recent">最近活动</option><option value="name">条件名称</option><option value="status">运行状态</option></select></label></div></div>
+      {rules.length === 0 ? <p className="rule-empty">还没有规则；创建第一条条件后，运行状态和触发记录会显示在这里。</p> : visibleRules.length === 0 ? <p className="rule-empty" role="status">没有匹配的盯盘规则，请调整搜索或筛选条件。</p> : visibleRules.map((rule) => {
         const strategy = strategyFor(rule.strategyId);
         const history = monitorHistory.filter((entry) => entry.ruleId === rule.id).slice(0, 8);
-        return <article key={rule.id}><Bell size={20} /><div><strong>{ruleConditionSummary(rule)}</strong><small>{rule.scope === "watchlist" ? "整个自选（动态）" : rule.symbol} · {rule.logic === "OR" ? "任一条件" : "全部条件"} · 每 {rule.intervalSeconds >= 60 ? `${Math.round(rule.intervalSeconds / 60)} 分钟` : `${rule.intervalSeconds} 秒`} 检查</small><small>{rule.lastTriggeredAt ? `最近触发 ${new Date(rule.lastTriggeredAt).toLocaleString("zh-CN")}` : rule.lastCheckedAt ? `最近检查 ${new Date(rule.lastCheckedAt).toLocaleString("zh-CN")}` : "尚未检查"} · {strategy.name}{rule.scope === "watchlist" && rule.lastSignalBySymbol ? ` · 已跟踪 ${Object.keys(rule.lastSignalBySymbol).length} 个标的` : ""}</small>{history.length > 0 ? <details className="monitor-history"><summary>查看最近 {history.length} 次检查</summary><div className="monitor-history-list">{history.map((entry) => <div className="monitor-history-entry" key={entry.id}><span className={`monitor-outcome ${entry.outcome}`} aria-label={entry.outcome === "triggered" ? "已触发" : entry.outcome === "not_triggered" ? "未触发" : entry.outcome === "error" ? "检查失败" : "待核实"}>{entry.outcome === "triggered" ? "触发" : entry.outcome === "not_triggered" ? "未触发" : entry.outcome === "error" ? "失败" : "待核实"}</span><div><strong>{entry.symbol ? `${entry.symbol} · ` : ""}{new Date(entry.checkedAt).toLocaleString("zh-CN")}</strong><small>{entry.summary}</small><small>{entry.asOf ? `数据截至 ${entry.asOf}` : "数据截至时间未返回"} · {entry.source === "data-service" ? "真实数据服务" : "浏览器预览"}{entry.audits?.length ? ` · ${entry.audits.length} 条审计` : ""}</small></div></div>)}</div></details> : <small className="monitor-history-empty">暂无检查记录；运行一次后会保留结果与数据来源。</small>}</div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id).catch((cause) => setActionError(errorMessage(cause))); }} aria-label={`立即检查${rule.scope === "watchlist" ? "整个自选" : rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => removeRule(rule.id)}><Trash size={15} /></button></article>;
+        return <article key={rule.id}><Bell size={20} /><div><strong>{ruleConditionSummary(rule)}</strong><small>{rule.scope === "watchlist" ? "整个自选（动态）" : rule.symbol} · {rule.logic === "OR" ? "任一条件" : "全部条件"} · 每 {rule.intervalSeconds >= 60 ? `${Math.round(rule.intervalSeconds / 60)} 分钟` : `${rule.intervalSeconds} 秒`} 检查</small><small>{rule.lastTriggeredAt ? `最近触发 ${new Date(rule.lastTriggeredAt).toLocaleString("zh-CN")}` : rule.lastCheckedAt ? `最近检查 ${new Date(rule.lastCheckedAt).toLocaleString("zh-CN")}` : "尚未检查"} · {strategy.name}{rule.scope === "watchlist" && rule.lastSignalBySymbol ? ` · 已跟踪 ${Object.keys(rule.lastSignalBySymbol).length} 个标的` : ""}</small>{history.length > 0 ? <details className="monitor-history"><summary>查看最近 {history.length} 次检查</summary><div className="monitor-history-list">{history.map((entry) => <div className="monitor-history-entry" key={entry.id}><span className={`monitor-outcome ${entry.outcome}`} aria-label={entry.outcome === "triggered" ? "已触发" : entry.outcome === "not_triggered" ? "未触发" : entry.outcome === "error" ? "检查失败" : "待核实"}>{entry.outcome === "triggered" ? "触发" : entry.outcome === "not_triggered" ? "未触发" : entry.outcome === "error" ? "失败" : "待核实"}</span><div><strong>{entry.symbol ? `${entry.symbol} · ` : ""}{new Date(entry.checkedAt).toLocaleString("zh-CN")}</strong><small>{entry.summary}</small><small>{entry.asOf ? `数据截至 ${entry.asOf}` : "数据截至时间未返回"} · {entry.source === "data-service" ? "真实数据服务" : "浏览器预览"}{entry.audits?.length ? ` · ${entry.audits.length} 条审计` : ""}</small></div></div>)}</div></details> : <small className="monitor-history-empty">暂无检查记录；运行一次后会保留结果与数据来源。</small>}</div><button className="rule-run" disabled={!realDataMode || monitorBusy || !rule.enabled} onClick={() => { void runMonitorCheck(rule.id).catch((cause) => setActionError(errorMessage(cause))); }} aria-label={`立即检查${rule.scope === "watchlist" ? "整个自选" : rule.symbol}`}><Play size={14} weight="fill" /></button><button className={rule.enabled ? "toggle on" : "toggle"} onClick={() => toggleRule(rule.id)} aria-label={`${rule.enabled ? "停用" : "启用"}${strategy.name}`} aria-pressed={rule.enabled}><span /></button><button className="icon-button rule-edit" onClick={() => openEdit(rule)} aria-label={`编辑${ruleConditionSummary(rule)}`}>编辑</button><button className="icon-button" aria-label={`删除${strategy.name}`} onClick={() => removeRule(rule.id)}><Trash size={15} /></button></article>;
       })}
     </section>
     {realDataMode ? <p className="security-note">检查结果会保留在本地审计时间线；缺失字段显示为“待核实”，不会当作未触发。历史记录最多保留 500 条。</p> : null}
     {actionError ? <p className="form-error" role="alert">{actionError}</p> : null}
-    {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card condition-modal" onSubmit={createRule}><div className="modal-heading"><h2>新建盯盘条件</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">规则创建分三步：选择范围、组合真实数据条件、设定检查频率。自选组规则会跟随当前自选动态增删标的，并按标的独立去重。</p><label>监控范围<select aria-label="监控范围" value={form.scope} onChange={(event) => setForm((value) => ({ ...value, scope: event.target.value }))}><option value="symbol">单个标的</option><option value="watchlist">整个自选</option></select></label>{form.scope === "symbol" ? <label>标的<select aria-label="监控标的" value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label> : <p className="monitor-scope-note">将检查当前自选中的 {watchlist.length} 个标的；以后新增或删除自选会自动跟随。</p>}<ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">保存并启用</button></form></div>}
+    {dialogOpen && <div className="modal-backdrop" role="presentation"><form className="modal-card condition-modal" onSubmit={saveRule}><div className="modal-heading"><h2>{editingRule ? "编辑盯盘条件" : "新建盯盘条件"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => { setDialogOpen(false); setEditingRule(null); }}><X size={18} /></button></div><p className="modal-help">{editingRule ? "修改后会保留历史检查记录，但清除旧触发边沿；下一次真实数据检查完成后才会重新判断。" : "规则创建分三步：选择范围、组合真实数据条件、设定检查频率。自选组规则会跟随当前自选动态增删标的，并按标的独立去重。"}</p><label>监控范围<select aria-label="监控范围" value={form.scope} onChange={(event) => setForm((value) => ({ ...value, scope: event.target.value }))}><option value="symbol">单个标的</option><option value="watchlist">整个自选</option></select></label>{form.scope === "symbol" ? <label>标的<select aria-label="监控标的" value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label> : <p className="monitor-scope-note">将检查当前自选中的 {watchlist.length} 个标的；以后新增或删除自选会自动跟随。</p>}<ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><button className="primary-action" type="submit">{editingRule ? "保存修改" : "保存并启用"}</button></form></div>}
   </div>;
 }
 

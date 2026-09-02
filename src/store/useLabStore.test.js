@@ -75,6 +75,36 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().skillItems.find((item) => item.id === "news").installed).toBe(true);
   });
 
+  it("reads the latest store state when a queued persistence write starts", async () => {
+    let captured;
+    persistence.saveUserState.mockImplementationOnce(async (state) => {
+      captured = state;
+      return { ...state, revision: state.revision + 1 };
+    });
+
+    const pending = useLabStore.getState().persistUserState();
+    const added = { symbol: "TEST", name: "并发测试", market: "自定义", group: "测试" };
+    useLabStore.setState((state) => ({ watchlist: [...state.watchlist, added] }));
+    await pending;
+
+    expect(captured.watchlist).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "TEST" })]));
+  });
+
+  it("edits a monitor rule, preserves its audit timeline, and resets the trigger edge", async () => {
+    const history = [{ id: "check-1", ruleId: "rule-1", outcome: "triggered", checkedAt: "2026-08-31T08:00:00Z" }];
+    useLabStore.setState({
+      rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }], logic: "AND", intervalSeconds: 300, enabled: true, lastCheckedAt: "2026-08-31T08:00:00Z", lastTriggeredAt: "2026-08-31T08:00:00Z", lastSignalTriggered: true, lastSignalBySymbol: { "600519": true } }],
+      monitorHistory: history,
+    });
+
+    const updated = await useLabStore.getState().updateRule("rule-1", { conditions: [{ type: "price_change", operator: "abs_gte", value: 5 }], intervalSeconds: 600 });
+
+    expect(updated).toMatchObject({ intervalSeconds: 600, lastCheckedAt: null, lastTriggeredAt: null, lastSignalTriggered: null, lastSignalBySymbol: {} });
+    expect(useLabStore.getState().rules[0].conditions[0].value).toBe(5);
+    expect(useLabStore.getState().monitorHistory).toEqual(history);
+    expect(persistence.saveUserState).toHaveBeenCalledWith(expect.objectContaining({ monitorRules: expect.arrayContaining([expect.objectContaining({ id: "rule-1", intervalSeconds: 600 })]) }), expect.any(Object));
+  });
+
   it("updates one assistant placeholder in place until the final answer", async () => {
     let reportProgress;
     let finish;
