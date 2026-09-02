@@ -927,8 +927,10 @@ mod tests {
 
     #[test]
     fn invalid_installed_skill_id_is_rejected() {
-        let mut state = UserState::default();
-        state.installed_skill_ids = vec!["../escape".into()];
+        let state = UserState {
+            installed_skill_ids: vec!["../escape".into()],
+            ..UserState::default()
+        };
         assert!(validate(&state).is_err());
     }
 }
