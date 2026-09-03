@@ -63,7 +63,7 @@ export function quoteFreshness(value, now = Date.now(), staleAfterMs = QUOTE_STA
   return { state: ageMs > staleAfterMs ? "stale" : "fresh", timestamp, ageMs };
 }
 
-function formatQuoteTimestamp(timestamp, market, compact = false) {
+export function formatQuoteTimestamp(timestamp, market, compact = false) {
   const definition = marketTimeZone(market);
   const marketText = String(market ?? "").trim();
   if (marketText && !definition) {
@@ -80,6 +80,25 @@ function formatQuoteTimestamp(timestamp, market, compact = false) {
     : { hour: "2-digit", minute: "2-digit", second: "2-digit" };
   const time = new Intl.DateTimeFormat("zh-CN", { ...options, timeZone: definition?.timeZone }).format(new Date(timestamp));
   return marketText ? `${time} · ${definition.label}` : time;
+}
+
+/**
+ * Format an exact provider timestamp for dense chart/tooltips. Unlike the
+ * freshness label this always includes the calendar date, so a crosshair
+ * value is unambiguous when the chart spans multiple sessions. Unknown
+ * venues use UTC explicitly instead of the browser's local timezone.
+ */
+export function formatQuoteDateTime(value, market = "") {
+  const timestamp = timestampValue(value);
+  if (!Number.isFinite(timestamp)) return "数据时间未知";
+  const definition = marketTimeZone(market);
+  const marketText = String(market ?? "").trim();
+  const options = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+  if (definition) options.timeZone = definition.timeZone;
+  else if (marketText) options.timeZone = "UTC";
+  const formatted = new Intl.DateTimeFormat("zh-CN", options).format(new Date(timestamp));
+  if (!definition && marketText) return `${formatted} UTC · 时区未知`;
+  return marketText ? `${formatted} · ${definition.label}` : formatted;
 }
 
 export function formatQuoteFreshness(value, now = Date.now(), market = "") {

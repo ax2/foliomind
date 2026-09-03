@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteFreshness } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteFreshness } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -62,6 +62,12 @@ describe("quote formatting", () => {
     expect(formatQuoteFreshness("2026-07-15T13:55:00Z", Date.parse("2026-07-15T14:00:00Z"), "NASDAQ")).toMatch(/09:55:00.*美东时间/);
     expect(formatCompactQuoteFreshness("2026-01-15T14:55:00Z", now, "HKEX")).toContain("香港时间");
     expect(formatQuoteFreshness("2026-01-15T14:55:00Z", now, "自定义市场")).toContain("时区未知");
+  });
+
+  it("formats exact chart timestamps with date and explicit venue context", () => {
+    expect(formatQuoteDateTime("2026-01-15T14:55:03Z", "NASDAQ")).toMatch(/2026.*09:55:03.*美东时间/);
+    expect(formatQuoteDateTime("2026-01-15T14:55:03Z", "自定义市场")).toMatch(/2026.*14:55:03.*UTC.*时区未知/);
+    expect(formatQuoteDateTime("not-a-date", "NASDAQ")).toBe("数据时间未知");
   });
 
   it("does not infer a timezone from an embedded short market alias", () => {

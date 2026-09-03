@@ -785,6 +785,46 @@ textarea:focus-visible {
   width: 100%;
   height: 350px;
 }
+.market-chart-with-tooltip {
+  position: relative;
+}
+.market-chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 10px;
+  max-width: calc(100% - 20px);
+  padding: 8px 10px;
+  border: 1px solid rgba(22, 119, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 18px rgba(28, 43, 66, 0.1);
+  color: #253047;
+  pointer-events: none;
+}
+.market-chart-tooltip > strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.market-chart-tooltip-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 5px;
+}
+.market-chart-tooltip-values span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 11px;
+}
+.market-chart-tooltip-values small { color: #7b8494; }
+.market-chart-tooltip-values b { font-variant-numeric: tabular-nums; }
+.market-chart-tooltip-ma5 b { color: #b86b00; }
+.market-chart-tooltip-ma20 b { color: #6941c6; }
 .market-chart.chart-empty {
   display: grid;
   place-items: center;
