@@ -2,12 +2,12 @@ const numberValue = (value) => Number(value);
 export const QUOTE_STALE_AFTER_MS = 15 * 60 * 1000;
 
 const MARKET_TIME_ZONE_DEFINITIONS = [
-  { patterns: ["NASDAQ", "NYSE", "AMEX", "美股", "US"], timeZone: "America/New_York", label: "美东时间" },
-  { patterns: ["HKEX", "港股", "香港", "HK"], timeZone: "Asia/Hong_Kong", label: "香港时间" },
-  { patterns: ["LSE", "伦敦", "英国", "UK"], timeZone: "Europe/London", label: "伦敦时间" },
-  { patterns: ["TSE", "东京", "日本", "日股", "JP"], timeZone: "Asia/Tokyo", label: "东京时间" },
-  { patterns: ["EURONEXT", "欧洲", "欧股", "EU"], timeZone: "Europe/Paris", label: "中欧时间" },
-  { patterns: ["SSE", "SZSE", "沪市", "深市", "沪深", "上交所", "深交所", "A股", "中国", "CN"], timeZone: "Asia/Shanghai", label: "北京时间" },
+  { region: "us", patterns: ["NASDAQ", "NYSE", "AMEX", "美股", "US"], timeZone: "America/New_York", label: "美东时间" },
+  { region: "hk", patterns: ["HKEX", "港股", "香港", "HK"], timeZone: "Asia/Hong_Kong", label: "香港时间" },
+  { region: "uk", patterns: ["LSE", "伦敦", "英国", "UK"], timeZone: "Europe/London", label: "伦敦时间" },
+  { region: "jp", patterns: ["TSE", "东京", "日本", "日股", "JP"], timeZone: "Asia/Tokyo", label: "东京时间" },
+  { region: "eu", patterns: ["EURONEXT", "欧洲", "欧股", "EU"], timeZone: "Europe/Paris", label: "中欧时间" },
+  { region: "cn", patterns: ["SSE", "SS", "SH", "SZSE", "SZ", "BSE", "BJ", "XSHG", "XSHE", "CFFEX", "沪市", "深市", "沪深", "上交所", "深交所", "中金所", "A股", "中国", "CN"], timeZone: "Asia/Shanghai", label: "北京时间" },
 ];
 
 function marketPatternMatches(value, pattern) {
@@ -24,6 +24,15 @@ export function marketTimeZone(market) {
   const value = String(market ?? "").trim().toUpperCase();
   if (!value) return null;
   return MARKET_TIME_ZONE_DEFINITIONS.find(({ patterns }) => patterns.some((pattern) => marketPatternMatches(value, pattern))) || null;
+}
+
+/**
+ * Return a coarse, explicit market region for routing and prompt context.
+ * Unknown labels intentionally return null; callers must not silently treat
+ * an unrecognised venue as A股.
+ */
+export function marketRegionFor(market) {
+  return marketTimeZone(market)?.region || null;
 }
 
 /** A quote price is displayable only when the provider returned a finite positive value. */

@@ -15,7 +15,7 @@ import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
-import { isValidQuotePrice } from "../lib/quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
@@ -105,19 +105,23 @@ function skillItemsForIds(items, installedSkillIds) {
   const installed = new Set(Array.isArray(installedSkillIds) ? installedSkillIds : items.filter((item) => item.installed).map((item) => item.id));
   return items.map((item) => ({ ...item, installed: installed.has(item.id) }));
 }
-function qverisSymbol(value) {
+function qverisSymbol(value, market = "") {
   const raw = String(value || "").trim().toUpperCase();
   if (!raw) return raw;
   if (/\.(SH|SS|SZ|BJ)$/.test(raw)) return raw.replace(/\.SS$/, ".SH");
-  if (/^(600|601|603|605|688|689)\d{3}$/.test(raw)) return `${raw}.SH`;
-  if (/^(000|001|002|003|300|301)\d{3}$/.test(raw)) return `${raw}.SZ`;
+  const marketText = String(market || "").trim();
+  const inferChina = !marketText || marketRegionFor(marketText) === "cn";
+  if (inferChina && /^(600|601|603|605|688|689)\d{3}$/.test(raw)) return `${raw}.SH`;
+  if (inferChina && /^(000|001|002|003|300|301)\d{3}$/.test(raw)) return `${raw}.SZ`;
   return raw;
 }
 function marketContext(item) {
-  const market = String(item?.market || item?.category || "").toLocaleUpperCase("zh-CN");
-  if (/NASDAQ|NYSE|AMEX|美股|US/.test(market)) return "美股";
-  if (/HKEX|港股|香港|HK/.test(market)) return "港股";
-  return "A股";
+  const market = String(item?.market || "").toLocaleUpperCase("zh-CN");
+  const region = marketRegionFor(market);
+  if (region === "us") return "美股";
+  if (region === "hk") return "港股";
+  if (region === "cn" || !market) return "A股";
+  return "未知市场";
 }
 function dataItemForSymbol(state, symbol) {
   const normalized = String(symbol || "").trim().toUpperCase();
@@ -433,10 +437,10 @@ function portfolioContextForSymbol(positions, symbol, quote) {
   return portfolioAttributionContext(position, quote);
 }
 
-async function queryMonitorData(kind, symbol) {
+async function queryMonitorData(kind, symbol, market = "") {
   if ((!isLocalWebRuntime() && !isDesktopRuntime()) || typeof queryCapabilityData !== "function") return null;
   try {
-    const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 });
+    const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol, market) }, { timeoutMs: 60_000 });
     const text = JSON.stringify(cached?.data ?? cached ?? {});
     return { fields: monitorFieldsFromReply(text, symbol), mode: cached?.mode || "pi-local-host", audits: cached?.audits || [{ operation: "cap-call", outcome: "success", kind }] };
   } catch (error) {
@@ -520,7 +524,7 @@ async function askFinancialData(prompt, kind, symbol, range, options) {
     try {
       const requestOptions = { timeoutMs: options?.settleTimeoutMs || 90_000 };
       if (options?.signal) requestOptions.signal = options.signal;
-      const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol), range }, requestOptions);
+      const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol, options?.market), range }, requestOptions);
       // A test double or a malformed native response must not silently turn a
       // successful transport into an Agent fallback. Treat a missing result as
       // an explicit cache miss so the fallback policy below remains narrow.
@@ -555,7 +559,7 @@ export function shouldFallbackToAgent(error) {
 }
 
 function liveQuotePrompt(item) {
-  const marketSymbol = qverisSymbol(item.symbol);
+  const marketSymbol = qverisSymbol(item.symbol, item.market);
   return `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）${marketContext(item)}实时行情快照。调用工具时参数 symbol 必须使用 ${marketSymbol}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的实时行情工具，不要交叉核验，不要第二次搜索。不要使用示例数据。严格只返回一个 JSON 对象，不要 Markdown，格式为 {"quotes":[{"symbol":"${item.symbol}","name":"${item.name}","price":null,"changePercent":null,"changeAmount":null,"open":null,"previousClose":null,"high":null,"low":null,"volume":null,"turnover":null,"turnoverRate":null,"volumeRatio":null,"pe":null,"pb":null,"marketCap":null,"floatMarketCap":null,"asOf":"数据时间","source":"数据来源"}],"errors":[]}。没有真实值的字段填 null。`;
 }
 
@@ -563,7 +567,7 @@ async function fetchLiveQuote(item, options = {}) {
   const prompt = liveQuotePrompt(item);
   const requestOptions = { settleTimeoutMs: options.settleTimeoutMs || 60_000 };
   if (options.signal) requestOptions.signal = options.signal;
-  const reply = await askFinancialData(prompt, "quote", item.symbol, "", requestOptions);
+  const reply = await askFinancialData(prompt, "quote", item.symbol, "", { ...requestOptions, market: item.market });
   let quotes = liveQuotesFromReply(reply.text, [item.symbol]);
   // A stale cached selection may return an empty envelope. Rediscover once so
   // the fast path remains self-healing without making every request slow.
@@ -585,7 +589,7 @@ async function executeMonitorForItem(rule, item) {
   const monitorPrompt = `执行一次真实金融盯盘检查。标的：${item?.name || rule.symbol}（${item?.symbol || rule.symbol}）。策略：${strategy.name}。条件：${ruleConditionSummary(rule)}。${conditionPrompt(rule)} ${strategy.prompt} 必须使用内置 qveris-finance-research Skill 按 Search → Inspect → Call 查询，不得使用界面示例数据。请严格返回一个 JSON 对象，不要 Markdown：{"triggered":true、false 或 null,"title":"简短标题","summary":"含来源和数据截至时间的结论","severity":"info|warning|critical","asOf":"数据截至时间"}。`;
   if ((isLocalWebRuntime() || isDesktopRuntime()) && typeof queryCapabilityData === "function") {
     const kinds = [...new Set(conditionsForRule(rule).map((condition) => monitorDataKind(condition.type)))];
-    const queryResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, item?.symbol || rule.symbol)))).filter(Boolean);
+    const queryResults = (await Promise.all(kinds.map((kind) => queryMonitorData(kind, item?.symbol || rule.symbol, item?.market)))).filter(Boolean);
     const directFailures = queryResults.map((current) => current.error).filter(Boolean);
     if (directFailures.some(shouldBlockMonitorModelFallback)) throw directFailures.find(shouldBlockMonitorModelFallback);
     const directResults = queryResults.filter((current) => !current.error);
@@ -785,7 +789,8 @@ export const useLabStore = create((set, get) => ({
     let audits = [];
     try {
       if ((isLocalWebRuntime() || isDesktopRuntime()) && typeof queryCapabilityData === "function") {
-        const results = await Promise.allSettled(["sentiment", "core_event", "capital_flow"].map((kind) => queryCapabilityData({ kind, symbol: qverisSymbol(symbol) }, { timeoutMs: 60_000 })));
+        const anomalyItem = dataItemForSymbol(state, symbol);
+        const results = await Promise.allSettled(["sentiment", "core_event", "capital_flow"].map((kind) => queryCapabilityData({ kind, symbol: qverisSymbol(symbol, anomalyItem?.market) }, { timeoutMs: 60_000 })));
         const data = results.filter((result) => result.status === "fulfilled").flatMap((result) => {
           const value = result.value;
           audits = [...audits, ...(Array.isArray(value?.audits) ? value.audits : [])];
@@ -826,8 +831,8 @@ export const useLabStore = create((set, get) => ({
     detailsRequestController = requestController;
     set((current) => ({ quoteDetailsLoading: { ...current.quoteDetailsLoading, [symbol]: true }, quoteDetailsError: { ...current.quoteDetailsError, [symbol]: "" } }));
     try {
-      const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`;
-      const reply = await askFinancialData(prompt, "details", item.symbol, "", { settleTimeoutMs: 90_000, signal: requestController.signal });
+      const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的真实公司简介和最近一期财务指标。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol, item.market)}。允许分别 Search 相关资料，但每个候选工具只能 Inspect 后 Call 一次。不要交叉核验，不要编造。只返回一个 JSON 对象，不要 Markdown：{"fundamentals":{"revenue":null,"netProfit":null,"grossMargin":null,"netMargin":null,"roe":null,"reportPeriod":""},"companyDescription":"","errors":[]}。没有真实数据填 null 或空字符串。`;
+      const reply = await askFinancialData(prompt, "details", item.symbol, "", { settleTimeoutMs: 90_000, signal: requestController.signal, market: item.market });
       if (requestGeneration !== detailsRequestGeneration) return false;
       let details = detailedQuoteFromReply(reply.text);
       if (!details && reply.cacheHit) details = detailedQuoteFromReply((await askPi(prompt, { settleTimeoutMs: 90_000, signal: requestController.signal })).text);
@@ -870,8 +875,8 @@ export const useLabStore = create((set, get) => ({
     set((current) => ({ quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
     const rangeRequest = { 分时: "今天的1分钟或5分钟分时", "5日": "最近5个交易日日线", 日K: "最近90个交易日日线", 周K: "最近52周周线", 月K: "最近60个月月线", 季K: "最近20个季度线", 年K: "最近10年年线" }[range] || range;
     try {
-      const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol)}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`;
-      const reply = await askFinancialData(prompt, "series", item.symbol, rangeRequest, { settleTimeoutMs: 60_000, signal: requestController.signal });
+      const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）的${rangeRequest}真实行情。调用工具时如需股票参数，使用 ${qverisSymbol(item.symbol, item.market)}。只做一次 Search、一次 Inspect、一次 Call，选最匹配的历史或分时工具，不要交叉核验。只返回一个 JSON 对象，不要 Markdown：{"series":[]}。时间序列点使用 {"time":"ISO或YYYY-MM-DD HH:mm:ss","open":null,"high":null,"low":null,"close":null,"value":null,"volume":null}；没有真实数据返回空数组，禁止编造。`;
+      const reply = await askFinancialData(prompt, "series", item.symbol, rangeRequest, { settleTimeoutMs: 60_000, signal: requestController.signal, market: item.market });
       if (requestGeneration !== seriesRequestGeneration) return false;
       const series = seriesFromReply(reply.text);
       set((current) => ({ liveQuotes: { ...current.liveQuotes, [symbol]: { ...current.liveQuotes[symbol], seriesByRange: { ...(current.liveQuotes[symbol]?.seriesByRange || {}), [range]: series } } }, quoteSeriesLoading: { ...current.quoteSeriesLoading, [symbol]: { ...(current.quoteSeriesLoading[symbol] || {}), [range]: false } }, quoteSeriesLoaded: { ...current.quoteSeriesLoaded, [symbol]: { ...(current.quoteSeriesLoaded[symbol] || {}), [range]: true } }, quoteSeriesError: { ...current.quoteSeriesError, [symbol]: { ...(current.quoteSeriesError[symbol] || {}), [range]: "" } } }));
@@ -908,7 +913,7 @@ export const useLabStore = create((set, get) => ({
         try {
           if (requestGeneration !== eventsRequestGeneration) return false;
           const prompt = `使用内置 qveris-finance-research Skill 查询 ${item.name}（${item.symbol}）未来 90 天内已排期的公司事件，包括分红、拆股、股东会和财报相关日期。只返回真实数据，不要公告全文，不要编造。严格只返回一个 JSON 对象，不要 Markdown：{"events":[{"date":"YYYY-MM-DD或ISO时间","type":"事件类型","title":"事件标题","detail":"事件说明","source":"数据来源","url":"可选链接"}]}。没有真实事件返回空数组。`;
-          const reply = await askFinancialData(prompt, "core_event", item.symbol, "", { settleTimeoutMs: 60_000, signal: requestController.signal });
+          const reply = await askFinancialData(prompt, "core_event", item.symbol, "", { settleTimeoutMs: 60_000, signal: requestController.signal, market: item.market });
           if (requestGeneration !== eventsRequestGeneration) return false;
           const itemEvents = eventsFromReply(reply.text).map((event, index) => ({ ...event, id: `${item.symbol}-${event.date || "undated"}-${index}`, symbol: item.symbol, name: item.name, market: item.market, capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" }));
           rows.push(...itemEvents);

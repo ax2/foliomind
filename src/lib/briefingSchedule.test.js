@@ -27,5 +27,7 @@ describe("portfolio briefing schedule", () => {
     expect(marketCodesForPositions([{ market: "沪深", symbol: "600519" }, { market: "沪深", symbol: "300750" }])).toEqual([SSE_MARKET_CODE, SZSE_MARKET_CODE]);
     expect(() => marketCodesForPositions([{ market: "NASDAQ", symbol: "AAPL" }])).toThrow("暂不支持美股交易日历");
     expect(() => marketCodeForPosition({ market: "沪深", symbol: "999999" })).toThrow("确定 A 股交易所");
+    expect(() => marketCodeForPosition({ market: "RUSSELL 2000", symbol: "RUT" })).toThrow("暂不支持 RUSSELL 2000");
+    expect(() => marketCodeForPosition({ market: "CUSTOM-USAGE", symbol: "123456" })).toThrow("暂不支持 CUSTOM-USAGE");
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketTimeZone, quoteFreshness } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteFreshness } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -69,6 +69,13 @@ describe("quote formatting", () => {
     expect(marketTimeZone("RUSSELL 2000")).toBeNull();
     expect(formatQuoteFreshness("2026-01-15T14:55:00Z", now, "RUSSELL 2000")).toMatch(/UTC.*时区未知/);
     expect(formatCompactQuoteFreshness("2026-01-15T14:55:00Z", now, "RUSSELL 2000")).toMatch(/UTC.*时区未知/);
+  });
+
+  it("returns explicit regions without substring false positives", () => {
+    expect(marketRegionFor("NASDAQ")).toBe("us");
+    expect(marketRegionFor("沪深")).toBe("cn");
+    expect(marketRegionFor("RUSSELL 2000")).toBeNull();
+    expect(marketRegionFor("CUSTOM-USAGE")).toBeNull();
   });
 
   it("accepts unix-second and unix-millisecond provider timestamps", () => {

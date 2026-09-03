@@ -1,4 +1,4 @@
-import { isValidQuotePrice } from "./quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor } from "./quoteFormatting.js";
 
 export const BRIEFING_TIME_ZONE = "Asia/Shanghai";
 export const SSE_MARKET_CODE = "212001";
@@ -19,12 +19,13 @@ function inferCnMarketCode(symbol) {
 
 export function marketCodeForPosition(position = {}) {
   const market = String(position?.market || "").trim().toUpperCase();
-  if (["NASDAQ", "NYSE", "AMEX", "美股", "US"].some((value) => market.includes(value) || market === value)) throw new Error("当前自动复盘暂不支持美股交易日历，请改用手动复盘");
-  if (market.includes("HKEX") || market.includes("港股") || market.includes("香港") || market === "HK") return HKEX_MARKET_CODE;
+  const region = marketRegionFor(market);
+  if (region === "us") throw new Error("当前自动复盘暂不支持美股交易日历，请改用手动复盘");
+  if (region === "hk") return HKEX_MARKET_CODE;
   if (market.includes("CFFEX") || market.includes("中金所")) return CFFEX_MARKET_CODE;
   if (market === "深市" || market.includes("深交所") || market === "SZ" || market === "SZSE") return SZSE_MARKET_CODE;
   if (market === "沪市" || market.includes("上交所") || market === "SH" || market === "SSE") return SSE_MARKET_CODE;
-  if (market.includes("A股") || market.includes("沪深") || !market || market === "自定义") {
+  if (region === "cn" || !market) {
     const code = inferCnMarketCode(position?.symbol);
     if (code) return code;
     throw new Error(`无法根据 ${String(position?.symbol || "该标的")} 确定 A 股交易所`);

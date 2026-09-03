@@ -498,6 +498,21 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.askPi.mock.calls[0][0]).not.toContain("A股实时行情快照");
   });
 
+  it("does not route an explicit unknown market through an A-share symbol suffix", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "123456", name: "自定义标的", market: "RUSSELL 2000" }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "123456", price: 10 }] }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(runtime.askPi.mock.calls[0][0]).toContain("未知市场实时行情快照");
+    expect(runtime.askPi.mock.calls[0][0]).toContain("参数 symbol 必须使用 123456");
+    expect(runtime.askPi.mock.calls[0][0]).not.toContain("123456.SH");
+    expect(runtime.askPi.mock.calls[0][0]).not.toContain("123456.SZ");
+  });
+
   it("keeps upstream data errors friendly and free of gateway details", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

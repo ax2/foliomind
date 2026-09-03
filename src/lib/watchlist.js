@@ -1,4 +1,4 @@
-import { isValidQuotePrice } from "./quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor } from "./quoteFormatting.js";
 
 export const WATCHLIST_DEFAULT_GROUP = "自选";
 
@@ -16,9 +16,10 @@ function text(value, max = 64) {
 /** Resolve a stable, user-facing group from a market label for legacy items. */
 export function watchlistGroupForMarket(market, fallback = WATCHLIST_DEFAULT_GROUP) {
   const value = String(market ?? "").trim().toLocaleUpperCase("zh-CN");
-  if (/NASDAQ|NYSE|AMEX|美股|US/.test(value)) return "美股";
-  if (/HKEX|港股|香港|HK/.test(value)) return "港股";
-  if (/沪|深|A股|SH|SS|SZ|BJ/.test(value)) return "A股";
+  const region = marketRegionFor(value);
+  if (region === "us") return "美股";
+  if (region === "hk") return "港股";
+  if (region === "cn") return "A股";
   return text(fallback) || WATCHLIST_DEFAULT_GROUP;
 }
 

@@ -6,6 +6,8 @@ describe("watchlist organization", () => {
     expect(normalizeWatchlistItem({ symbol: " aapl ", name: " Apple ", market: "NASDAQ" })).toMatchObject({ symbol: "AAPL", name: "Apple", group: "美股" });
     expect(normalizeWatchlistItem({ symbol: "600519", name: "贵州茅台", market: "沪深", group: "核心持仓" })).toMatchObject({ group: "核心持仓" });
     expect(watchlistGroupForMarket("HKEX")).toBe("港股");
+    expect(watchlistGroupForMarket("RUSSELL 2000", "观察")).toBe("观察");
+    expect(watchlistGroupForMarket("CUSTOM-USAGE", "观察")).toBe("观察");
   });
 
   it("sorts numeric quote fields with missing values last and keeps stable ties", () => {
