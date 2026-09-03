@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeSeries } from "./MarketChart.jsx";
+import { movingAverage, normalizeSeries } from "./MarketChart.jsx";
 
 describe("normalizeSeries", () => {
   it("sorts provider points and keeps the latest duplicate timestamp", () => {
@@ -35,5 +35,20 @@ describe("normalizeSeries", () => {
     expect(point.high).toBeNaN();
     expect(point.low).toBeNaN();
     expect(point.close).toBe(12.5);
+  });
+
+  it("calculates only complete moving-average windows from real points", () => {
+    const points = normalizeSeries([
+      { timestamp: 1788000000, close: 10 },
+      { timestamp: 1788000060, close: 12 },
+      { timestamp: 1788000120, close: 14 },
+      { timestamp: 1788000180, close: 16 },
+      { timestamp: 1788000240, close: 18 },
+      { timestamp: 1788000300, close: 20 },
+    ]);
+
+    expect(movingAverage(points, 5).map((point) => point.value)).toEqual([14, 16]);
+    expect(movingAverage(points, 20)).toEqual([]);
+    expect(movingAverage(points, 0)).toEqual([]);
   });
 });

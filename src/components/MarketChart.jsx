@@ -45,14 +45,38 @@ export function normalizeSeries(series) {
   return [...byTime.values()].sort((left, right) => left.time - right.time);
 }
 
-export function MarketChart({ series = [], range = "分时", loading = false, error = "", onRetry, showGrid = true, showMovingAverage = false }) {
+/**
+ * Calculate a simple moving average from the already-normalized real series.
+ * Returning an empty array for an invalid/insufficient window keeps the chart
+ * honest: we never interpolate missing provider points or draw a synthetic
+ * indicator before enough observations exist.
+ */
+export function movingAverage(points, period) {
+  const windowSize = Number(period);
+  if (!Number.isInteger(windowSize) || windowSize < 2 || !Array.isArray(points) || points.length < windowSize) return [];
+  const result = [];
+  const window = [];
+  let sum = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const value = Number(points[index]?.value);
+    if (!Number.isFinite(value)) {
+      window.length = 0;
+      sum = 0;
+      continue;
+    }
+    window.push(value);
+    sum += value;
+    if (window.length > windowSize) sum -= window.shift();
+    if (window.length === windowSize) result.push({ time: points[index].time, value: sum / windowSize });
+  }
+  return result;
+}
+
+export function MarketChart({ series = [], range = "分时", loading = false, error = "", onRetry, showGrid = true, showMovingAverage = false, showMovingAverage20 = false }) {
   const ref = useRef(null);
   const points = useMemo(() => normalizeSeries(series), [series]);
-  const movingAverage = useMemo(() => points.map((point, index) => {
-    if (index < 4) return null;
-    const window = points.slice(index - 4, index + 1);
-    return { time: point.time, value: window.reduce((total, item) => total + item.value, 0) / window.length };
-  }).filter(Boolean), [points]);
+  const movingAverage5 = useMemo(() => movingAverage(points, 5), [points]);
+  const movingAverage20 = useMemo(() => movingAverage(points, 20), [points]);
   useEffect(() => {
     if (!ref.current || points.length < 2) return undefined;
     const chart = createChart(ref.current, {
@@ -67,13 +91,17 @@ export function MarketChart({ series = [], range = "分时", loading = false, er
     const candles = range !== "分时" && range !== "5日" && points.every((point) => [point.open, point.high, point.low, point.close].every(Number.isFinite));
     const seriesView = candles ? chart.addSeries(CandlestickSeries, { upColor: "#18a66a", downColor: "#f04444", borderVisible: false, wickUpColor: "#18a66a", wickDownColor: "#f04444" }) : chart.addSeries(AreaSeries, { lineColor: "#1677ff", topColor: "rgba(22, 119, 255, 0.18)", bottomColor: "rgba(22, 119, 255, 0.01)", lineWidth: 2, priceLineVisible: false });
     seriesView.setData(candles ? points : points.map((point) => ({ time: point.time, value: point.value })));
-    if (showMovingAverage && movingAverage.length >= 2) {
+    if (showMovingAverage && movingAverage5.length >= 2) {
       const averageView = chart.addSeries(LineSeries, { color: "#f59e0b", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: "MA5" });
-      averageView.setData(movingAverage);
+      averageView.setData(movingAverage5);
+    }
+    if (showMovingAverage20 && movingAverage20.length >= 2) {
+      const averageView = chart.addSeries(LineSeries, { color: "#8b5cf6", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: "MA20" });
+      averageView.setData(movingAverage20);
     }
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [points, range, showGrid, showMovingAverage, movingAverage]);
+  }, [points, range, showGrid, showMovingAverage, showMovingAverage20, movingAverage5, movingAverage20]);
   if (loading) return <div className="market-chart chart-empty" aria-label="正在获取真实行情"><DataState compact state="loading" title={`正在获取${range}数据`} description="正在从已配置渠道获取真实行情。" /></div>;
   if (error) return <div className="market-chart chart-empty" aria-label={`${range}数据暂不可用`}><DataState compact state="error" title="该周期暂时没有可用数据" description="系统会稍后自动重试，也可以立即重新获取。" actionLabel={onRetry ? "立即重试" : ""} onAction={onRetry} /></div>;
   if (points.length < 2) return <div className="market-chart chart-empty" aria-label={`暂无真实${range}数据`}><DataState compact state="empty" title={`暂无真实${range}数据`} description="有新数据返回后会自动显示，空白区域不会使用示例走势填充。" /></div>;

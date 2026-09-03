@@ -176,6 +176,13 @@ describe("FolioMind core flows", () => {
     expect(movingAverage).not.toBeChecked();
     fireEvent.click(movingAverage);
     expect(movingAverage).toBeChecked();
+    const movingAverage20 = screen.getByRole("checkbox", { name: "显示 MA20" });
+    expect(movingAverage20).not.toBeChecked();
+    fireEvent.click(movingAverage20);
+    expect(movingAverage20).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
+    expect(movingAverage).not.toBeChecked();
+    expect(movingAverage20).not.toBeChecked();
   });
 
   it("offers editable quick prompts in the copilot composer", () => {

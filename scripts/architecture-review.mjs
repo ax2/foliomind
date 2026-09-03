@@ -131,6 +131,7 @@ check("持仓 CSV 导入边界", portfolio.includes("parsePortfolioImport") && p
 check("持仓导入预览确认", marketViews.includes("importPreview") && marketViews.includes("确认导入持仓") && marketViews.includes("confirmPortfolioImport") && marketViews.includes("取消不会修改当前组合") && prd.includes("Stage 3DD 持仓导入预览与显式确认") && readme.includes("展示预览，确认后才提交"), "持仓文件选择后只能生成本地预览，显式确认后才可提交 canonical 状态");
 check("真实行情研究筛选", research.includes("RESEARCH_FILTER_FIELDS") && research.includes("filterResearchItems") && research.includes("activeResearchFilterCount") && marketViews.includes("research-filter-panel") && marketViews.includes("已保存研究筛选") && marketViews.includes("最多保存 10 个筛选") && prd.includes("Stage 3DE 真实行情研究筛选与条件预设") && readme.includes("真实数值条件"), "研究筛选需支持真实字段数值条件、可复用本地预设和缺失字段安全边界");
 check("跨市场路由安全", quoteFormatting.includes("marketRegionFor") && watchlist.includes("marketRegionFor") && briefingSchedule.includes("marketRegionFor") && labStore.includes("marketRegionFor") && labStore.includes("未知市场") && prd.includes("Stage 3DF 跨市场识别与路由安全"), "市场识别必须使用 token 边界；未知市场不得被静默路由为 A 股或错误交易日历");
+check("行情技术指标覆盖", marketChart.includes("export function movingAverage") && marketChart.includes("showMovingAverage20") && stockWorkspace.includes("显示 MA20") && marketChart.includes('title: "MA20"') && prd.includes("Stage 3DG 行情趋势指标覆盖"), "行情图表应支持基于真实序列的 MA5/MA20 趋势覆盖，不增加上游请求或绘制合成数据");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
