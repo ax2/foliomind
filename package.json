@@ -1,6 +1,6 @@
 {
   "name": "foliomind",
-  "version": "0.1.169",
+  "version": "0.1.170",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "web:dev": "node scripts/web-dev.mjs",
     "host:dev": "node scripts/local-host.mjs",
     "build": "vite build && npm run check:bundle && node scripts/prepare-sites-build.mjs",
+    "clean": "node scripts/clean-generated.mjs",
     "check:bundle": "node scripts/check-bundle-size.mjs",
     "preview": "vite preview",
     "tauri": "tauri",

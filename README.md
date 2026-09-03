@@ -148,14 +148,22 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
+构建或 Playwright 回归后可清理可重新生成的产物；该命令只处理 `dist`、`.qa`、`.cache` 和 Tauri target 目录，不会删除 Pi、portable-git、用户配置或源代码：
+
+```bash
+npm run clean
+```
+
+需要先确认清理范围时运行 `npm run clean -- --dry-run`。
+
 Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host 自动递增端口时可通过 `FOLIOMIND_QA_URL=http://127.0.0.1:<端口> python scripts/qa-playwright.py` 指定实际页面地址。
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.169`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.170`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.169 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.170 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

@@ -6,6 +6,7 @@ src-tauri/resources/portable-git/*
 !src-tauri/resources/portable-git/.gitkeep
 dist/
 src-tauri/target/
+src-tauri/target-linux/
 .DS_Store
 *.log
 .env

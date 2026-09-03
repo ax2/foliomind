@@ -2094,3 +2094,18 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 4. 组件测试覆盖首次进入二级页面的异步加载态与最终内容；桌面宽屏、Web 本地调试和 390px 窄屏回归继续验证无控制台错误、页面横向溢出和功能退化。
 
 验收标准：生产构建首屏入口主 JS 小于 450KB，二级工作台独立生成异步 chunk；首次切换可看到短暂加载态并最终展示正确页面；重复切换复用已加载模块；前端测试、构建、安全审计、架构审查和发布前 Web QA 通过。
+### Stage 3DR 构建产物清理（本轮增量）
+
+**目标**：让本地构建、桌面打包和 Playwright 回归结束后可以安全回收可再生目录，保持仓库工作区可审阅。
+
+**范围与边界**：
+
+- 提供 `npm run clean`，只清理 `dist/`、`.qa/`、`.cache/`、`src-tauri/target/` 和可能由 Linux 构建生成的 `src-tauri/target-linux/`。
+- 清理目录采用代码内固定白名单和工作区路径校验，支持 `--dry-run` 预览；不得递归扫描或根据用户输入删除路径。
+- `src-tauri/resources/pi/`、`src-tauri/resources/portable-git/`、`.openai/`、用户状态和源代码不属于清理范围。
+
+**验收**：
+
+- 构建后执行 `npm run clean`，上述生成目录不存在或为空，源文件、运行时资源和 Sites 配置仍可正常构建。
+- `npm run clean -- --dry-run` 仅输出待清理清单，不改变文件。
+- `npm test`、`npm run build`、`npm run test:sites`、`npm run audit:security` 与 `npm run review:architecture` 全部通过。
