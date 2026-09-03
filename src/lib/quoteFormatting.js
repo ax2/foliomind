@@ -126,9 +126,9 @@ export function formatPrice(value) {
   return number >= 1000 ? number.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : number >= 1 ? number.toFixed(2) : number.toFixed(4);
 }
 
-export function formatPercent(value) {
+export function formatPercent(value, { signed = true } = {}) {
   const number = numberValue(value);
-  return Number.isFinite(number) ? `${number >= 0 ? "+" : ""}${number.toFixed(2)}%` : "—";
+  return Number.isFinite(number) ? `${signed && number >= 0 ? "+" : ""}${number.toFixed(2)}%` : "—";
 }
 
 /** Resolve a directional tone without treating missing data as up or down. */

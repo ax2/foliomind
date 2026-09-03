@@ -20,6 +20,8 @@ describe("quote formatting", () => {
 
   it("normalizes signed percentages and ratio-style margins", () => {
     expect(formatPercent(-1.21)).toBe("-1.21%");
+    expect(formatPercent(100, { signed: false })).toBe("100.00%");
+    expect(formatPercent(0, { signed: false })).toBe("0.00%");
     expect(formatQuoteField("turnoverRate", 0.28)).toBe("0.28%");
     expect(formatQuoteField("grossMargin", 0.8895)).toBe("88.95%");
     expect(formatQuoteField("roe", 33.65)).toBe("33.65%");

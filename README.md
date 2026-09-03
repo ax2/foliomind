@@ -11,6 +11,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 投资组合持仓、成本、市值、未实现盈亏与行情覆盖率。
 - 组合盘后复盘快照：保存真实行情覆盖、组合盈亏、风险信号和未来 7 天已返回事件，可展开回顾并随本地备份迁移。
 - 组合风险洞察在已有真实历史序列上展示加权样本波动、平均相关性、有效配对数和历史覆盖率；序列不足时保持空值，结果明确标注未年化，不生成综合风险评分。
+- 组合占比、行情覆盖和成本暴露使用无方向百分比显示，涨跌与盈亏仍保留正负号，避免将覆盖率误读为收益。
 - 持仓可选配置止盈/止损价；真实行情到价后按边沿去重生成站内/系统提醒，不执行自动交易。
 - 持仓可建立交易计划档案（买入逻辑、计划周期、目标/止损价），支持执行/重新跟踪、操作留痕和真实价格距离提示。
 - 组合明细支持按名称、代码、市场或买入逻辑搜索，并按交易计划状态筛选；筛选仅改变视图，不修改持仓。
@@ -151,10 +152,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.161`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.162`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.161 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.162 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。
