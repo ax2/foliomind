@@ -10,7 +10,7 @@ import { MarketChart } from "./MarketChart.jsx";
 const ranges = ["分时", "5日", "日K", "周K", "月K", "季K", "年K"];
 const quoteFields = [["今开", "open"], ["昨收", "previousClose"], ["最高", "high"], ["最低", "low"], ["成交量", "volume"], ["成交额", "turnover"], ["换手率", "turnoverRate"], ["量比", "volumeRatio"], ["市盈率(TTM)", "pe"], ["市净率(LF)", "pb"], ["总市值", "marketCap"], ["流通市值", "floatMarketCap"]];
 
-function SetupChecklist({ userStateLoaded, integrationStatus, integrationStatusLoading, integrationStatusError, hasQuote, liveDataLoading, onSettings, onRefresh }) {
+function SetupChecklist({ userStateLoaded, integrationStatus, integrationStatusLoading, integrationStatusError, hasQuote, liveDataLoading, onSettings, onRefresh, onCancel }) {
   if (!userStateLoaded || integrationStatusLoading || integrationStatusError) return null;
   const connected = hasRealDataAccess(integrationStatus);
   const modelReady = hasModelAccess(integrationStatus);
@@ -27,7 +27,7 @@ function SetupChecklist({ userStateLoaded, integrationStatus, integrationStatusL
   const completed = steps.filter((step) => step.done).length;
   return <section className="setup-checklist" aria-label="开始使用 FolioMind">
     <div className="setup-checklist-heading"><div><span>开始使用</span><h2>{connected ? "再完成一步，开始工作" : "先连接数据，再开始研究"}</h2><p>每一步都由你主动触发；未返回的字段会保持为空，不会用演示数据代替。</p></div><strong>{completed}/{steps.length}</strong></div>
-    <ol>{steps.map((step, index) => <li className={step.done ? "done" : ""} key={step.label}><span className="setup-step-number" aria-hidden="true">{step.done ? "✓" : index + 1}</span><div><strong>{step.label}</strong><small>{step.detail}</small></div>{step.action && <button type="button" className="secondary-button" disabled={liveDataLoading && index === 0} onClick={step.action}>{index === 0 && connected ? liveDataLoading ? "获取中…" : "获取行情" : "去设置"}</button>}</li>)}</ol>
+    <ol>{steps.map((step, index) => <li className={step.done ? "done" : ""} key={step.label}><span className="setup-step-number" aria-hidden="true">{step.done ? "✓" : index + 1}</span><div><strong>{step.label}</strong><small>{step.detail}</small></div>{step.action && <button type="button" className="secondary-button" onClick={index === 0 && connected && liveDataLoading ? onCancel : step.action}>{index === 0 && connected ? liveDataLoading ? "停止更新" : "获取行情" : "去设置"}</button>}</li>)}</ol>
   </section>;
 }
 
@@ -55,6 +55,7 @@ export function StockWorkspace() {
   const integrationStatusLoading = useLabStore((state) => state.integrationStatusLoading);
   const integrationStatusError = useLabStore((state) => state.integrationStatusError);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
+  const cancelLiveDataRefresh = useLabStore((state) => state.cancelLiveDataRefresh);
   const refreshSelectedQuote = useLabStore((state) => state.refreshSelectedQuote);
   const addWatchlist = useLabStore((state) => state.addWatchlist);
   const removeWatchlist = useLabStore((state) => state.removeWatchlist);
@@ -141,9 +142,9 @@ export function StockWorkspace() {
       <section className={`data-health-strip data-health-${healthState}`} aria-label="行情数据状态">
         <span className="data-health-dot" aria-hidden="true" />
         <div className="data-health-copy"><strong>{healthTitle}</strong><small>{healthDetail}</small></div>
-        <button className="data-health-action" disabled={healthState === "checking" || healthState === "loading"} onClick={() => { if (integrationStatusError || (!realDataMode && healthState !== "checking")) setActiveView("settings"); else if (realDataMode) void refreshLiveData(); }}><ArrowsClockwise size={14} />{integrationStatusLoading ? "读取中…" : integrationStatusError ? "去设置重试" : realDataMode ? healthState === "loading" ? "更新中…" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button><button className="data-health-evidence" type="button" onClick={() => setEvidenceOpen(true)}>来源与证据</button>
+        <button className="data-health-action" disabled={healthState === "checking"} onClick={() => { if (healthState === "loading") cancelLiveDataRefresh(); else if (integrationStatusError || (!realDataMode && healthState !== "checking")) setActiveView("settings"); else if (realDataMode) void refreshLiveData(); }}><ArrowsClockwise size={14} />{integrationStatusLoading ? "读取中…" : integrationStatusError ? "去设置重试" : realDataMode ? healthState === "loading" ? "停止更新" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button><button className="data-health-evidence" type="button" onClick={() => setEvidenceOpen(true)}>来源与证据</button>
       </section>
-      <SetupChecklist userStateLoaded={userStateLoaded} integrationStatus={integrationStatus} integrationStatusLoading={integrationStatusLoading} integrationStatusError={integrationStatusError} hasQuote={hasQuote} liveDataLoading={liveDataLoading} onSettings={() => setActiveView("settings")} onRefresh={() => { void refreshSelectedQuote(symbol); }} />
+      <SetupChecklist userStateLoaded={userStateLoaded} integrationStatus={integrationStatus} integrationStatusLoading={integrationStatusLoading} integrationStatusError={integrationStatusError} hasQuote={hasQuote} liveDataLoading={liveDataLoading} onSettings={() => setActiveView("settings")} onRefresh={() => { void refreshSelectedQuote(symbol); }} onCancel={cancelLiveDataRefresh} />
       <section className="quote-overview">
       <div className={`primary-price ${changeToneClass(change)}`}>{price == null ? "—" : formatPrice(price)} <span>{change == null ? (integrationStatusLoading ? "正在读取数据连接" : integrationStatusError ? "数据连接暂不可用" : realDataMode ? "尚未查询真实行情" : "预览模式") : `${changeAmount == null ? "" : `${changeAmount >= 0 ? "+" : ""}${formatPrice(changeAmount)}　`}${formatPercent(change)}`}</span><small className={hasQuote ? `quote-source quote-source-${freshness.state}` : ""}>{hasQuote ? `数据源 · ${quote.source || "真实数据"} · ${formatQuoteFreshness(quote.asOf, Date.now(), stock.market)}` : integrationStatusLoading ? "连接确认后才会显示真实数据" : integrationStatusError ? "请到设置检查本地 Host" : realDataMode ? liveDataLoading ? "正在查询真实行情" : "暂无已查询数据 · 点击实时数据获取" : "配置数据服务后显示真实行情"}</small></div>
         <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.[key])}</dd></dl>)}</div>

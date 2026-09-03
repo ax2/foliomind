@@ -659,6 +659,18 @@ export const useLabStore = create((set, get) => ({
     }
     return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
+  cancelLiveDataRefresh: () => {
+    if (!get().liveDataLoading) return false;
+    // Invalidate the whole sweep before aborting the controller. Workers that
+    // are already between a CAP response and their state commit will then
+    // discard their result, while the Host still cancels the active upstream
+    // request when all shared waiters have left.
+    liveRequestGeneration += 1;
+    abortController(liveRequestController);
+    liveRequestController = null;
+    set({ liveDataLoading: false, liveDataError: "已停止本轮行情更新，可稍后重试" });
+    return true;
+  },
   refreshLiveData: async (options = {}) => {
     const state = get();
     const configured = hasRealDataAccess(state.integrationStatus);

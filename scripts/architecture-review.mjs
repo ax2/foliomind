@@ -136,6 +136,7 @@ check("行情图表交互明细", marketChart.includes("subscribeCrosshairMove")
 check("组合历史风险指标", portfolio.includes("export function portfolioRiskReturns") && portfolio.includes("sampleStandardDeviation") && portfolio.includes("correlationFor") && portfolio.includes("weightedVolatility") && portfolio.includes("averageCorrelation") && marketViews.includes("加权波动（样本）") && marketViews.includes("平均相关性") && marketViews.includes("历史数据覆盖") && prd.includes("Stage 3DI 组合历史风险指标"), "组合风险读数必须只基于真实历史序列，明确样本/未年化口径，并在数据不足时保持空值");
 check("百分比语义格式", quoteFormatting.includes("signed = true") && marketViews.includes("signed: false") && prd.includes("Stage 3DJ 百分比语义与格式边界"), "方向性变化保留正负号，组合占比与覆盖率等无方向比例必须显式使用无符号格式");
 check("百分比语义全入口一致性", marketViews.includes("formatPercent(quote.turnoverRate, { signed: false })") && marketViews.includes("formatPercent(value, { signed: false })") && marketViews.includes("formatPercent(row.weight, { signed: false })") && prd.includes("Stage 3DK 行情与组合比例语义全入口一致性"), "组合明细占比、市场换手率列和汇总必须使用无符号格式，涨跌幅继续保留方向符号");
+check("行情刷新主动取消", labStore.includes("cancelLiveDataRefresh: () =>") && stockWorkspace.includes("停止更新") && marketViews.includes("onCancel={cancelLiveDataRefresh}") && prd.includes("Stage 3DL 行情刷新主动取消"), "慢速行情全量刷新必须支持用户主动停止、取消上游请求并阻止过期结果提交");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

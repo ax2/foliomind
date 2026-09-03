@@ -193,6 +193,32 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, source: "真实 CAP" });
   });
 
+  it("cancels a slow full quote sweep without leaving the store busy", async () => {
+    let startedResolve;
+    let requestSignal;
+    const started = new Promise((resolve) => { startedResolve = resolve; });
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockImplementation((_input, options = {}) => {
+      requestSignal = options.signal;
+      startedResolve();
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true });
+      });
+    });
+
+    const pending = useLabStore.getState().refreshLiveData();
+    await started;
+    expect(useLabStore.getState().liveDataLoading).toBe(true);
+    expect(useLabStore.getState().cancelLiveDataRefresh()).toBe(true);
+    expect(requestSignal.aborted).toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ liveDataLoading: false, liveDataError: "已停止本轮行情更新，可稍后重试" });
+    await expect(pending).resolves.toBe(false);
+  });
+
   it("does not invoke the Agent again after a direct CAP authentication failure", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
