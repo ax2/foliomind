@@ -10,6 +10,7 @@ import { initialLabState, useLabStore } from "./store/useLabStore.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
 const originalHydrateUserState = useLabStore.getState().hydrateUserState;
+const originalImportPortfolioItems = useLabStore.getState().importPortfolioItems;
 const integrationMocks = vi.hoisted(() => ({
   applyIntegrationSettings: vi.fn(),
   loadIntegrationStatus: vi.fn(),
@@ -87,6 +88,7 @@ beforeEach(() => {
     rules: initialLabState.rules.map((rule) => ({ ...rule })),
     cancelMessage: originalCancelMessage,
     hydrateUserState: originalHydrateUserState,
+    importPortfolioItems: originalImportPortfolioItems,
   });
 });
 
@@ -644,9 +646,36 @@ describe("FolioMind core flows", () => {
     render(<PortfolioView />);
     const file = new File(["代码,名称,市场,数量,平均成本,现价,市值\nAAPL,Apple,NASDAQ,2,100,999,1998\n"], "portfolio.csv", { type: "text/csv" });
     fireEvent.change(screen.getByLabelText("导入持仓文件"), { target: { files: [file] } });
+    expect(await screen.findByRole("dialog", { name: "确认导入持仓" })).toBeInTheDocument();
+    expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
     expect(await screen.findByText(/已导入 1 个持仓/)).toBeInTheDocument();
     expect(useLabStore.getState().portfolioPositions[0]).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100 });
     expect(useLabStore.getState().portfolioPositions[0]).not.toHaveProperty("currentPrice");
+  });
+
+  it("does not mutate the portfolio when an import preview is cancelled", async () => {
+    useLabStore.setState({ ...initialLabState, userStateLoaded: true, portfolioPositions: [] });
+    render(<PortfolioView />);
+    const file = new File(["代码,名称,市场,数量,平均成本\nAAPL,Apple,NASDAQ,2,100\n"], "portfolio.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("导入持仓文件"), { target: { files: [file] } });
+    expect(await screen.findByRole("dialog", { name: "确认导入持仓" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "确认导入持仓" })).not.toBeInTheDocument();
+    expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
+  });
+
+  it("keeps the import preview when canonical portfolio save fails", async () => {
+    const importFailure = vi.fn().mockRejectedValue(new Error("保存失败"));
+    useLabStore.setState({ ...initialLabState, userStateLoaded: true, portfolioPositions: [], importPortfolioItems: importFailure });
+    render(<PortfolioView />);
+    const file = new File(["代码,名称,市场,数量,平均成本\nAAPL,Apple,NASDAQ,2,100\n"], "portfolio.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("导入持仓文件"), { target: { files: [file] } });
+    expect(await screen.findByRole("dialog", { name: "确认导入持仓" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("保存失败"));
+    expect(screen.getByRole("dialog", { name: "确认导入持仓" })).toBeInTheDocument();
+    expect(importFailure).toHaveBeenCalledOnce();
   });
 
   it("filters portfolio rows by symbol and plan status without changing stored positions", () => {

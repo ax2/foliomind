@@ -1876,6 +1876,17 @@ textarea:focus-visible {
 .portfolio-table-toolbar h2 { margin: 0; color: #273449; font-size: 14px; }
 .portfolio-table-toolbar small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
 .portfolio-import-notice { margin: 12px 0 0; border-radius: 7px; padding: 9px 11px; background: #eef6ff; color: #42688e; font-size: 10px; line-height: 1.5; }
+.portfolio-import-preview { margin-top: 12px; border: 1px solid #c7dced; border-radius: 9px; padding: 14px; background: #f8fbff; box-shadow: 0 6px 18px rgba(49, 93, 137, .08); }
+.portfolio-import-preview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.portfolio-import-preview-heading h2 { margin: 0; color: #26384d; font-size: 14px; }
+.portfolio-import-preview-heading p { max-width: 360px; margin: 4px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.portfolio-import-preview-summary { display: flex; flex-wrap: wrap; gap: 9px 16px; margin-top: 12px; color: #59718c; font-size: 10px; }
+.portfolio-import-preview-summary strong { color: #285e91; }
+.portfolio-import-preview-help { margin: 10px 0 0; color: #6c7c8f; font-size: 10px; line-height: 1.55; }
+.portfolio-import-errors { margin-top: 10px; color: #a45c3b; font-size: 10px; }
+.portfolio-import-errors summary { cursor: pointer; }
+.portfolio-import-errors ul { margin: 7px 0 0; padding-left: 18px; line-height: 1.6; }
+.portfolio-import-preview-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 13px; }
 .portfolio-table-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: #697586; font-size: 10px; }
 .portfolio-search { min-width: 180px; }
 .portfolio-search input { width: 100%; min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 8px; background: #fff; color: #3f4e62; font-size: 10px; }

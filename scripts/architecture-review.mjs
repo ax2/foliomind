@@ -128,6 +128,7 @@ check("用户状态变更事务完整性", labStore.includes("addRule: async") &
 check("自选顺序可访问调整", watchlistSidebar.includes("moveWatchlistItem") && watchlistSidebar.includes("上移") && watchlistSidebar.includes("下移") && labStore.includes("moveWatchlistItem: async") && storeTest.includes("moves a watchlist item within its group") && prd.includes("Stage 3DA 自选顺序可访问调整"), "自选侧栏在自定义顺序下必须支持键盘可达的同组上移/下移，并通过 canonical Host 持久化");
 check("组合持仓搜索与计划筛选", marketViews.includes("portfolioQuery") && marketViews.includes("portfolioPlanFilter") && marketViews.includes("搜索持仓") && marketViews.includes("计划状态筛选") && marketViews.includes("没有符合条件的持仓") && prd.includes("Stage 3DB 组合持仓搜索与计划筛选"), "组合持仓列表必须支持本地搜索、计划状态筛选和可恢复空态，且不改变用户状态或触发额外数据请求");
 check("持仓 CSV 导入边界", portfolio.includes("parsePortfolioImport") && portfolio.includes("parseDelimitedLine") && marketViews.includes("导入持仓") && labStore.includes("importPortfolioItems: async") && storeTest.includes("imports portfolio positions atomically") && prd.includes("Stage 3DC 持仓 CSV 导入与安全迁移"), "持仓 CSV 必须先解析校验再通过 canonical Host 一次性保存，忽略运行时行情字段并支持失败回滚");
+check("持仓导入预览确认", marketViews.includes("importPreview") && marketViews.includes("确认导入持仓") && marketViews.includes("confirmPortfolioImport") && marketViews.includes("取消不会修改当前组合") && prd.includes("Stage 3DD 持仓导入预览与显式确认") && readme.includes("展示预览，确认后才提交"), "持仓文件选择后只能生成本地预览，显式确认后才可提交 canonical 状态");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

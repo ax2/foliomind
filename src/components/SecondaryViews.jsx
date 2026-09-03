@@ -158,6 +158,7 @@ export function PortfolioView() {
   const [portfolioPlanFilter, setPortfolioPlanFilter] = useState("all");
   const [importNotice, setImportNotice] = useState("");
   const [importBusy, setImportBusy] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
   const portfolioImportInput = useRef(null);
   const metrics = useMemo(() => portfolioMetrics(positions, liveQuotes), [positions, liveQuotes]);
   const allocationRows = useMemo(() => portfolioAllocationRows(positions, liveQuotes), [positions, liveQuotes]);
@@ -260,11 +261,24 @@ export function PortfolioView() {
     try {
       const parsed = parsePortfolioImport(await readTextFile(file));
       if (!parsed.items.length) throw new Error(parsed.errors.length ? `没有可导入的有效持仓（${parsed.errors[0].reason}）` : "文件中没有持仓记录");
-      const imported = await importPortfolioItems(parsed.items);
-      const detail = [parsed.skipped ? `跳过 ${parsed.skipped} 条重复记录` : "", parsed.errors.length ? `另有 ${parsed.errors.length} 条无效记录` : ""].filter(Boolean).join("；");
-      setImportNotice(`已导入 ${imported.length} 个持仓${detail ? ` · ${detail}` : ""}。现价仍需重新获取真实行情。`);
+      setImportPreview({ fileName: file.name || "持仓文件", ...parsed });
     } catch (importError) {
       setImportNotice(importError?.message || "暂时无法导入持仓，请检查文件后重试。");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+  const confirmPortfolioImport = async () => {
+    if (!importPreview?.items?.length) return;
+    setImportBusy(true);
+    setImportNotice("");
+    try {
+      const imported = await importPortfolioItems(importPreview.items);
+      const detail = [importPreview.skipped ? `检测到 ${importPreview.skipped} 条重复记录，已采用最后一条` : "", importPreview.errors?.length ? `另有 ${importPreview.errors.length} 条无效记录` : ""].filter(Boolean).join("；");
+      setImportNotice(`已导入 ${imported.length} 个持仓${detail ? ` · ${detail}` : ""}。现价仍需重新获取真实行情。`);
+      setImportPreview(null);
+    } catch (importError) {
+      setImportNotice(importError?.message || "暂时无法导入持仓，请稍后重试。导入预览仍然保留。");
     } finally {
       setImportBusy(false);
     }
@@ -273,6 +287,7 @@ export function PortfolioView() {
     <input ref={portfolioImportInput} className="visually-hidden" type="file" accept=".csv,text/csv" aria-label="导入持仓文件" onChange={(event) => { void importPortfolioFile(event); }} />
     <p className="security-note">只使用已返回的真实行情计算；缺少现价的持仓会显示为“—”，不会用预览数字填充。导入支持 FolioMind 导出 CSV 或最小字段 CSV（代码、名称、市场、数量、平均成本）。</p>
     {importNotice ? <p className="portfolio-import-notice" role="status">{importNotice}</p> : null}
+    {importPreview ? <section className="portfolio-import-preview" role="dialog" aria-modal="false" aria-labelledby="portfolio-import-title"><div className="portfolio-import-preview-heading"><div><h2 id="portfolio-import-title">确认导入持仓</h2><p title={importPreview.fileName}>{importPreview.fileName}</p></div><button type="button" className="icon-button" aria-label="关闭导入预览" onClick={() => setImportPreview(null)} disabled={importBusy}><X size={18} /></button></div><div className="portfolio-import-preview-summary"><strong>{importPreview.items.length} 个持仓将被写入</strong><span>{importPreview.skipped ? `${importPreview.skipped} 条重复记录采用最后一条` : "没有重复记录"}</span><span>{importPreview.errors?.length ? `${importPreview.errors.length} 条无效记录不会写入` : "所有记录均通过校验"}</span></div><p className="portfolio-import-preview-help">同一代码会更新现有持仓并保留其本地 ID；现价、市值、盈亏和数据时间等运行时字段不会导入。取消不会修改当前组合。</p>{importPreview.errors?.length ? <details className="portfolio-import-errors"><summary>查看无效行（显示前 5 条）</summary><ul>{importPreview.errors.slice(0, 5).map((item) => <li key={`${item.line}-${item.reason}`}>第 {item.line} 行：{item.reason}</li>)}</ul></details> : null}<div className="portfolio-import-preview-actions"><button type="button" className="secondary-button" onClick={() => setImportPreview(null)} disabled={importBusy}>取消</button><button type="button" className="primary-action" onClick={() => { void confirmPortfolioImport(); }} disabled={importBusy}>{importBusy ? "保存中…" : "确认导入"}</button></div></section> : null}
     <section className="portfolio-summary" aria-label="组合概览">
       <article className="portfolio-card"><span>当前市值</span><strong>{money(metrics.totalMarketValue)}</strong><small>{metrics.pricedCount ? `${metrics.pricedCount}/${metrics.totalCount} 个持仓有行情` : "等待真实行情"}</small></article>
       <article className="portfolio-card"><span>持仓成本</span><strong>{money(metrics.totalCost)}</strong><small>{metrics.totalCount ? `${metrics.totalCount} 个持仓` : "尚未添加持仓"}</small></article>
