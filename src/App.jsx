@@ -8,7 +8,7 @@ import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
-import { listenForBackgroundReviewCompleted, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
+import { listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
@@ -65,7 +65,7 @@ export function App() {
     if (!userStateLoaded) return undefined;
     let disposed = false;
     let unlisten = () => {};
-    void listenForBackgroundReviewCompleted(() => { void hydrateUserState(); }).then((cleanup) => {
+    void listenForBackgroundReviewStatus(() => { void hydrateUserState(); }).then((cleanup) => {
       if (disposed) cleanup();
       else unlisten = cleanup;
     });

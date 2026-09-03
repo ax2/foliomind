@@ -14,6 +14,7 @@ use std::{
     collections::HashSet,
     sync::{
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
     thread,
@@ -27,6 +28,7 @@ use uuid::Uuid;
 const QUOTE_TOOL_ID: &str = "qveris_finance.mkt_l1_rt";
 const DISCLAIMER: &str = "本复盘仅整理已返回的真实数据，不构成投资建议或交易指令。";
 const COMPLETED_EVENT: &str = "foliomind://background-review-completed";
+const STATUS_EVENT: &str = "foliomind://background-review-status";
 const LOG_EVENT: &str = "foliomind://background-scheduler-log";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,6 +144,7 @@ fn emit_scheduler_log(
 #[derive(Default)]
 pub struct BackgroundScheduler {
     stop: Arc<AtomicBool>,
+    wake: Mutex<Option<Sender<()>>>,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
     running: Arc<AtomicBool>,
 }
@@ -451,7 +454,7 @@ fn set_schedule_error(app: &AppHandle, now: &str, result: &str, message: &str) {
     });
 }
 
-pub fn reconcile(
+fn reconcile_inner(
     app: &AppHandle,
     credentials: &Arc<dyn CredentialStore>,
 ) -> Result<String, String> {
@@ -756,6 +759,34 @@ pub fn reconcile(
     Ok("success".into())
 }
 
+/// Run one background review and publish a small, credential-free lifecycle event.
+///
+/// The persisted user state remains the source of truth. The event only tells an
+/// already-open UI that it should hydrate that state, including failure and
+/// waiting states that do not emit the historical completion event.
+pub fn reconcile(
+    app: &AppHandle,
+    credentials: &Arc<dyn CredentialStore>,
+) -> Result<String, String> {
+    let result = reconcile_inner(app, credentials);
+    let payload = match &result {
+        Ok(status) => json!({
+            "status": status,
+            "success": true,
+            "error": Value::Null,
+            "at": Utc::now().to_rfc3339(),
+        }),
+        Err(error) => json!({
+            "status": "error",
+            "success": false,
+            "error": error.chars().take(512).collect::<String>(),
+            "at": Utc::now().to_rfc3339(),
+        }),
+    };
+    let _ = app.emit(STATUS_EVENT, payload);
+    result
+}
+
 impl BackgroundScheduler {
     pub fn start(&self, app: AppHandle, credentials: Arc<dyn CredentialStore>) {
         let mut worker = self
@@ -768,15 +799,19 @@ impl BackgroundScheduler {
         self.stop.store(false, Ordering::Release);
         let stop = self.stop.clone();
         let running = self.running.clone();
+        let (wake_sender, wake_receiver) = mpsc::channel();
+        if let Ok(mut wake) = self.wake.lock() {
+            *wake = Some(wake_sender);
+        }
         *worker = Some(thread::spawn(move || {
-            let mut elapsed = 59_u8;
             while !stop.load(Ordering::Acquire) {
-                thread::sleep(Duration::from_secs(1));
-                elapsed = elapsed.saturating_add(1);
-                if elapsed < 60 {
-                    continue;
+                match wake_receiver.recv_timeout(Duration::from_secs(60)) {
+                    Ok(_) | Err(RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Timeout) => {}
                 }
-                elapsed = 0;
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
                 if running
                     .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
@@ -795,6 +830,11 @@ impl BackgroundScheduler {
 
     pub fn stop_and_join(&self) {
         self.stop.store(true, Ordering::Release);
+        if let Ok(mut wake) = self.wake.lock() {
+            if let Some(sender) = wake.take() {
+                let _ = sender.send(());
+            }
+        }
         if let Ok(mut worker) = self.worker.lock() {
             if let Some(handle) = worker.take() {
                 let _ = handle.join();
@@ -822,6 +862,11 @@ impl BackgroundScheduler {
 impl Drop for BackgroundScheduler {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Ok(wake) = self.wake.get_mut() {
+            if let Some(sender) = wake.take() {
+                let _ = sender.send(());
+            }
+        }
     }
 }
 

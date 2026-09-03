@@ -22,3 +22,9 @@ export async function listenForBackgroundReviewCompleted(handler) {
   const { listen } = await import("@tauri-apps/api/event");
   return listen("foliomind://background-review-completed", (event) => handler(event.payload));
 }
+
+export async function listenForBackgroundReviewStatus(handler) {
+  if (!isDesktopRuntime()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("foliomind://background-review-status", (event) => handler(event.payload));
+}

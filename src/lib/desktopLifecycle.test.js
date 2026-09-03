@@ -10,7 +10,7 @@ vi.mock("./piRuntime.js", () => ({ isDesktopRuntime: mocks.desktop }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
-import { listenForDesktopReconcile, loadDesktopLifecycleStatus, reconcileDesktopNow } from "./desktopLifecycle.js";
+import { listenForBackgroundReviewStatus, listenForDesktopReconcile, loadDesktopLifecycleStatus, reconcileDesktopNow } from "./desktopLifecycle.js";
 
 describe("desktop resident lifecycle bridge", () => {
   beforeEach(() => {
@@ -36,5 +36,16 @@ describe("desktop resident lifecycle bridge", () => {
     listener();
     expect(mocks.listen).toHaveBeenCalledWith("foliomind://background-reconcile", expect.any(Function));
     expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("forwards background review status events", async () => {
+    const unlisten = vi.fn();
+    let listener;
+    mocks.listen.mockImplementation(async (_event, callback) => { listener = callback; return unlisten; });
+    const handler = vi.fn();
+    await expect(listenForBackgroundReviewStatus(handler)).resolves.toBe(unlisten);
+    listener({ payload: { status: "error", success: false } });
+    expect(mocks.listen).toHaveBeenCalledWith("foliomind://background-review-status", expect.any(Function));
+    expect(handler).toHaveBeenCalledWith({ status: "error", success: false });
   });
 });
