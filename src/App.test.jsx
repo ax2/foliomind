@@ -744,6 +744,32 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState().portfolioPositions).toHaveLength(2);
   });
 
+  it("keeps allocation and turnover percentages neutral while preserving change signs", () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      portfolioPositions: [
+        { id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100 },
+        { id: "p2", symbol: "MSFT", name: "Microsoft", market: "NASDAQ", quantity: 2, averageCost: 100 },
+      ],
+      liveQuotes: {
+        AAPL: { price: 120, change: 1, turnoverRate: 12.5, asOf: "2026-08-31T08:00:00Z" },
+        MSFT: { price: 120, change: -1, turnoverRate: 4.25, asOf: "2026-08-31T08:00:00Z" },
+      },
+    });
+    render(<PortfolioView />);
+    const rows = [...document.querySelectorAll(".portfolio-row")];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("50.00%");
+    expect(rows[0].textContent).not.toContain("+50.00%");
+    cleanup();
+    render(<MarketView />);
+    fireEvent.change(screen.getByRole("combobox", { name: "行情视图" }), { target: { value: "trading" } });
+    expect(screen.getByText("12.50%", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("+1.00%", { exact: true }).length).toBeGreaterThan(0);
+  });
+
   it("renders portfolio performance only from two real review snapshots", () => {
     useLabStore.setState({
       ...initialLabState,
