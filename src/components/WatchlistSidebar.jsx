@@ -1,4 +1,4 @@
-import { DownloadSimple, DotsThree, Plus, UploadSimple, X } from "@phosphor-icons/react";
+import { CaretDown, CaretUp, DownloadSimple, DotsThree, Plus, UploadSimple, X } from "@phosphor-icons/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
@@ -16,7 +16,7 @@ async function readTextFile(file) {
   });
 }
 
-const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDataMode, previewMode, onSelect, onRemove }) {
+const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDataMode, previewMode, sortKey, canMoveUp, canMoveDown, onSelect, onRemove, onMove }) {
   const hasQuote = isValidQuotePrice(quote?.price);
   const hasChange = Number.isFinite(quote?.change);
   const market = item.market;
@@ -27,7 +27,13 @@ const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDat
       <span><strong title={item.name}>{item.name}</strong><small>{item.symbol}{item.category ? ` · ${item.category}` : ""}</small></span>
       <span className={`quote ${changeToneClass(quote?.change)}`}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasChange ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : previewMode ? "预览模式" : "等待配置"}</small>{hasQuote && <small className={`quote-freshness quote-source-${freshness.state}`} title={`${quote.source || "数据服务"} · ${freshnessLabel}`}>{formatCompactQuoteFreshness(quote.asOf, Date.now(), market)}</small>}</span>
     </button>
-    <button className="watch-remove" aria-label="移除自选" title={`移除${item.name || item.symbol}自选`} onClick={() => { void onRemove(item.symbol); }}><X size={12} /></button>
+    <span className="watch-row-actions">
+      {sortKey === "custom" && <>
+        <button className="watch-order-button" disabled={!canMoveUp} aria-label={`上移${item.symbol}`} title={canMoveUp ? `上移${item.name || item.symbol}` : "已经是本组第一项"} onClick={() => { void onMove(item.symbol, "up"); }}><CaretUp size={12} /></button>
+        <button className="watch-order-button" disabled={!canMoveDown} aria-label={`下移${item.symbol}`} title={canMoveDown ? `下移${item.name || item.symbol}` : "已经是本组最后一项"} onClick={() => { void onMove(item.symbol, "down"); }}><CaretDown size={12} /></button>
+      </>}
+      <button className="watch-remove" aria-label={`移除${item.symbol}自选`} title={`移除${item.name || item.symbol}自选`} onClick={() => { void onRemove(item.symbol); }}><X size={12} /></button>
+    </span>
   </div>;
 });
 
@@ -43,6 +49,7 @@ export function WatchlistSidebar() {
   const addWatchlist = useLabStore((state) => state.addWatchlist);
   const importWatchlistItems = useLabStore((state) => state.importWatchlistItems);
   const removeWatchlist = useLabStore((state) => state.removeWatchlist);
+  const moveWatchlistItem = useLabStore((state) => state.moveWatchlistItem);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -118,6 +125,15 @@ export function WatchlistSidebar() {
     try { await removeWatchlist(symbol); setFeedback("已从自选移除"); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, [removeWatchlist]);
+  const moveItem = useCallback(async (symbol, direction) => {
+    setError("");
+    try {
+      const moved = await moveWatchlistItem(symbol, direction);
+      if (moved) setFeedback(direction === "up" ? "已上移自选" : "已下移自选");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [moveWatchlistItem]);
   const selectItem = useCallback((symbol) => selectSymbol(symbol), [selectSymbol]);
   const addItem = async (item) => {
     if (!selectedAddGroup) { setError("请输入分组名称"); return; }
@@ -137,8 +153,9 @@ export function WatchlistSidebar() {
       <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
     </div>
+    {sortKey === "custom" && normalizedWatchlist.length > 1 && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} onSelect={selectItem} onRemove={removeItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
+      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && index > 0} canMoveDown={sortKey === "custom" && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}

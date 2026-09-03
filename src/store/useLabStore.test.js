@@ -90,6 +90,36 @@ describe("lab store streaming lifecycle", () => {
     expect(captured.watchlist).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "TEST" })]));
   });
 
+  it("moves a watchlist item within its group and persists the custom order", async () => {
+    persistence.saveUserState.mockClear();
+    useLabStore.setState({ watchlist: [
+      { symbol: "A", name: "第一项", market: "自定义", group: "核心" },
+      { symbol: "B", name: "第二项", market: "自定义", group: "核心" },
+      { symbol: "C", name: "另一组", market: "自定义", group: "观察" },
+      { symbol: "D", name: "第三项", market: "自定义", group: "核心" },
+    ] });
+
+    await expect(useLabStore.getState().moveWatchlistItem("D", "up")).resolves.toBe(true);
+    expect(useLabStore.getState().watchlist.map((item) => item.symbol)).toEqual(["A", "D", "C", "B"]);
+    expect(persistence.saveUserState).toHaveBeenCalledWith(expect.objectContaining({ watchlist: [
+      expect.objectContaining({ symbol: "A" }), expect.objectContaining({ symbol: "D" }), expect.objectContaining({ symbol: "C" }), expect.objectContaining({ symbol: "B" }),
+    ] }), expect.any(Object));
+    await expect(useLabStore.getState().moveWatchlistItem("A", "up")).resolves.toBe(false);
+    await expect(useLabStore.getState().moveWatchlistItem("D", "sideways")).resolves.toBe(false);
+  });
+
+  it("rolls back a watchlist reorder when canonical persistence fails", async () => {
+    const error = new Error("disk full");
+    useLabStore.setState({ watchlist: [
+      { symbol: "A", name: "第一项", market: "自定义", group: "核心" },
+      { symbol: "B", name: "第二项", market: "自定义", group: "核心" },
+    ] });
+    persistence.saveUserState.mockRejectedValueOnce(error);
+
+    await expect(useLabStore.getState().moveWatchlistItem("B", "up")).rejects.toBe(error);
+    expect(useLabStore.getState().watchlist.map((item) => item.symbol)).toEqual(["A", "B"]);
+  });
+
   it("edits a monitor rule, preserves its audit timeline, and resets the trigger edge", async () => {
     const history = [{ id: "check-1", ruleId: "rule-1", outcome: "triggered", checkedAt: "2026-08-31T08:00:00Z" }];
     useLabStore.setState({

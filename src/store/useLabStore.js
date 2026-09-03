@@ -1122,6 +1122,33 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
   },
+  moveWatchlistItem: async (symbol, direction) => {
+    const previous = get().watchlist;
+    const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+    const offset = direction === "up" ? -1 : direction === "down" ? 1 : 0;
+    const currentIndex = previous.findIndex((item) => String(item?.symbol || "").trim().toUpperCase() === normalizedSymbol);
+    if (!normalizedSymbol || offset === 0 || currentIndex < 0) return false;
+    const currentGroup = normalizeWatchlistItem(previous[currentIndex]).group;
+    const groupIndexes = previous.reduce((indexes, item, index) => {
+      if (normalizeWatchlistItem(item).group === currentGroup) indexes.push(index);
+      return indexes;
+    }, []);
+    const groupPosition = groupIndexes.indexOf(currentIndex);
+    const targetIndex = groupIndexes[groupPosition + offset];
+    if (targetIndex == null) return false;
+    const next = [...previous];
+    [next[currentIndex], next[targetIndex]] = [next[targetIndex], next[currentIndex]];
+    set({ watchlist: next });
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      // Preserve a later edit made while persistence was in flight; only undo
+      // this move when the list is still exactly the optimistic snapshot.
+      set((state) => JSON.stringify(state.watchlist) === JSON.stringify(next) ? { watchlist: previous } : {});
+      throw error;
+    }
+  },
   savePortfolioPosition: async (input) => {
     const normalized = normalizePortfolioPosition(input);
     if (!normalized) throw new Error("请输入有效的持仓数量和成本");
