@@ -725,12 +725,20 @@ async function readUserStateUnlocked() {
       }
     }
   }
+  const backupExists = await stat(stateBackupFile).then(() => true).catch(() => false);
+  if (!backupExists) return normalizeUserState(defaultState);
+  // A backup file proves that this directory has persisted user data. If that
+  // last-known-good snapshot is now invalid, fail closed instead of silently
+  // returning defaults and allowing the next save to overwrite user facts.
   try {
     const backup = await readPersistedUserState(stateBackupFile);
     await atomicJson(stateFile, backup);
     return backup;
-  } catch {
-    return normalizeUserState(defaultState);
+  } catch (backupError) {
+    const error = new Error("本地用户数据缺少主文件，且恢复快照不可用，请导入备份文件");
+    error.code = "USER_STATE_CORRUPTED";
+    error.cause = backupError;
+    throw error;
   }
 }
 async function readUserState() {

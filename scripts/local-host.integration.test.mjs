@@ -181,6 +181,19 @@ test("Local Host reports a recoverable error when user state and backup are both
   assert.match(response.payload.error, /导入备份/);
 });
 
+test("Local Host fails closed when the primary state is missing but its backup is corrupt", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-missing-primary-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  await writeFile(join(dataDir, "user-state.json.backup"), "{broken", "utf8");
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const response = await hostRequest(host, "/api/user-state");
+  assert.equal(response.response.status, 400);
+  assert.equal(response.payload.code, "USER_STATE_CORRUPTED");
+  assert.match(response.payload.error, /导入备份/);
+});
+
 test("Local Host serializes prompt requests, aborts the owner, and releases runtime state", async (context) => {
   let resolveRequest;
   const firstRequest = new Promise((resolve) => { resolveRequest = resolve; });
