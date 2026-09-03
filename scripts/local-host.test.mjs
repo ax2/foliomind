@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
+import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, debugPayload, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -59,6 +59,28 @@ test("extracts provider and model gateway costs without inventing missing charge
   assert.deepEqual(costFrom({ result: { cost: { value: "0.2", cost_unit: "credits" } } }), { amount: 0.2, unit: "credits" });
   assert.deepEqual(costSummary([{ type: "qveris", cost: { amount: 0.1, unit: "credits" } }, { type: "cap", cost: { amount: 0.05, unit: "credits" } }, { type: "model", cost: { amount: 0.2, unit: "usd" } }, { type: "model" }]), { qverisCalls: 2, qverisCost: 0.15, qverisCostKnown: 2, modelCalls: 2, modelCost: 0.2, modelCostKnown: 1, units: ["credits", "usd"], qverisUnits: ["credits"], modelUnits: ["usd"] });
   assert.deepEqual(costSummary([{ type: "cap", cacheHit: true }, { type: "cap", cacheHit: false, cost: { amount: 0.1, unit: "credits" } }]), { qverisCalls: 1, qverisCost: 0.1, qverisCostKnown: 1, modelCalls: 0, modelCost: 0, modelCostKnown: 0, units: ["credits"], qverisUnits: ["credits"], modelUnits: [] });
+});
+
+test("redacts nested credentials from developer payloads", () => {
+  const payload = debugPayload({
+    apiKey: "sk_live_should-not-appear",
+    nested: { access_token: "access-secret", clientSecret: "client-secret", safe: "600519" },
+    list: [{ authorization: "Bearer hidden" }, { token: "token-secret" }],
+    note: 'Bearer sk_text_secret and {"password":"inline-secret"}',
+  });
+  assert.equal(payload.includes("sk_live_should-not-appear"), false);
+  assert.equal(payload.includes("access-secret"), false);
+  assert.equal(payload.includes("client-secret"), false);
+  assert.equal(payload.includes("token-secret"), false);
+  assert.equal(payload.includes("inline-secret"), false);
+  assert.match(payload, /\[REDACTED\]/);
+  assert.match(payload, /600519/);
+
+  const circular = { safe: "kept" };
+  circular.self = circular;
+  assert.doesNotThrow(() => debugPayload(circular));
+  assert.match(debugPayload(circular), /\[CIRCULAR\]/);
+  assert.equal(debugPayload({ values: Array.from({ length: 101 }, (_, index) => index) }).includes("100"), false);
 });
 
 test("keeps the qveris_finance CAP contract local and normalizes real envelopes", () => {

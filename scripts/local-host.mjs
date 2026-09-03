@@ -209,20 +209,44 @@ export function createRuntimeGate() {
 
 const runtimeGate = createRuntimeGate();
 
+const SENSITIVE_DEBUG_KEY = /^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|token|secret|password|credential|private[_-]?key|client[_-]?secret)$/i;
+
+/**
+ * Redact both ordinary error text and structured developer payloads. CAP
+ * parameters are user-controlled JSON, so a string-only regex is not enough:
+ * JSON quoting and nested objects must never allow credentials into the local
+ * debug log or an exported log bundle.
+ */
 function redact(value, max = 800) {
   return String(value || "")
     .replace(/Bearer\s+[^\s,;"']+/gi, "Bearer [REDACTED]")
-    .replace(/(api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;"']+/gi, (_match, key) => `${key}=[REDACTED]`)
-    .replace(/([?&](?:api[_-]?key|token|secret)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(/((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|token|secret|password|credential|private[_-]?key|client[_-]?secret)(?:["']?)\s*[:=]\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[REDACTED]"')
+    .replace(/((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|token|secret|password|credential|private[_-]?key|client[_-]?secret)(?:["']?)\s*[:=]\s*)'(?:[^'\\]|\\.)*'/gi, "$1'[REDACTED]'")
+    .replace(/((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|token|secret|password|credential|private[_-]?key|client[_-]?secret)(?:["']?)\s*[:=]\s*)[^\s,;}'"]+/gi, "$1[REDACTED]")
+    .replace(/([?&](?:api[_-]?key|token|secret|authorization)=)[^&\s]+/gi, "$1[REDACTED]")
     .replace(/\b(?:sk|cap)_[A-Za-z0-9._-]+\b/g, "[REDACTED]")
     .slice(0, max);
 }
-function debugPayload(value, max = 3_000) {
+
+function sanitizeDebugValue(value, seen = new WeakSet(), depth = 0) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return redact(value);
+  if (depth > 8) return "[TRUNCATED]";
+  if (typeof value !== "object") return redact(String(value));
+  if (seen.has(value)) return "[CIRCULAR]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.slice(0, 100).map((item) => sanitizeDebugValue(item, seen, depth + 1));
+  const result = {};
+  for (const [key, item] of Object.entries(value).slice(0, 200)) {
+    result[key] = SENSITIVE_DEBUG_KEY.test(key) ? "[REDACTED]" : sanitizeDebugValue(item, seen, depth + 1);
+  }
+  return result;
+}
+
+export function debugPayload(value, max = 3_000) {
   if (value == null) return "";
-  try {
-    const encoded = JSON.stringify(value);
-    return redact(encoded, max);
-  } catch { return redact(value).slice(0, max); }
+  try { return redact(JSON.stringify(sanitizeDebugValue(value)), max); }
+  catch { return redact(value).slice(0, max); }
 }
 function costCandidate(value, unitHint = "credits") {
   if (value == null || Array.isArray(value)) return null;
