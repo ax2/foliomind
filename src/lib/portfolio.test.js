@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, parsePortfolioImport, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, sortPortfolioRows } from "./portfolio.js";
+import { normalizePortfolioPosition, parsePortfolioImport, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, portfolioRiskReturns, sortPortfolioRows } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -84,6 +84,41 @@ describe("portfolio metrics", () => {
     expect(result.pricedCoverage).toBe(50);
     expect(result.signals.map((signal) => signal.title)).toEqual(expect.arrayContaining(["单一标的集中度较高", "部分持仓缺少现价"]));
     expect(result.hasEnoughDataForRiskModel).toBe(false);
+  });
+
+  it("computes sample risk metrics only from real overlapping history", () => {
+    const series = (prices) => prices.map((close, index) => ({ time: `2026-08-${String(25 + index).padStart(2, "0")}`, close }));
+    const positions = [
+      { id: "p1", symbol: "AAPL", name: "Apple", quantity: 1, averageCost: 100 },
+      { id: "p2", symbol: "MSFT", name: "Microsoft", quantity: 1, averageCost: 200 },
+    ];
+    const quotes = { AAPL: { price: 104, series: series([100, 101, 103, 102, 104]) }, MSFT: { price: 208, seriesByRange: { "日K": series([200, 202, 206, 204, 208]) } } };
+    const returns = portfolioRiskReturns(quotes.AAPL);
+    expect(returns.size).toBe(4);
+    expect([...returns.values()][0]).toBeCloseTo(1, 6);
+    const result = portfolioRiskMetrics(positions, quotes);
+    expect(result.historicalCount).toBe(2);
+    expect(result.historicalSampleCount).toBe(4);
+    expect(result.historicalCoverage).toBe(100);
+    expect(result.correlationPairs).toBe(1);
+    expect(result.averageCorrelation).toBeCloseTo(1, 6);
+    expect(result.weightedVolatility).toBeGreaterThan(0);
+    expect(result.hasEnoughDataForRiskModel).toBe(true);
+    expect(result.signals.map((signal) => signal.title)).toContain("历史风险指标已计算");
+  });
+
+  it("leaves historical risk metrics empty when history is too short or cannot overlap", () => {
+    const makeSeries = (start, offset = 0) => [0, 1, 2].map((value) => ({ time: `2026-08-${String(start + value).padStart(2, "0")}`, close: 100 + offset + value }));
+    const positions = [
+      { id: "p1", symbol: "AAPL", name: "Apple", quantity: 1, averageCost: 100 },
+      { id: "p2", symbol: "MSFT", name: "Microsoft", quantity: 1, averageCost: 200 },
+    ];
+    const result = portfolioRiskMetrics(positions, { AAPL: { price: 102, series: makeSeries(25) }, MSFT: { price: 202, series: makeSeries(30, 100) } });
+    expect(result.weightedVolatility).toBeNull();
+    expect(result.averageCorrelation).toBeNull();
+    expect(result.correlationPairs).toBe(0);
+    expect(result.hasEnoughDataForRiskModel).toBe(false);
+    expect(result.signals.map((signal) => signal.title)).not.toContain("历史风险指标已计算");
   });
 
   it("exports a truthful report with blanks for unpriced positions", () => {

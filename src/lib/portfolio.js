@@ -292,6 +292,80 @@ export function portfolioPerformanceSeries(reviews, limit = 60) {
   return [...byDay.values()].sort((left, right) => left.timestamp - right.timestamp).slice(-safeLimit);
 }
 
+function riskTimestamp(rawTime) {
+  if (typeof rawTime === "number" && Number.isFinite(rawTime)) return rawTime > 10_000_000_000 ? Math.floor(rawTime / 1000) : Math.floor(rawTime);
+  const text = String(rawTime ?? "").trim();
+  if (!text) return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const number = Number(text);
+    return Number.isFinite(number) ? (number > 10_000_000_000 ? Math.floor(number / 1000) : Math.floor(number)) : null;
+  }
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null;
+}
+
+/**
+ * Build percentage returns from the longest real historical series available
+ * for a quote. The range is intentionally not annualized because provider
+ * series can be daily, weekly, or intraday; the UI labels the result as a
+ * sample statistic instead of implying a fixed frequency.
+ */
+export function portfolioRiskReturns(quote = {}) {
+  const candidates = [];
+  if (Array.isArray(quote?.series)) candidates.push(quote.series);
+  if (quote?.seriesByRange && typeof quote.seriesByRange === "object") {
+    for (const series of Object.values(quote.seriesByRange)) if (Array.isArray(series)) candidates.push(series);
+  }
+  let best = [];
+  for (const series of candidates) {
+    const byTime = new Map();
+    for (const point of series) {
+      const time = riskTimestamp(point?.time ?? point?.timestamp ?? point?.date);
+      const price = finitePositiveValue(point?.close ?? point?.value ?? point?.price);
+      if (time == null || price == null) continue;
+      byTime.set(time, price);
+    }
+    const points = [...byTime.entries()].sort((left, right) => left[0] - right[0]);
+    if (points.length > best.length) best = points;
+  }
+  const returns = new Map();
+  for (let index = 1; index < best.length; index += 1) {
+    const previous = best[index - 1][1];
+    const current = best[index][1];
+    if (!Number.isFinite(previous) || previous <= 0 || !Number.isFinite(current) || current <= 0) continue;
+    returns.set(best[index][0], ((current - previous) / previous) * 100);
+  }
+  return returns;
+}
+
+function sampleStandardDeviation(values) {
+  if (!Array.isArray(values) || values.length < 3) return null;
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + ((value - average) ** 2), 0) / (values.length - 1);
+  return Number.isFinite(variance) && variance >= 0 ? Math.sqrt(variance) : null;
+}
+
+function correlationFor(left, right) {
+  const overlap = [...left.keys()].filter((time) => right.has(time));
+  if (overlap.length < 3) return null;
+  const leftValues = overlap.map((time) => left.get(time));
+  const rightValues = overlap.map((time) => right.get(time));
+  const leftAverage = leftValues.reduce((sum, value) => sum + value, 0) / overlap.length;
+  const rightAverage = rightValues.reduce((sum, value) => sum + value, 0) / overlap.length;
+  let numerator = 0;
+  let leftVariance = 0;
+  let rightVariance = 0;
+  for (let index = 0; index < overlap.length; index += 1) {
+    const leftDelta = leftValues[index] - leftAverage;
+    const rightDelta = rightValues[index] - rightAverage;
+    numerator += leftDelta * rightDelta;
+    leftVariance += leftDelta ** 2;
+    rightVariance += rightDelta ** 2;
+  }
+  const denominator = Math.sqrt(leftVariance * rightVariance);
+  return denominator > 0 && Number.isFinite(denominator) ? numerator / denominator : null;
+}
+
 /** Sort portfolio rows for comparison; missing real quote values always stay last. */
 export function sortPortfolioRows(rows, sortKey = "default", direction = "desc") {
   const values = Array.isArray(rows) ? rows : [];
@@ -388,6 +462,23 @@ export function portfolioRiskMetrics(positions, liveQuotes) {
   const missingCost = missingRows.reduce((total, row) => total + row.costValue, 0);
   const missingCostWeight = totalCost > 0 ? (missingCost / totalCost) * 100 : null;
   const pricedCoverage = metrics.totalCount > 0 ? (metrics.pricedCount / metrics.totalCount) * 100 : null;
+  const returnsBySymbol = new Map(pricedRows.map((row) => [row.symbol, portfolioRiskReturns(row.quote)]));
+  const historicalRows = pricedRows.filter((row) => (returnsBySymbol.get(row.symbol)?.size || 0) >= 3);
+  const volatilityRows = historicalRows.map((row) => ({ row, volatility: sampleStandardDeviation([...returnsBySymbol.get(row.symbol).values()]) })).filter((entry) => entry.volatility != null);
+  const weightedVolatility = volatilityRows.length && metrics.totalMarketValue > 0
+    ? volatilityRows.reduce((total, entry) => total + entry.volatility * ((entry.row.weight || 0) / 100), 0)
+    : null;
+  const correlations = [];
+  for (let leftIndex = 0; leftIndex < historicalRows.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < historicalRows.length; rightIndex += 1) {
+      const left = returnsBySymbol.get(historicalRows[leftIndex].symbol);
+      const right = returnsBySymbol.get(historicalRows[rightIndex].symbol);
+      const correlation = correlationFor(left, right);
+      if (correlation != null) correlations.push(correlation);
+    }
+  }
+  const averageCorrelation = correlations.length ? correlations.reduce((sum, value) => sum + value, 0) / correlations.length : null;
+  const historicalSampleCount = historicalRows.length ? Math.min(...historicalRows.map((row) => returnsBySymbol.get(row.symbol).size)) : 0;
   const signals = [];
   if (topPosition?.weight >= 50) {
     signals.push({ level: "critical", title: "单一标的集中度较高", detail: `${topPosition.name} 占已计价组合 ${topPosition.weight.toFixed(1)}%，建议确认是否符合你的风险上限。` });
@@ -397,15 +488,24 @@ export function portfolioRiskMetrics(positions, liveQuotes) {
   if (missingRows.length > 0) {
     signals.push({ level: "info", title: "部分持仓缺少现价", detail: `${missingRows.length} 个持仓暂未返回真实行情，${missingCostWeight == null ? "暂无法计算" : `约 ${missingCostWeight.toFixed(1)}% 成本暴露`}未纳入市值和盈亏。` });
   }
-  if (pricedRows.length >= 2 && pricedRows.every((row) => !Array.isArray(row.quote?.series) || row.quote.series.length < 2)) {
+  if (pricedRows.length >= 2 && historicalRows.length < 2) {
     signals.push({ level: "info", title: "波动率与相关性尚未计算", detail: "当前没有足够的真实历史序列；补齐历史数据后才会计算波动率和相关性。" });
+  }
+  if (historicalRows.length >= 2 && historicalSampleCount >= 3 && correlations.length > 0) {
+    signals.push({ level: "info", title: "历史风险指标已计算", detail: `基于 ${historicalRows.length} 个持仓；每个可计算持仓至少有 ${historicalSampleCount} 个历史收益点，${correlations.length} 组序列存在重叠。指标为样本统计，不构成投资建议。` });
   }
   return {
     topPosition,
     topWeight: topPosition?.weight ?? null,
     pricedCoverage,
     missingCostWeight,
+    weightedVolatility,
+    averageCorrelation,
+    correlationPairs: correlations.length,
+    historicalCount: historicalRows.length,
+    historicalSampleCount,
+    historicalCoverage: metrics.pricedCount > 0 ? (historicalRows.length / metrics.pricedCount) * 100 : null,
     signals,
-    hasEnoughDataForRiskModel: pricedRows.length >= 2 && pricedRows.every((row) => Array.isArray(row.quote?.series) && row.quote.series.length >= 2),
+    hasEnoughDataForRiskModel: historicalRows.length >= 2 && historicalSampleCount >= 3 && correlations.length > 0,
   };
 }
