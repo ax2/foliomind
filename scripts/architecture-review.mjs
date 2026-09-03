@@ -12,6 +12,7 @@ const quoteFormatting = await load("src/lib/quoteFormatting.js");
 const monitorLifecycle = await load("src/lib/monitorLifecycle.js");
 const strategies = await load("src/data/monitorStrategies.js");
 const research = await load("src/lib/research.js");
+const viteConfig = await load("vite.config.mjs");
 const portfolio = await load("src/lib/portfolio.js");
 const marketBreadth = await load("src/lib/marketBreadth.js");
 const anomalyDetection = await load("src/lib/anomalyDetection.js");
@@ -141,6 +142,8 @@ check("hydration 选择一致性", labStore.includes("const nextWatchlist = hydr
 check("事件刷新主动取消", labStore.includes("cancelEventsRefresh: () =>") && labStore.includes("eventsRequestGeneration += 1") && marketViews.includes("cancelEventsRefresh") && marketViews.includes("停止更新") && storeTest.includes("cancels a slow event refresh without committing late results") && prd.includes("Stage 3DN 事件刷新主动取消"), "事件日历慢请求必须支持独立主动取消、AbortSignal 和过期结果隔离，不得连带行情请求");
 check("事件来源链接安全", labStore.includes('from "../lib/urlSafety.js"') && labStore.includes("url: safeExternalUrl(event.url)") && marketViews.includes("safeExternalUrl(event.url)") && storeTest.includes("keeps event source links on safe web protocols") && prd.includes("Stage 3DO 事件来源链接安全边界"), "事件来源只允许受长度限制的 HTTP(S) 链接，危险协议必须降为空且不影响其它真实事件字段");
 check("开发日志嵌套敏感字段脱敏", localHost.includes("SENSITIVE_DEBUG_KEY") && localHost.includes("sanitizeDebugValue") && localHost.includes("export function debugPayload") && hostLockTest.includes("redacts nested credentials from developer payloads") && prd.includes("Stage 3DP 开发日志嵌套敏感字段脱敏"), "动态 CAP 参数和返回摘要必须递归按字段脱敏，不能因 JSON 嵌套或引号格式把凭据写入本地日志");
+check("首屏路由按需拆包", app.includes("lazy(() => import(\"./components/SecondaryViews.jsx\")") && app.includes("<Suspense fallback={secondaryViewLoading}>") && viteConfig.includes("manualChunks") && viteConfig.includes("charts") && viteConfig.includes("icons") && prd.includes("Stage 3DQ 首屏路由按需拆包"), "自选首页不得静态加载所有二级工作台，生产构建需保留可缓存的异步路由 chunk 和图表/图标边界");
+check("首屏包体积门禁", packageJson.scripts?.build?.includes("check:bundle") && packageJson.scripts?.["check:bundle"]?.includes("check-bundle-size") && prd.includes("控制在 450KB"), "生产构建必须执行首屏入口 450KB 与二级异步 chunk 检查，避免性能回归只停留在人工观察");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

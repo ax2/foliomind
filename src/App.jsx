@@ -1,9 +1,8 @@
 import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { ChatView, EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, SettingsView, SkillsView } from "./components/SecondaryViews.jsx";
 import { BRIEFING_RECONCILE_INTERVAL_MS, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
@@ -13,6 +12,18 @@ import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
 import { friendlyDataMessage } from "./lib/friendlyMessages.js";
+
+// The secondary workspaces are intentionally kept out of the initial route.
+// They share one module so switching views still incurs a single, cacheable
+// request while the watchlist remains fast on the first load.
+const SecondaryViewModule = lazy(() => import("./components/SecondaryViews.jsx").then((module) => ({
+  default: ({ view }) => {
+    const View = module[view];
+    return View ? <View /> : null;
+  },
+})));
+
+const secondaryViewLoading = <div className="secondary-view-loading" role="status" aria-live="polite">正在打开工作台…</div>;
 
 export function App() {
   const activeView = useLabStore((state) => state.activeView);
@@ -114,16 +125,19 @@ export function App() {
       window.removeEventListener("focus", onWindowFocus);
     };
   }, [userStateLoaded, integrationRefreshKey, priorityRefreshKey, refreshLiveData]);
+  const renderSecondaryView = (view, withLiveQuotes = false) => <Suspense fallback={secondaryViewLoading}>
+    {withLiveQuotes ? <div className="secondary-view-shell"><LiveQuotesStrip /><SecondaryViewModule view={view} /></div> : <SecondaryViewModule view={view} />}
+  </Suspense>;
   const renderView = () => {
-    if (activeView === "market") return <div className="secondary-view-shell"><LiveQuotesStrip /><MarketView /></div>;
-    if (activeView === "research") return <div className="secondary-view-shell"><LiveQuotesStrip /><ResearchView /></div>;
-    if (activeView === "monitor") return <div className="secondary-view-shell"><LiveQuotesStrip /><MonitorView /></div>;
-    if (activeView === "events") return <div className="secondary-view-shell"><LiveQuotesStrip /><EventsView /></div>;
-    if (activeView === "portfolio") return <PortfolioView />;
-    if (activeView === "notifications") return <NotificationsView />;
-    if (activeView === "skills") return <SkillsView />;
-    if (activeView === "chat") return <ChatView />;
-    if (activeView === "settings") return <SettingsView />;
+    if (activeView === "market") return renderSecondaryView("MarketView", true);
+    if (activeView === "research") return renderSecondaryView("ResearchView", true);
+    if (activeView === "monitor") return renderSecondaryView("MonitorView", true);
+    if (activeView === "events") return renderSecondaryView("EventsView", true);
+    if (activeView === "portfolio") return renderSecondaryView("PortfolioView");
+    if (activeView === "notifications") return renderSecondaryView("NotificationsView");
+    if (activeView === "skills") return renderSecondaryView("SkillsView");
+    if (activeView === "chat") return renderSecondaryView("ChatView");
+    if (activeView === "settings") return renderSecondaryView("SettingsView");
     return <><WatchlistSidebar /><StockWorkspace /><CopilotPanel /></>;
   };
   const showGlobalNotice = settingsNotice && activeView !== "settings";

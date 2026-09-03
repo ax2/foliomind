@@ -167,7 +167,7 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
     expect(screen.getByRole("menu", { name: "更多操作" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "打开盯盘" }));
-    expect(screen.getByRole("heading", { name: "个股盯盘" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "个股盯盘" })).toBeInTheDocument();
     useLabStore.setState({ activeView: "watchlist", selectedSymbol: "600519" });
     expect(await screen.findByRole("button", { name: "图表设置" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "图表设置" }));
