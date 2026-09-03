@@ -639,6 +639,30 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByText("等待真实行情").length).toBeGreaterThan(0);
   });
 
+  it("filters portfolio rows by symbol and plan status without changing stored positions", () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      portfolioPositions: [
+        { id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100, planStatus: "active", planThesis: "盈利增长" },
+        { id: "p2", symbol: "MSFT", name: "Microsoft", market: "NASDAQ", quantity: 1, averageCost: 300, planStatus: "none" },
+      ],
+      liveQuotes: { AAPL: { price: 120, change: 1, asOf: "2026-08-31T08:00:00Z" }, MSFT: { price: 310, change: -1, asOf: "2026-08-31T08:00:00Z" } },
+    });
+    render(<PortfolioView />);
+    expect(screen.getByText((content) => content.includes("显示 2/2 个持仓"))).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索持仓" }), { target: { value: "Microsoft" } });
+    expect(screen.getByText((content) => content.includes("显示 1/2 个持仓"))).toBeInTheDocument();
+    expect(screen.getAllByText("Microsoft").length).toBeGreaterThan(0);
+    expect([...document.querySelectorAll(".portfolio-row")].map((row) => row.textContent)).not.toEqual(expect.arrayContaining([expect.stringContaining("Apple")]));
+    fireEvent.change(screen.getByRole("combobox", { name: "计划状态筛选" }), { target: { value: "active" } });
+    expect(screen.getByText("没有符合条件的持仓")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(screen.getByText((content) => content.includes("显示 2/2 个持仓"))).toBeInTheDocument();
+    expect(useLabStore.getState().portfolioPositions).toHaveLength(2);
+  });
+
   it("renders portfolio performance only from two real review snapshots", () => {
     useLabStore.setState({
       ...initialLabState,

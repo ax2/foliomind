@@ -1876,6 +1876,8 @@ textarea:focus-visible {
 .portfolio-table-toolbar h2 { margin: 0; color: #273449; font-size: 14px; }
 .portfolio-table-toolbar small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
 .portfolio-table-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: #697586; font-size: 10px; }
+.portfolio-search { min-width: 180px; }
+.portfolio-search input { width: 100%; min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 8px; background: #fff; color: #3f4e62; font-size: 10px; }
 .portfolio-table-toolbar select { min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 7px; background: #fff; color: #3f4e62; font-size: 10px; }
 .portfolio-sort-direction { min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 9px; background: #fff; color: #526071; cursor: pointer; font-size: 10px; }
 .portfolio-sort-direction:disabled { color: #aab2bc; background: #f7f8fa; cursor: not-allowed; }
@@ -1885,6 +1887,10 @@ textarea:focus-visible {
 .portfolio-row > span:first-child { display: grid; gap: 3px; }
 .portfolio-row strong { color: #242b35; font-size: 12px; }
 .portfolio-row small { color: var(--muted); font-size: 10px; }
+.portfolio-filter-empty { display: grid; justify-items: center; gap: 7px; padding: 28px 15px; color: var(--muted); text-align: center; }
+.portfolio-filter-empty svg { color: #7b9bc0; }
+.portfolio-filter-empty strong { color: #3f4e62; font-size: 12px; }
+.portfolio-filter-empty p { margin: 0; font-size: 10px; }
 .portfolio-actions { display: flex; gap: 3px; }
 .portfolio-actions .icon-button { width: auto; padding: 0 6px; font-size: 10px; }
 .portfolio-alert-plan { display: grid; gap: 3px; color: var(--muted); font-size: 10px; }
@@ -2127,6 +2133,11 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
   .portfolio-summary { grid-template-columns: 1fr; }
+  .portfolio-table-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .portfolio-table-toolbar > div { flex: 1 1 100%; }
+  .portfolio-table-toolbar label { flex: 1 1 140px; }
+  .portfolio-search { min-width: 0; }
+  .portfolio-sort-direction { flex: 1 1 100%; }
   .portfolio-performance-heading { flex-direction: column; gap: 4px; }
   .portfolio-performance-chart svg { height: 150px; }
   .portfolio-performance-summary { grid-template-columns: 1fr; }
