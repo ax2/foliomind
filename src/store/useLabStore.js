@@ -1438,6 +1438,11 @@ export const useLabStore = create((set, get) => ({
     }
   },
   runMonitorCheck: async (ruleId) => {
+    // Keep the real-data boundary defensive at the Store API as well as in
+    // the UI. Older views or direct integrations must not turn browser
+    // preview output into persisted monitor history or notifications.
+    const runtimeState = get();
+    if (!(isLocalWebRuntime() || isDesktopRuntime()) || !hasRealDataAccess(runtimeState.integrationStatus)) return false;
     let acquired = false; let expired = false; let rule; let previousRule = null; let items = [];
     set((state) => {
       rule = state.rules.find((candidate) => candidate.id === ruleId);
