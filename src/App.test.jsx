@@ -1059,6 +1059,26 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
   });
 
+  it("does not render unsafe event source URLs as clickable links", async () => {
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "local-host",
+    });
+    useLabStore.setState({
+      userStateLoaded: true,
+      eventDataLoaded: true,
+      eventDataReceivedCount: 1,
+      eventDataTotalCount: 1,
+      events: [{ id: "event-unsafe", date: "2026-09-10", symbol: "600519", name: "贵州茅台", type: "公告", title: "真实事件", detail: "真实事件说明", source: "真实事件源", url: "javascript:alert(1)" }],
+    });
+
+    render(<EventsView />);
+    expect(await screen.findByText("真实事件")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "查看来源" })).not.toBeInTheDocument();
+  });
+
   it("filters the real event calendar to portfolio holdings", async () => {
     integrationMocks.loadIntegrationStatus.mockResolvedValue({
       credentialConfigured: true,

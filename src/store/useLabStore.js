@@ -17,6 +17,7 @@ import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvide
 import { collectEventReminders } from "../lib/eventReminders.js";
 import { isValidQuotePrice, marketRegionFor } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
+import { safeExternalUrl } from "../lib/urlSafety.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -385,7 +386,7 @@ function eventsFromReply(text) {
     title: String(event.title || event.description || event.name || ""),
     detail: String(event.detail || event.description || event.title || ""),
     source: String(event.source || event.sourceName || fallbackSource),
-    url: String(event.url || ""),
+    url: safeExternalUrl(event.url),
   })).filter((event) => event.date || event.title);
 }
 

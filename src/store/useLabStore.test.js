@@ -901,6 +901,29 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().events[0]).toMatchObject({ symbol: "600519", type: "分红", title: "分红登记日", source: "真实事件源", capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" });
   });
 
+  it("keeps event source links on safe web protocols", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: {
+        events: [
+          { date: "2026-09-01", type: "公告", title: "安全来源", url: "  https://example.com/notice  " },
+          { date: "2026-09-02", type: "公告", title: "危险来源", url: "javascript:alert(document.domain)" },
+          { date: "2026-09-03", type: "公告", title: "数据来源", url: "data:text/html,<script>alert(1)</script>" },
+        ],
+        source: "真实事件源",
+      },
+      mode: "qveris-cap",
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshEvents()).resolves.toBe(true);
+    expect(useLabStore.getState().events.map((event) => event.url)).toEqual(["https://example.com/notice", "", ""]);
+  });
+
   it("cancels a slow event refresh without committing late results", async () => {
     let startedResolve;
     let requestSignal;
