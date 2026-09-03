@@ -137,6 +137,7 @@ check("组合历史风险指标", portfolio.includes("export function portfolioR
 check("百分比语义格式", quoteFormatting.includes("signed = true") && marketViews.includes("signed: false") && prd.includes("Stage 3DJ 百分比语义与格式边界"), "方向性变化保留正负号，组合占比与覆盖率等无方向比例必须显式使用无符号格式");
 check("百分比语义全入口一致性", marketViews.includes("formatPercent(quote.turnoverRate, { signed: false })") && marketViews.includes("formatPercent(value, { signed: false })") && marketViews.includes("formatPercent(row.weight, { signed: false })") && prd.includes("Stage 3DK 行情与组合比例语义全入口一致性"), "组合明细占比、市场换手率列和汇总必须使用无符号格式，涨跌幅继续保留方向符号");
 check("行情刷新主动取消", labStore.includes("cancelLiveDataRefresh: () =>") && stockWorkspace.includes("停止更新") && marketViews.includes("onCancel={cancelLiveDataRefresh}") && prd.includes("Stage 3DL 行情刷新主动取消"), "慢速行情全量刷新必须支持用户主动停止、取消上游请求并阻止过期结果提交");
+check("hydration 选择一致性", labStore.includes("const nextWatchlist = hydrated.watchlist.length") && labStore.includes("const selectedSymbol = nextWatchlist.some") && storeTest.includes("anchors the selected workspace to the hydrated watchlist") && prd.includes("Stage 3DM 持久化自选与详情上下文一致性"), "用户状态 hydration 后详情选择必须落在当前规范化自选列表内，保留仍存在的用户选择并安全回退");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

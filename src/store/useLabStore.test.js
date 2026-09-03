@@ -45,6 +45,28 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ userStateLoaded: true, userStateLoading: false, userStateError: "", watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
   });
 
+  it("anchors the selected workspace to the hydrated watchlist", async () => {
+    useLabStore.setState({ selectedSymbol: "600519", watchlist: initialLabState.watchlist });
+    persistence.loadUserState.mockResolvedValueOnce({ revision: 12, watchlist: [
+      { symbol: "AAPL", name: "Apple", market: "NASDAQ" },
+      { symbol: "MSFT", name: "Microsoft", market: "NASDAQ" },
+    ] });
+
+    await expect(useLabStore.getState().hydrateUserState()).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "AAPL", watchlist: [{ symbol: "AAPL" }, { symbol: "MSFT" }] });
+  });
+
+  it("keeps a user-selected symbol when it survives hydration", async () => {
+    useLabStore.setState({ selectedSymbol: "MSFT", watchlist: initialLabState.watchlist });
+    persistence.loadUserState.mockResolvedValueOnce({ revision: 13, watchlist: [
+      { symbol: "AAPL", name: "Apple", market: "NASDAQ" },
+      { symbol: "MSFT", name: "Microsoft", market: "NASDAQ" },
+    ] });
+
+    await expect(useLabStore.getState().hydrateUserState()).resolves.toBe(true);
+    expect(useLabStore.getState().selectedSymbol).toBe("MSFT");
+  });
+
   it("starts with an explicit integration hydration state", () => {
     useLabStore.setState({ ...initialLabState });
     expect(useLabStore.getState()).toMatchObject({ integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "" });

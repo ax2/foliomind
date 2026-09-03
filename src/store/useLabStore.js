@@ -1022,7 +1022,19 @@ export const useLabStore = create((set, get) => ({
           const hydrated = localChanged ? mergeUserStateChanges(base, local, remote) : remote;
           lastPersistedState = remote;
           lastLocalSnapshot = localChanged ? base : remote;
-          set((state) => ({ watchlist: hydrated.watchlist.length ? hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name) : state.watchlist, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" }));
+          set((state) => {
+            const nextWatchlist = hydrated.watchlist.length
+              ? hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name)
+              : state.watchlist;
+            // A persisted watchlist can legitimately change outside the current
+            // WebView (another window, import, or a desktop session). Keep the
+            // selected workspace anchored to a real row after hydration instead
+            // of rendering a stale default/removed symbol in the detail pane.
+            const selectedSymbol = nextWatchlist.some((item) => item.symbol === state.selectedSymbol)
+              ? state.selectedSymbol
+              : nextWatchlist[0]?.symbol || state.selectedSymbol;
+            return { watchlist: nextWatchlist, selectedSymbol, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
+          });
           if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
         } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true, userStateLoading: false, userStateError: "" }); await persistSnapshot(get()); }
         return true;
