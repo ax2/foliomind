@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePortfolioPosition, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, sortPortfolioRows } from "./portfolio.js";
+import { normalizePortfolioPosition, parsePortfolioImport, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, sortPortfolioRows } from "./portfolio.js";
 
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
@@ -93,5 +93,14 @@ describe("portfolio metrics", () => {
     expect(csv).toContain('"Apple, Inc."');
     expect(csv).toContain("MSFT,Microsoft,US,1,200,");
     expect(csv).toContain("Apple, Inc.");
+  });
+
+  it("parses portfolio exports without importing runtime quote fields", () => {
+    const parsed = parsePortfolioImport("代码,名称,市场,数量,平均成本,计划状态,现价,市值\nAAPL,Apple,NASDAQ,2,100,已执行,125,250\nMSFT,Microsoft,NASDAQ,0,200,执行中,300,300\nAAPL,Duplicate,NASDAQ,1,90,执行中,90,90\n");
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.items[0]).toMatchObject({ symbol: "AAPL", name: "Duplicate", quantity: 1, averageCost: 90, planStatus: "active" });
+    expect(parsed.items[0]).not.toHaveProperty("currentPrice");
+    expect(parsed.skipped).toBe(1);
+    expect(parsed.errors).toMatchObject([{ line: 3 }]);
   });
 });

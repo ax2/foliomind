@@ -519,6 +519,29 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioPositions).toHaveLength(0);
   });
 
+  it("imports portfolio positions atomically and updates duplicate symbols", async () => {
+    const existing = { id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 1, averageCost: 90 };
+    useLabStore.setState({ portfolioPositions: [existing] });
+    const imported = await useLabStore.getState().importPortfolioItems([
+      { symbol: "AAPL", name: "Apple Inc.", market: "NASDAQ", quantity: 2, averageCost: 100 },
+      { symbol: "MSFT", name: "Microsoft", market: "NASDAQ", quantity: 1, averageCost: 300 },
+    ]);
+    expect(imported).toHaveLength(2);
+    expect(useLabStore.getState().portfolioPositions).toMatchObject([
+      { id: "p1", symbol: "AAPL", quantity: 2, averageCost: 100 },
+      { symbol: "MSFT", quantity: 1, averageCost: 300 },
+    ]);
+  });
+
+  it("rolls back portfolio imports when canonical persistence fails", async () => {
+    const previous = [{ id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 1, averageCost: 90 }];
+    const error = new Error("disk full");
+    useLabStore.setState({ portfolioPositions: previous });
+    persistence.saveUserState.mockRejectedValueOnce(error);
+    await expect(useLabStore.getState().importPortfolioItems([{ symbol: "MSFT", name: "Microsoft", market: "NASDAQ", quantity: 1, averageCost: 300 }])).rejects.toBe(error);
+    expect(useLabStore.getState().portfolioPositions).toEqual(previous);
+  });
+
   it("surfaces persistence failures and deduplicates a retry save", async () => {
     const error = new Error("Host unavailable");
     persistence.saveUserState.mockClear();

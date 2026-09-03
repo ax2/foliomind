@@ -1182,6 +1182,25 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
   },
+  importPortfolioItems: async (items) => {
+    const imported = (Array.isArray(items) ? items : []).map(normalizePortfolioPosition).filter(Boolean);
+    if (!imported.length) throw new Error("没有可导入的有效持仓");
+    const previous = get().portfolioPositions;
+    const bySymbol = new Map(previous.map((position) => [position.symbol, position]));
+    const nextImported = imported.map((position) => ({ ...position, id: bySymbol.get(position.symbol)?.id || createId("position") }));
+    const importedSymbols = new Set(nextImported.map((position) => position.symbol));
+    const importedBySymbol = new Map(nextImported.map((position) => [position.symbol, position]));
+    const next = previous.map((position) => importedBySymbol.get(position.symbol) || position);
+    next.push(...nextImported.filter((position) => !previous.some((candidate) => candidate.symbol === position.symbol)));
+    set({ portfolioPositions: next });
+    try {
+      await get().persistUserState();
+      return nextImported;
+    } catch (error) {
+      set((state) => JSON.stringify(state.portfolioPositions) === JSON.stringify(next) ? { portfolioPositions: previous } : {});
+      throw error;
+    }
+  },
   updatePortfolioPlanStatus: async (id, status, note = "") => {
     if (!["active", "executed", "archived"].includes(status)) throw new Error("交易计划状态无效");
     const current = get().portfolioPositions;

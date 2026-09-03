@@ -1875,6 +1875,7 @@ textarea:focus-visible {
 .portfolio-table-toolbar > div { flex: 1; min-width: 0; }
 .portfolio-table-toolbar h2 { margin: 0; color: #273449; font-size: 14px; }
 .portfolio-table-toolbar small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.portfolio-import-notice { margin: 12px 0 0; border-radius: 7px; padding: 9px 11px; background: #eef6ff; color: #42688e; font-size: 10px; line-height: 1.5; }
 .portfolio-table-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: #697586; font-size: 10px; }
 .portfolio-search { min-width: 180px; }
 .portfolio-search input { width: 100%; min-height: 30px; border: 1px solid #dfe2e7; border-radius: 7px; padding: 0 8px; background: #fff; color: #3f4e62; font-size: 10px; }

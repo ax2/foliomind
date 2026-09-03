@@ -639,6 +639,16 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByText("等待真实行情").length).toBeGreaterThan(0);
   });
 
+  it("imports a portfolio CSV and keeps runtime quote fields out of state", async () => {
+    useLabStore.setState({ ...initialLabState, userStateLoaded: true, portfolioPositions: [] });
+    render(<PortfolioView />);
+    const file = new File(["代码,名称,市场,数量,平均成本,现价,市值\nAAPL,Apple,NASDAQ,2,100,999,1998\n"], "portfolio.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("导入持仓文件"), { target: { files: [file] } });
+    expect(await screen.findByText(/已导入 1 个持仓/)).toBeInTheDocument();
+    expect(useLabStore.getState().portfolioPositions[0]).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100 });
+    expect(useLabStore.getState().portfolioPositions[0]).not.toHaveProperty("currentPrice");
+  });
+
   it("filters portfolio rows by symbol and plan status without changing stored positions", () => {
     useLabStore.setState({
       ...initialLabState,

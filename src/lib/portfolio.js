@@ -19,6 +19,89 @@ export const PORTFOLIO_SORT_OPTIONS = Object.freeze([
   { id: "weight", label: "组合占比", field: "weight" },
 ]);
 
+function parseDelimitedLine(line) {
+  const fields = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && line[index + 1] === '"' && quoted) { field += '"'; index += 1; continue; }
+    if (char === '"') { quoted = !quoted; continue; }
+    if (char === "," && !quoted) { fields.push(field.trim()); field = ""; continue; }
+    field += char;
+  }
+  fields.push(field.trim());
+  return fields;
+}
+
+function headerKey(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/[ _-]/g, "");
+}
+
+function importedPlanStatus(value) {
+  const text = String(value ?? "").trim();
+  return ({ "执行中": "active", "跟踪中": "active", "已执行": "executed", "已归档": "archived", "未建立": "none", "未建立计划": "none" })[text] || text;
+}
+
+/**
+ * Parse a FolioMind portfolio report (or a minimal symbol/name/quantity/cost
+ * CSV) without mutating state. Live quote and audit fields are intentionally
+ * ignored so imported files cannot smuggle runtime data into user state.
+ */
+export function parsePortfolioImport(raw, { maxItems = 500 } = {}) {
+  const source = String(raw ?? "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  if (source.length > 2_000_000) throw new Error("持仓文件过大，请拆分后再导入（最大 2 MB）");
+  const lines = source.split("\n");
+  const firstIndex = lines.findIndex((line) => line.trim());
+  if (firstIndex < 0) return { items: [], skipped: 0, errors: [] };
+  const firstFields = parseDelimitedLine(lines[firstIndex]);
+  const headerNames = firstFields.map(headerKey);
+  const aliases = {
+    symbol: ["symbol", "ticker", "代码", "证券代码"],
+    name: ["name", "名称"],
+    market: ["market", "市场"],
+    quantity: ["quantity", "数量", "持仓数量"],
+    averageCost: ["averagecost", "average_cost", "平均成本", "成本"],
+    takeProfitPrice: ["takeprofitprice", "止盈价"],
+    stopLossPrice: ["stoplossprice", "止损价"],
+    planThesis: ["planthesis", "plan_thesis", "买入逻辑"],
+    planHorizon: ["planhorizon", "plan_horizon", "计划周期"],
+    planStatus: ["planstatus", "plan_status", "计划状态"],
+  };
+  const findIndex = (keys) => headerNames.findIndex((key) => keys.includes(key));
+  const hasHeader = findIndex(aliases.symbol) >= 0 && findIndex(aliases.quantity) >= 0;
+  const indexes = hasHeader ? Object.fromEntries(Object.entries(aliases).map(([key, keys]) => [key, findIndex(keys)])) : null;
+  const items = [];
+  const errors = [];
+  const seen = new Set();
+  const itemIndexBySymbol = new Map();
+  let skipped = 0;
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const line = lines[lineNumber].trim();
+    if (!line || line.startsWith("#") || (hasHeader && lineNumber === firstIndex)) continue;
+    const fields = parseDelimitedLine(line);
+    const value = (key, fallbackIndex) => indexes ? fields[indexes[key]] : fields[fallbackIndex];
+    const candidate = {
+      symbol: value("symbol", 0), name: value("name", 1), market: value("market", 2),
+      quantity: value("quantity", 3), averageCost: value("averageCost", 4),
+      takeProfitPrice: value("takeProfitPrice", 5), stopLossPrice: value("stopLossPrice", 6),
+      planThesis: value("planThesis", 9), planHorizon: value("planHorizon", 10), planStatus: importedPlanStatus(value("planStatus", 11)),
+    };
+    const normalized = normalizePortfolioPosition(candidate);
+    if (!normalized) { errors.push({ line: lineNumber + 1, reason: "代码、数量或平均成本无效" }); continue; }
+    if (seen.has(normalized.symbol)) {
+      skipped += 1;
+      items[itemIndexBySymbol.get(normalized.symbol)] = normalized;
+      continue;
+    }
+    if (items.length >= maxItems) { errors.push({ line: lineNumber + 1, reason: `最多导入 ${maxItems} 个持仓` }); continue; }
+    seen.add(normalized.symbol);
+    itemIndexBySymbol.set(normalized.symbol, items.length);
+    items.push(normalized);
+  }
+  return { items, skipped, errors };
+}
+
 const PLAN_HORIZON_IDS = new Set(PORTFOLIO_PLAN_HORIZONS.map((item) => item.id));
 const PLAN_STATUS_IDS = new Set(PORTFOLIO_PLAN_STATUSES.map((item) => item.id));
 

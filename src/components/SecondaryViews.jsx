@@ -4,7 +4,7 @@ import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels, testModelConnection as testModelGateway } from "../lib/integrations.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
-import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
+import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, parsePortfolioImport, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlyModelMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { requestSystemNotificationPermission, setSystemNotificationsEnabled, systemNotificationsEnabled } from "../lib/systemNotifications.js";
@@ -26,6 +26,15 @@ import { isMonitorRuleExpired, MONITOR_TRIGGER_MODES, monitorDateInputValue, mon
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error, fallback = "") => fallback ? friendlyDataMessage(error, fallback) : friendlySettingsMessage(error);
+const readTextFile = (file) => {
+  if (typeof file?.text === "function") return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("无法读取文件内容"));
+    reader.readAsText(file);
+  });
+};
 
 const portfolioFormDefaults = { symbol: "", name: "", market: "", quantity: "", averageCost: "", takeProfitPrice: "", stopLossPrice: "", planThesis: "", planHorizon: "" };
 const planActionLabels = { created: "建立计划", adjusted: "调整参数", executed: "确认执行", reopened: "重新跟踪", archived: "归档计划" };
@@ -126,6 +135,7 @@ export function PortfolioView() {
   const briefingScheduleBusy = useLabStore((state) => state.briefingScheduleBusy);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const savePortfolioPosition = useLabStore((state) => state.savePortfolioPosition);
+  const importPortfolioItems = useLabStore((state) => state.importPortfolioItems);
   const updatePortfolioPlanStatus = useLabStore((state) => state.updatePortfolioPlanStatus);
   const removePortfolioPosition = useLabStore((state) => state.removePortfolioPosition);
   const createPortfolioReview = useLabStore((state) => state.createPortfolioReview);
@@ -146,6 +156,9 @@ export function PortfolioView() {
   const [portfolioSortDirection, setPortfolioSortDirection] = useState("desc");
   const [portfolioQuery, setPortfolioQuery] = useState("");
   const [portfolioPlanFilter, setPortfolioPlanFilter] = useState("all");
+  const [importNotice, setImportNotice] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const portfolioImportInput = useRef(null);
   const metrics = useMemo(() => portfolioMetrics(positions, liveQuotes), [positions, liveQuotes]);
   const allocationRows = useMemo(() => portfolioAllocationRows(positions, liveQuotes), [positions, liveQuotes]);
   const sortedPortfolioRows = useMemo(() => sortPortfolioRows(metrics.rows, portfolioSortKey, portfolioSortDirection), [metrics.rows, portfolioSortKey, portfolioSortDirection]);
@@ -238,8 +251,28 @@ export function PortfolioView() {
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
-  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><div className="page-header-actions"><button className="secondary-button" onClick={() => { void generateReview(); }} disabled={!positions.length}><CalendarDots size={17} />生成复盘</button><button className="secondary-button" onClick={exportReport} disabled={!positions.length}><DownloadSimple size={17} />导出报告</button><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></div></header>
-    <p className="security-note">只使用已返回的真实行情计算；缺少现价的持仓会显示为“—”，不会用预览数字填充。</p>
+  const importPortfolioFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImportBusy(true);
+    setImportNotice("");
+    try {
+      const parsed = parsePortfolioImport(await readTextFile(file));
+      if (!parsed.items.length) throw new Error(parsed.errors.length ? `没有可导入的有效持仓（${parsed.errors[0].reason}）` : "文件中没有持仓记录");
+      const imported = await importPortfolioItems(parsed.items);
+      const detail = [parsed.skipped ? `跳过 ${parsed.skipped} 条重复记录` : "", parsed.errors.length ? `另有 ${parsed.errors.length} 条无效记录` : ""].filter(Boolean).join("；");
+      setImportNotice(`已导入 ${imported.length} 个持仓${detail ? ` · ${detail}` : ""}。现价仍需重新获取真实行情。`);
+    } catch (importError) {
+      setImportNotice(importError?.message || "暂时无法导入持仓，请检查文件后重试。");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><div className="page-header-actions"><button className="secondary-button" onClick={() => { void generateReview(); }} disabled={!positions.length}><CalendarDots size={17} />生成复盘</button><button className="secondary-button" onClick={exportReport} disabled={!positions.length}><DownloadSimple size={17} />导出报告</button><button className="secondary-button" onClick={() => portfolioImportInput.current?.click()} disabled={importBusy}><UploadSimple size={17} />{importBusy ? "导入中…" : "导入持仓"}</button><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></div></header>
+    <input ref={portfolioImportInput} className="visually-hidden" type="file" accept=".csv,text/csv" aria-label="导入持仓文件" onChange={(event) => { void importPortfolioFile(event); }} />
+    <p className="security-note">只使用已返回的真实行情计算；缺少现价的持仓会显示为“—”，不会用预览数字填充。导入支持 FolioMind 导出 CSV 或最小字段 CSV（代码、名称、市场、数量、平均成本）。</p>
+    {importNotice ? <p className="portfolio-import-notice" role="status">{importNotice}</p> : null}
     <section className="portfolio-summary" aria-label="组合概览">
       <article className="portfolio-card"><span>当前市值</span><strong>{money(metrics.totalMarketValue)}</strong><small>{metrics.pricedCount ? `${metrics.pricedCount}/${metrics.totalCount} 个持仓有行情` : "等待真实行情"}</small></article>
       <article className="portfolio-card"><span>持仓成本</span><strong>{money(metrics.totalCost)}</strong><small>{metrics.totalCount ? `${metrics.totalCount} 个持仓` : "尚未添加持仓"}</small></article>
