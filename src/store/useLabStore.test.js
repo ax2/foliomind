@@ -901,6 +901,34 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().events[0]).toMatchObject({ symbol: "600519", type: "分红", title: "分红登记日", source: "真实事件源", capability: "EVENT.CALENDAR.CORP", provider: "qveris_finance" });
   });
 
+  it("cancels a slow event refresh without committing late results", async () => {
+    let startedResolve;
+    let requestSignal;
+    const started = new Promise((resolve) => { startedResolve = resolve; });
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      events: [{ id: "existing", symbol: "600519", name: "贵州茅台", date: "2026-09-10", title: "已保存事件" }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }],
+    });
+    runtime.queryCachedData.mockImplementation((_input, options = {}) => {
+      requestSignal = options.signal;
+      startedResolve();
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true });
+      });
+    });
+
+    const pending = useLabStore.getState().refreshEvents();
+    await started;
+    expect(useLabStore.getState().eventDataLoading).toBe(true);
+    expect(useLabStore.getState().cancelEventsRefresh()).toBe(true);
+    expect(requestSignal.aborted).toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ eventDataLoading: false, eventDataLoaded: true, eventDataError: "已停止本轮事件更新，可稍后重试" });
+    expect(useLabStore.getState().events).toHaveLength(1);
+    await expect(pending).resolves.toBe(false);
+  });
+
   it("creates idempotent upcoming and same-day event reminders", async () => {
     const event = { id: "event-1", symbol: "600519", name: "贵州茅台", date: "2026-09-08", type: "股东会", title: "临时股东会", source: "真实事件源" };
     await expect(useLabStore.getState().notifyDueEventReminders([event], new Date("2026-09-03T01:00:00Z"))).resolves.toBe(1);

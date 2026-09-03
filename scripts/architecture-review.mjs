@@ -138,6 +138,7 @@ check("百分比语义格式", quoteFormatting.includes("signed = true") && mark
 check("百分比语义全入口一致性", marketViews.includes("formatPercent(quote.turnoverRate, { signed: false })") && marketViews.includes("formatPercent(value, { signed: false })") && marketViews.includes("formatPercent(row.weight, { signed: false })") && prd.includes("Stage 3DK 行情与组合比例语义全入口一致性"), "组合明细占比、市场换手率列和汇总必须使用无符号格式，涨跌幅继续保留方向符号");
 check("行情刷新主动取消", labStore.includes("cancelLiveDataRefresh: () =>") && stockWorkspace.includes("停止更新") && marketViews.includes("onCancel={cancelLiveDataRefresh}") && prd.includes("Stage 3DL 行情刷新主动取消"), "慢速行情全量刷新必须支持用户主动停止、取消上游请求并阻止过期结果提交");
 check("hydration 选择一致性", labStore.includes("const nextWatchlist = hydrated.watchlist.length") && labStore.includes("const selectedSymbol = nextWatchlist.some") && storeTest.includes("anchors the selected workspace to the hydrated watchlist") && prd.includes("Stage 3DM 持久化自选与详情上下文一致性"), "用户状态 hydration 后详情选择必须落在当前规范化自选列表内，保留仍存在的用户选择并安全回退");
+check("事件刷新主动取消", labStore.includes("cancelEventsRefresh: () =>") && labStore.includes("eventsRequestGeneration += 1") && marketViews.includes("cancelEventsRefresh") && marketViews.includes("停止更新") && storeTest.includes("cancels a slow event refresh without committing late results") && prd.includes("Stage 3DN 事件刷新主动取消"), "事件日历慢请求必须支持独立主动取消、AbortSignal 和过期结果隔离，不得连带行情请求");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

@@ -671,6 +671,17 @@ export const useLabStore = create((set, get) => ({
     set({ liveDataLoading: false, liveDataError: "已停止本轮行情更新，可稍后重试" });
     return true;
   },
+  cancelEventsRefresh: () => {
+    if (!get().eventDataLoading) return false;
+    // Event refreshes have an independent controller from quote refreshes.
+    // Invalidate the sweep before aborting so a worker that races with the
+    // abort cannot commit a late event or trigger reminders.
+    eventsRequestGeneration += 1;
+    abortController(eventsRequestController);
+    eventsRequestController = null;
+    set({ eventDataLoading: false, eventDataLoaded: true, eventDataError: "已停止本轮事件更新，可稍后重试" });
+    return true;
+  },
   refreshLiveData: async (options = {}) => {
     const state = get();
     const configured = hasRealDataAccess(state.integrationStatus);

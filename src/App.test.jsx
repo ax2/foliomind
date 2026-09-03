@@ -574,6 +574,24 @@ describe("FolioMind core flows", () => {
     await waitFor(() => expect(refreshEvents).toHaveBeenCalledOnce());
   });
 
+  it("exposes an independent stop action while events are loading", () => {
+    const cancelEventsRefresh = vi.fn().mockReturnValue(true);
+    useLabStore.setState({
+      activeView: "events",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      eventDataLoaded: false,
+      eventDataLoading: true,
+      eventDataTotalCount: 2,
+      eventDataReceivedCount: 1,
+      cancelEventsRefresh,
+    });
+    render(<EventsView />);
+    const stop = screen.getAllByRole("button", { name: "停止更新" });
+    expect(stop.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(stop[0]);
+    expect(cancelEventsRefresh).toHaveBeenCalledOnce();
+  });
+
   it("filters notifications and links a message back to its symbol", () => {
     useLabStore.setState({
       activeView: "notifications",
