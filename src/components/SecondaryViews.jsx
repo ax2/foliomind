@@ -21,7 +21,7 @@ import { nextBriefingLabel } from "../lib/briefingSchedule.js";
 import { loadDesktopLifecycleStatus, reconcileDesktopNow } from "../lib/desktopLifecycle.js";
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { marketBreadth, marketWatchlistSummary } from "../lib/marketBreadth.js";
-import { RESEARCH_SORT_OPTIONS, sortResearchItems } from "../lib/research.js";
+import { activeResearchFilterCount, DEFAULT_RESEARCH_FILTERS, filterResearchItems, normalizeResearchFilters, RESEARCH_FILTER_FIELDS, RESEARCH_SORT_OPTIONS, sortResearchItems } from "../lib/research.js";
 import { isMonitorRuleExpired, MONITOR_TRIGGER_MODES, monitorDateInputValue, monitorLifecycleLabel } from "../lib/monitorLifecycle.js";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
@@ -41,6 +41,7 @@ const planActionLabels = { created: "建立计划", adjusted: "调整参数", ex
 const MARKET_COLUMNS_STORAGE_KEY = "foliomind.market-columns.v1";
 const MARKET_VIEWS_STORAGE_KEY = "foliomind.market-views.v1";
 const CUSTOM_MARKET_VIEW_ID = "custom";
+const RESEARCH_SCREENS_STORAGE_KEY = "foliomind.research-screens.v1";
 const MARKET_COLUMN_DEFINITIONS = Object.freeze([
   { id: "price", label: "最新价" },
   { id: "change", label: "涨跌幅" },
@@ -57,6 +58,29 @@ const DEFAULT_MARKET_VIEWS = Object.freeze([
   { id: "trading", name: "交易盘面", columns: ["price", "change", "volume", "turnoverRate", "asOf"] },
   { id: "full", name: "完整字段", columns: MARKET_COLUMN_DEFINITIONS.map((column) => column.id) },
 ]);
+
+function loadResearchScreens() {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(RESEARCH_SCREENS_STORAGE_KEY) || "null");
+    if (!Array.isArray(stored)) return [];
+    const unique = new Map();
+    stored.forEach((screen) => {
+      const id = String(screen?.id || "");
+      const name = String(screen?.name || "").trim().slice(0, 32);
+      if (!id.startsWith("screen-") || !name) return;
+      unique.set(id, { id, name, filters: normalizeResearchFilters(screen?.filters) });
+    });
+    return [...unique.values()].slice(0, 10);
+  } catch { return []; }
+}
+
+function createResearchScreenId() {
+  const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+  return `screen-${Date.now().toString(36)}-${suffix}`;
+}
 
 function normalizeMarketColumns(columns) {
   const allowed = new Set(MARKET_COLUMN_DEFINITIONS.map((column) => column.id));
@@ -455,16 +479,27 @@ export function ResearchView() {
   const [onlyPriced, setOnlyPriced] = useState(false);
   const [sortKey, setSortKey] = useState("default");
   const [sortDirection, setSortDirection] = useState("desc");
+  const [filters, setFilters] = useState(() => normalizeResearchFilters(DEFAULT_RESEARCH_FILTERS));
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [researchScreens, setResearchScreens] = useState(loadResearchScreens);
+  const [activeScreenId, setActiveScreenId] = useState("custom");
+  const [screenName, setScreenName] = useState("");
+  const [screenNotice, setScreenNotice] = useState("");
   const realDataMode = hasRealDataAccess(integrationStatus);
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-  const filtered = useMemo(() => watchlist.filter((item) => {
+  useEffect(() => {
+    try { window.localStorage.setItem(RESEARCH_SCREENS_STORAGE_KEY, JSON.stringify(researchScreens)); } catch { /* Storage may be disabled. */ }
+  }, [researchScreens]);
+  const textFiltered = useMemo(() => watchlist.filter((item) => {
     const quote = liveQuotes[item.symbol];
     const change = Number(quote?.change);
     const matchesQuery = !normalizedQuery || `${item.name} ${item.symbol} ${item.market} ${item.category}`.toLocaleLowerCase("zh-CN").includes(normalizedQuery);
     const matchesDirection = direction === "all" || (direction === "up" && Number.isFinite(change) && change > 0) || (direction === "down" && Number.isFinite(change) && change < 0);
     return matchesQuery && matchesDirection && (!onlyPriced || isValidQuotePrice(quote?.price));
   }), [watchlist, liveQuotes, normalizedQuery, direction, onlyPriced]);
+  const filtered = useMemo(() => filterResearchItems(textFiltered, liveQuotes, filters), [textFiltered, liveQuotes, filters]);
   const sorted = useMemo(() => sortResearchItems(filtered, liveQuotes, sortKey, sortDirection), [filtered, liveQuotes, sortKey, sortDirection]);
+  const activeFilterCount = activeResearchFilterCount(filters);
   const returnedCount = watchlist.filter((item) => isValidQuotePrice(liveQuotes[item.symbol]?.price)).length;
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length });
   const retry = () => { void refreshLiveData(); };
@@ -474,11 +509,50 @@ export function ResearchView() {
     if (event.type === "keydown") event.preventDefault();
     selectSymbol(symbol);
   };
+  const updateResearchFilter = (id, value) => {
+    setFilters((current) => normalizeResearchFilters({ ...current, [id]: value }));
+    setActiveScreenId("custom");
+    setScreenNotice("");
+  };
+  const clearResearchFilters = () => {
+    setFilters(normalizeResearchFilters(DEFAULT_RESEARCH_FILTERS));
+    setActiveScreenId("custom");
+    setScreenNotice("已清除数值条件");
+  };
+  const selectResearchScreen = (id) => {
+    const selected = researchScreens.find((screen) => screen.id === id);
+    if (!selected) { setActiveScreenId("custom"); return; }
+    setFilters(normalizeResearchFilters(selected.filters));
+    setActiveScreenId(selected.id);
+    setScreenNotice(`已载入“${selected.name}”筛选`);
+  };
+  const saveResearchScreen = (event) => {
+    event.preventDefault();
+    const name = screenName.trim().slice(0, 32);
+    if (!name) { setScreenNotice("请输入筛选名称"); return; }
+    const existing = researchScreens.find((screen) => screen.name === name);
+    if (!existing && researchScreens.length >= 10) { setScreenNotice("最多保存 10 个筛选，请删除不用的筛选后再试"); return; }
+    const id = existing?.id || createResearchScreenId();
+    const next = { id, name, filters: normalizeResearchFilters(filters) };
+    setResearchScreens((current) => existing ? current.map((screen) => screen.id === id ? next : screen) : [...current, next]);
+    setActiveScreenId(id);
+    setScreenName("");
+    setScreenNotice(`已保存“${name}”筛选`);
+  };
+  const deleteResearchScreen = () => {
+    const selected = researchScreens.find((screen) => screen.id === activeScreenId);
+    if (!selected) return;
+    setResearchScreens((current) => current.filter((screen) => screen.id !== selected.id));
+    setActiveScreenId("custom");
+    setScreenNotice(`已删除“${selected.name}”筛选`);
+  };
   return <div className="secondary-page research-page"><header><div><h1>研究筛选</h1><p>在我的自选中按真实行情筛选标的，不用示例数据填充。</p></div><button className="secondary-button" disabled={liveDataLoading} onClick={realDataMode ? retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "更新中…" : "刷新真实数据" : "配置数据"}</button></header>
-    <div className="research-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、代码或市场…" aria-label="搜索标的" /></label><div className="filter-group" aria-label="涨跌方向"><button className={direction === "all" ? "active" : ""} onClick={() => setDirection("all")}>全部</button><button className={direction === "up" ? "active" : ""} onClick={() => setDirection("up")}>上涨</button><button className={direction === "down" ? "active" : ""} onClick={() => setDirection("down")}>下跌</button></div><button className={`filter-toggle${onlyPriced ? " active" : ""}`} aria-pressed={onlyPriced} onClick={() => setOnlyPriced((value) => !value)}><Funnel size={15} />仅显示有行情</button><label className="research-sort-control"><span>排序</span><select aria-label="研究排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{RESEARCH_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><button className="research-sort-direction" type="button" disabled={sortKey === "default"} aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button></div>
+    <div className="research-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、代码或市场…" aria-label="搜索标的" /></label><div className="filter-group" aria-label="涨跌方向"><button className={direction === "all" ? "active" : ""} onClick={() => setDirection("all")}>全部</button><button className={direction === "up" ? "active" : ""} onClick={() => setDirection("up")}>上涨</button><button className={direction === "down" ? "active" : ""} onClick={() => setDirection("down")}>下跌</button></div><button className={`filter-toggle${onlyPriced ? " active" : ""}`} aria-pressed={onlyPriced} onClick={() => setOnlyPriced((value) => !value)}><Funnel size={15} />仅显示有行情</button><button type="button" className={`filter-toggle${filtersOpen || activeFilterCount ? " active" : ""}`} aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><Funnel size={15} />数值条件{activeFilterCount ? `（${activeFilterCount}）` : ""}</button><label className="research-sort-control"><span>排序</span><select aria-label="研究排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{RESEARCH_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><button className="research-sort-direction" type="button" disabled={sortKey === "default"} aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button></div>
+    {filtersOpen && <section className="research-filter-panel" aria-label="研究数值条件"><div className="research-filter-heading"><div><strong>真实行情条件</strong><small>只对已返回的真实字段生效；缺失字段不会被猜测。</small></div><button type="button" className="notification-link" onClick={clearResearchFilters} disabled={!activeFilterCount}>清除条件</button></div><div className="research-filter-grid">{RESEARCH_FILTER_FIELDS.map((field) => <label key={field.id} title={field.description}><span>{field.label}{field.suffix ? `（${field.suffix}）` : ""}</span><input type="number" step="any" inputMode="decimal" aria-label={field.label} value={filters[field.id]} onChange={(event) => updateResearchFilter(field.id, event.target.value)} placeholder="不限" /></label>)}</div></section>}
+    <div className="research-screen-bar"><label><span>已保存筛选</span><select aria-label="已保存研究筛选" value={activeScreenId} onChange={(event) => selectResearchScreen(event.target.value)}><option value="custom">临时条件</option>{researchScreens.map((screen) => <option value={screen.id} key={screen.id}>{screen.name}</option>)}</select></label><form onSubmit={saveResearchScreen}><input aria-label="筛选名称" maxLength={32} value={screenName} onChange={(event) => { setScreenName(event.target.value); setScreenNotice(""); }} placeholder="保存当前条件…" /><button type="submit" className="secondary-button">保存筛选</button></form>{activeScreenId !== "custom" && <button type="button" className="icon-button" aria-label="删除当前研究筛选" onClick={deleteResearchScreen}>删除</button>}{screenNotice && <span role="status">{screenNotice}</span>}</div>
     {returnedCount > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedCount} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : null}
     {returnedCount === 0 ? <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onSettings={openSettings} /> : sorted.length === 0 ? <DataState state="empty" title="没有符合条件的标的" description="调整搜索词或筛选条件后再试；已有真实行情不会被修改。" /> : <section className="research-table" aria-label="真实行情筛选结果"><div className="research-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>市盈率</span><span>市净率</span><span>数据时间</span></div>{sorted.map((item) => { const quote = liveQuotes[item.symbol]; const hasQuote = isValidQuotePrice(quote?.price); const freshness = quoteFreshness(quote?.asOf); return <div className="research-row" role="button" tabIndex="0" aria-label={`打开${item.name}详情`} onClick={(event) => openResearchSymbol(event, item.symbol)} onKeyDown={(event) => openResearchSymbol(event, item.symbol)} key={item.symbol}><span><strong title={item.name}>{item.name}</strong><small>{item.symbol} · {item.market || item.category}</small></span><span>{hasQuote ? formatPrice(quote.price) : "—"}</span><span className={changeToneClass(quote?.change)}>{formatPercent(quote?.change)}</span><span>{quote?.pe == null ? "—" : String(quote.pe)}</span><span>{quote?.pb == null ? "—" : String(quote.pb)}</span><span className={`quote-source quote-source-${freshness.state}`}>{hasQuote ? formatQuoteFreshness(quote.asOf, Date.now(), item.market) : "—"}</span></div>; })}</section>}
-    <p className="security-note">范围：我的自选 · {returnedCount}/{watchlist.length} 个标的已返回行情{liveDataLastRefreshAt ? ` · 最近更新 ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : ""}。估值字段缺失时保持空值。</p>
+    <p className="security-note">范围：我的自选 · 当前显示 {sorted.length}/{watchlist.length} 个标的 · {returnedCount} 个已返回行情{activeFilterCount ? ` · ${activeFilterCount} 个数值条件` : ""}{liveDataLastRefreshAt ? ` · 最近更新 ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : ""}。估值字段缺失时保持空值。</p>
   </div>;
 }
 

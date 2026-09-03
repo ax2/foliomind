@@ -321,6 +321,41 @@ describe("FolioMind core flows", () => {
     expect(table).not.toHaveTextContent("下跌标的");
   });
 
+  it("filters real valuation fields and persists a named research screen", async () => {
+    window.localStorage.removeItem("foliomind.research-screens.v1");
+    useLabStore.setState({
+      activeView: "research",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [
+        { symbol: "LOW", name: "低估值", market: "沪深" },
+        { symbol: "HIGH", name: "高估值", market: "沪深" },
+        { symbol: "MISSING", name: "缺失估值", market: "沪深" },
+      ],
+      liveQuotes: {
+        LOW: { price: 10, change: 1, pe: 8, pb: 1.1 },
+        HIGH: { price: 20, change: 2, pe: 24, pb: 3.2 },
+        MISSING: { price: 30, change: 3, pe: null, pb: null },
+      },
+    });
+    const { unmount } = render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: /数值条件/ }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "市盈率上限" }), { target: { value: "15" } });
+    const table = screen.getByRole("region", { name: "真实行情筛选结果" });
+    expect(table).toHaveTextContent("低估值");
+    expect(table).not.toHaveTextContent("高估值");
+    expect(table).not.toHaveTextContent("缺失估值");
+    fireEvent.change(screen.getByRole("textbox", { name: "筛选名称" }), { target: { value: "低估值观察" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存筛选" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已保存“低估值观察”筛选");
+    expect(JSON.parse(window.localStorage.getItem("foliomind.research-screens.v1"))).toHaveLength(1);
+    unmount();
+    render(<ResearchView />);
+    const selector = screen.getByRole("combobox", { name: "已保存研究筛选" });
+    fireEvent.change(selector, { target: { value: selector.options[1].value } });
+    fireEvent.click(screen.getByRole("button", { name: /数值条件/ }));
+    expect(screen.getByRole("spinbutton", { name: "市盈率上限" })).toHaveValue(15);
+  });
+
   it("opens a research result with mouse and keyboard", () => {
     useLabStore.setState({ activeView: "research", selectedSymbol: "", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } } });
     const { container } = render(<ResearchView />);
