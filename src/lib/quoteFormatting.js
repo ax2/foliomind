@@ -35,6 +35,13 @@ export function marketRegionFor(market) {
   return marketTimeZone(market)?.region || null;
 }
 
+/** Return a stable lookup key for provider symbols across exchange suffixes. */
+export function quoteSymbolKey(value) {
+  return String(value ?? "").trim().toUpperCase()
+    .replace(/^(?:SSE|SZSE|HKEX|NASDAQ|NYSE|AMEX):/, "")
+    .replace(/\.(?:SH|SS|SZ|BJ|HK|US)$/i, "");
+}
+
 /** A quote price is displayable only when the provider returned a finite positive value. */
 export function isValidQuotePrice(value) {
   const number = numberValue(value);

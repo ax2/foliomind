@@ -15,7 +15,7 @@ import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
-import { isValidQuotePrice, marketRegionFor } from "../lib/quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
 
@@ -998,7 +998,12 @@ export const useLabStore = create((set, get) => ({
     return delivered.length;
   },
   setActiveView: (activeView) => set({ activeView }),
-  selectSymbol: (selectedSymbol) => set({ selectedSymbol, activeView: "watchlist" }),
+  selectSymbol: (selectedSymbol) => {
+    const requested = String(selectedSymbol ?? "").trim();
+    const key = quoteSymbolKey(requested);
+    const resolved = get().watchlist.find((item) => quoteSymbolKey(item.symbol) === key)?.symbol || requested;
+    set({ selectedSymbol: resolved, activeView: "watchlist" });
+  },
   setChartRange: (chartRange) => set({ chartRange }),
   toggleSkill: async (id) => {
     const previous = get().skillItems;

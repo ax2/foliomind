@@ -37,6 +37,20 @@ describe("portfolio metrics", () => {
     expect(result.rows[1]).toMatchObject({ marketValue: null, pnl: null, weight: null, hasQuote: false });
   });
 
+  it("joins normalized provider symbols to suffixed imported positions", () => {
+    const result = portfolioMetrics([
+      { id: "p1", symbol: "600519.SS", name: "贵州茅台", quantity: 2, averageCost: 100 },
+    ], { "600519": { price: 125, asOf: "2026-09-03T07:00:00Z", source: "CAP" } });
+    expect(result.rows[0]).toMatchObject({ currentPrice: 125, marketValue: 250, pnl: 50, hasQuote: true });
+  });
+
+  it("does not guess when normalized quote keys are ambiguous", () => {
+    const result = portfolioMetrics([
+      { id: "p1", symbol: "600519.BJ", name: "同代码标的", quantity: 1, averageCost: 100 },
+    ], { "600519": { price: 125 }, "600519.SS": { price: 126 } });
+    expect(result.rows[0]).toMatchObject({ currentPrice: null, marketValue: null, hasQuote: false });
+  });
+
   it("rejects zero and negative prices as invalid real quotes", () => {
     const positions = [{ id: "p1", symbol: "AAPL", name: "Apple", quantity: 2, averageCost: 100 }];
     expect(portfolioMetrics(positions, { AAPL: { price: 0 } }).rows[0]).toMatchObject({ currentPrice: null, marketValue: null, hasQuote: false });

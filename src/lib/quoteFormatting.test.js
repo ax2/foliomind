@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteFreshness } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteFreshness, quoteSymbolKey } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -84,6 +84,13 @@ describe("quote formatting", () => {
     expect(marketRegionFor("沪深")).toBe("cn");
     expect(marketRegionFor("RUSSELL 2000")).toBeNull();
     expect(marketRegionFor("CUSTOM-USAGE")).toBeNull();
+  });
+
+  it("normalizes provider exchange suffixes only for data joins", () => {
+    expect(quoteSymbolKey("600519.SS")).toBe("600519");
+    expect(quoteSymbolKey("SSE:600519")).toBe("600519");
+    expect(quoteSymbolKey("aapl.us")).toBe("AAPL");
+    expect(quoteSymbolKey("RUSSELL 2000")).toBe("RUSSELL 2000");
   });
 
   it("accepts unix-second and unix-millisecond provider timestamps", () => {

@@ -145,6 +145,7 @@ check("开发日志嵌套敏感字段脱敏", localHost.includes("SENSITIVE_DEBU
 check("首屏路由按需拆包", app.includes("lazy(() => import(\"./components/SecondaryViews.jsx\")") && app.includes("<Suspense fallback={secondaryViewLoading}>") && viteConfig.includes("manualChunks") && viteConfig.includes("charts") && viteConfig.includes("icons") && prd.includes("Stage 3DQ 首屏路由按需拆包"), "自选首页不得静态加载所有二级工作台，生产构建需保留可缓存的异步路由 chunk 和图表/图标边界");
 check("首屏包体积门禁", packageJson.scripts?.build?.includes("check:bundle") && packageJson.scripts?.["check:bundle"]?.includes("check-bundle-size") && prd.includes("控制在 450KB"), "生产构建必须执行首屏入口 450KB 与二级异步 chunk 检查，避免性能回归只停留在人工观察");
 check("构建产物清理边界", packageJson.scripts?.clean === "node scripts/clean-generated.mjs" && cleanGenerated.includes('"src-tauri/target"') && cleanGenerated.includes('"src-tauri/target-linux"') && cleanGenerated.includes("Runtime resources such as Pi") && prd.includes("Stage 3DR 构建产物清理"), "构建后只能清理明确列出的生成目录，不得触碰 Pi、portable-git 或用户配置资源");
+check("跨入口证券代码匹配", quoteFormatting.includes("export function quoteSymbolKey") && portfolio.includes("quotesByKey") && labStore.includes("quoteSymbolKey(item.symbol)") && prd.includes("Stage 3DS 跨入口证券代码匹配"), "行情、持仓和详情跳转需要在保留原始代码的同时兼容 provider 交易所后缀，避免真实报价无法进入组合计算");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

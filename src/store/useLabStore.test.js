@@ -67,6 +67,12 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().selectedSymbol).toBe("MSFT");
   });
 
+  it("resolves exchange-suffixed navigation to the saved watchlist symbol", () => {
+    useLabStore.setState({ watchlist: [{ symbol: "600519", name: "贵州茅台", market: "A股" }] });
+    useLabStore.getState().selectSymbol("SSE:600519");
+    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "600519", activeView: "watchlist" });
+  });
+
   it("starts with an explicit integration hydration state", () => {
     useLabStore.setState({ ...initialLabState });
     expect(useLabStore.getState()).toMatchObject({ integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "" });
