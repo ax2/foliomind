@@ -12,11 +12,13 @@ import { listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDe
 import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
+import { friendlyDataMessage } from "./lib/friendlyMessages.js";
 
 export function App() {
   const activeView = useLabStore((state) => state.activeView);
   const settingsNotice = useLabStore((state) => state.settingsNotice);
   const clearSettingsNotice = useLabStore((state) => state.clearSettingsNotice);
+  const setSettingsNotice = useLabStore((state) => state.setSettingsNotice);
   const retryPersistedUserState = useLabStore((state) => state.retryPersistedUserState);
   const persistenceRetrying = useLabStore((state) => state.persistenceRetrying);
   const hydrateUserState = useLabStore((state) => state.hydrateUserState);
@@ -55,22 +57,30 @@ export function App() {
     if (!userStateLoaded) return undefined;
     let disposed = false;
     let unlisten = () => {};
-    void listenForDesktopReconcile(() => { void reconcileDesktopNow(); }).then((cleanup) => {
+    void listenForDesktopReconcile(() => {
+      void reconcileDesktopNow().catch((error) => {
+        setSettingsNotice({ type: "error", text: friendlyDataMessage(error, "桌面后台检查暂时失败，请稍后重试") });
+      });
+    }).then((cleanup) => {
       if (disposed) cleanup();
       else unlisten = cleanup;
+    }).catch((error) => {
+      if (!disposed) setSettingsNotice({ type: "error", text: friendlyDataMessage(error, "桌面驻留事件暂时不可用，请稍后重试") });
     });
     return () => { disposed = true; unlisten(); };
-  }, [userStateLoaded]);
+  }, [setSettingsNotice, userStateLoaded]);
   useEffect(() => {
     if (!userStateLoaded) return undefined;
     let disposed = false;
     let unlisten = () => {};
-    void listenForBackgroundReviewStatus(() => { void hydrateUserState(); }).then((cleanup) => {
+    void listenForBackgroundReviewStatus(() => { void hydrateUserState().catch((error) => setSettingsNotice({ type: "error", text: friendlyDataMessage(error, "后台复盘状态暂时无法刷新，请稍后重试") })); }).then((cleanup) => {
       if (disposed) cleanup();
       else unlisten = cleanup;
+    }).catch((error) => {
+      if (!disposed) setSettingsNotice({ type: "error", text: friendlyDataMessage(error, "后台复盘事件暂时不可用，请稍后重试") });
     });
     return () => { disposed = true; unlisten(); };
-  }, [userStateLoaded, hydrateUserState]);
+  }, [userStateLoaded, hydrateUserState, setSettingsNotice]);
   useEffect(() => {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured) return undefined;
     if (typeof window === "undefined" || typeof document === "undefined") return undefined;

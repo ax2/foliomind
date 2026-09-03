@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
-import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, installedSkillIdsForBackup } from "./components/SecondaryViews.jsx";
+import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, ResearchView, SettingsView, installedSkillIdsForBackup } from "./components/SecondaryViews.jsx";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
@@ -16,7 +16,13 @@ const integrationMocks = vi.hoisted(() => ({
   queryCapabilityData: vi.fn(),
   testModelConnection: vi.fn(),
 }));
-const runtimeMocks = vi.hoisted(() => ({ askPi: vi.fn() }));
+const runtimeMocks = vi.hoisted(() => ({ askPi: vi.fn(), desktopRuntime: false }));
+const desktopLifecycleMocks = vi.hoisted(() => ({
+  loadDesktopLifecycleStatus: vi.fn(),
+  reconcileDesktopNow: vi.fn(),
+  listenForDesktopReconcile: vi.fn().mockResolvedValue(() => {}),
+  listenForBackgroundReviewStatus: vi.fn().mockResolvedValue(() => {}),
+}));
 
 vi.mock("lightweight-charts", () => ({
   AreaSeries: {},
@@ -40,7 +46,10 @@ vi.mock("./lib/integrations.js", async (importOriginal) => ({
 vi.mock("./lib/piRuntime.js", async (importOriginal) => ({
   ...await importOriginal(),
   askPi: runtimeMocks.askPi,
+  isDesktopRuntime: () => runtimeMocks.desktopRuntime,
 }));
+
+vi.mock("./lib/desktopLifecycle.js", () => desktopLifecycleMocks);
 
 // App flow tests exercise the browser preview. Local Host behavior is covered
 // by the dedicated user-state and Local Host integration suites.
@@ -56,6 +65,11 @@ beforeEach(() => {
   integrationMocks.queryCapabilityData.mockReset();
   integrationMocks.testModelConnection.mockReset().mockResolvedValue({ text: "模型连接正常", model: "model-a" });
   runtimeMocks.askPi.mockReset().mockResolvedValue({ text: "模型连接正常" });
+  runtimeMocks.desktopRuntime = false;
+  desktopLifecycleMocks.loadDesktopLifecycleStatus.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
+  desktopLifecycleMocks.reconcileDesktopNow.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
+  desktopLifecycleMocks.listenForDesktopReconcile.mockReset().mockResolvedValue(() => {});
+  desktopLifecycleMocks.listenForBackgroundReviewStatus.mockReset().mockResolvedValue(() => {});
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
     settings: {
@@ -85,6 +99,18 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("本地数据暂时无法读取");
     fireEvent.click(screen.getByRole("button", { name: "重新读取本地数据" }));
     expect(retryHydration).toHaveBeenCalled();
+  });
+
+  it("shows a recoverable desktop lifecycle error and handles retry failures", async () => {
+    runtimeMocks.desktopRuntime = true;
+    desktopLifecycleMocks.loadDesktopLifecycleStatus.mockRejectedValueOnce(new Error("native bridge unavailable"));
+    desktopLifecycleMocks.reconcileDesktopNow.mockRejectedValueOnce(new Error("native bridge unavailable"));
+
+    render(<SettingsView />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("桌面驻留状态暂时无法读取");
+    fireEvent.click(screen.getByRole("button", { name: "立即检查" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("桌面驻留状态暂时无法更新"));
+    expect(desktopLifecycleMocks.reconcileDesktopNow).toHaveBeenCalledOnce();
   });
 
   it("does not call an unhydrated data connection browser preview", () => {
