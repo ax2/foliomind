@@ -393,9 +393,11 @@ mod tests {
 
     #[test]
     fn validates_data_channel_and_provider_selectors() {
-        let mut value = IntegrationSettings::default();
-        value.data_channel = "cap-compatible".into();
-        value.data_provider = "custom_finance.v1".into();
+        let mut value = IntegrationSettings {
+            data_channel: "cap-compatible".into(),
+            data_provider: "custom_finance.v1".into(),
+            ..IntegrationSettings::default()
+        };
         assert!(validate(&value).is_ok());
         value.data_provider = "provider with spaces".into();
         assert!(validate(&value).is_err());
