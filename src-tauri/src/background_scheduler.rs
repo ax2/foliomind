@@ -30,9 +30,22 @@ const DISCLAIMER: &str = "本复盘仅整理已返回的真实数据，不构成
 const COMPLETED_EVENT: &str = "foliomind://background-review-completed";
 const STATUS_EVENT: &str = "foliomind://background-review-status";
 const LOG_EVENT: &str = "foliomind://background-scheduler-log";
+const PREMARKET_EVENT: &str = "foliomind://background-premarket-due";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DueState {
+    Disabled,
+    NoPositions,
+    NotDue,
+    Completed,
+    RetryWait,
+    CalendarNeeded,
+    MarketClosed,
+    Due,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PremarketDueState {
     Disabled,
     NoPositions,
     NotDue,
@@ -155,6 +168,50 @@ fn day_and_minute(now: DateTime<Utc>) -> (String, u32) {
         local.format("%Y-%m-%d").to_string(),
         local.hour() * 60 + local.minute(),
     )
+}
+
+fn premarket_due_state(state: &UserState, now: DateTime<Utc>) -> PremarketDueState {
+    let schedule = &state.briefing_schedule;
+    let (day, minute) = day_and_minute(now);
+    let key = format!("premarket:{day}");
+    if !schedule.premarket_enabled {
+        return PremarketDueState::Disabled;
+    }
+    if state.portfolio_positions.is_empty() {
+        return PremarketDueState::NoPositions;
+    }
+    let mut parts = schedule
+        .premarket_time
+        .split(':')
+        .filter_map(|part| part.parse::<u32>().ok());
+    let premarket_minute = match (parts.next(), parts.next()) {
+        (Some(hour), Some(minute)) => hour * 60 + minute,
+        _ => return PremarketDueState::NotDue,
+    };
+    if minute < premarket_minute {
+        return PremarketDueState::NotDue;
+    }
+    if schedule.premarket_last_success_key == key {
+        return PremarketDueState::Completed;
+    }
+    if let Ok(last) = DateTime::parse_from_rfc3339(&schedule.premarket_last_attempt_at) {
+        if now
+            .signed_duration_since(last.with_timezone(&Utc))
+            .num_minutes()
+            < schedule.retry_minutes as i64
+        {
+            return PremarketDueState::RetryWait;
+        }
+    }
+    if schedule.calendar_date == day && schedule.calendar_status == "closed" {
+        return PremarketDueState::MarketClosed;
+    }
+    if schedule.calendar_date != day
+        || !matches!(schedule.calendar_status.as_str(), "trading" | "closed")
+    {
+        return PremarketDueState::CalendarNeeded;
+    }
+    PremarketDueState::Due
 }
 
 fn due_state(state: &UserState, now: DateTime<Utc>) -> DueState {
@@ -452,6 +509,56 @@ fn set_schedule_error(app: &AppHandle, now: &str, result: &str, message: &str) {
         state.briefing_schedule.last_error = message.chars().take(512).collect();
         Ok(())
     });
+}
+
+fn reconcile_premarket_signal(app: &AppHandle) -> Result<Option<String>, String> {
+    let now = Utc::now();
+    let state = user_state::load(app)?;
+    let status = premarket_due_state(&state, now);
+    if !matches!(
+        status,
+        PremarketDueState::CalendarNeeded | PremarketDueState::Due
+    ) {
+        return Ok(None);
+    }
+    let attempted_at = now.to_rfc3339();
+    let day = day_and_minute(now).0;
+    let key = format!("premarket:{day}");
+    let claimed = user_state::mutate(app, |current| {
+        let current_status = premarket_due_state(current, now);
+        if !matches!(
+            current_status,
+            PremarketDueState::CalendarNeeded | PremarketDueState::Due
+        ) {
+            return Err("BACKGROUND_PREMARKET_NOT_DUE".into());
+        }
+        current.briefing_schedule.premarket_last_attempt_at = attempted_at.clone();
+        current.briefing_schedule.premarket_last_result =
+            if current_status == PremarketDueState::CalendarNeeded {
+                "waiting-calendar"
+            } else {
+                "waiting-data"
+            }
+            .into();
+        current.briefing_schedule.premarket_last_error.clear();
+        Ok(())
+    });
+    if let Err(error) = claimed {
+        if error == "BACKGROUND_PREMARKET_NOT_DUE" {
+            return Ok(None);
+        }
+        return Err(error);
+    }
+    let _ = app.emit(
+        PREMARKET_EVENT,
+        json!({
+            "key": key,
+            "tradingDate": day,
+            "status": "due",
+            "at": attempted_at,
+        }),
+    );
+    Ok(Some("premarket-due".into()))
 }
 
 fn reconcile_inner(
@@ -768,6 +875,29 @@ pub fn reconcile(
     app: &AppHandle,
     credentials: &Arc<dyn CredentialStore>,
 ) -> Result<String, String> {
+    match reconcile_premarket_signal(app) {
+        Ok(Some(status)) => {
+            let payload = json!({
+                "status": status,
+                "success": true,
+                "error": Value::Null,
+                "at": Utc::now().to_rfc3339(),
+            });
+            let _ = app.emit(STATUS_EVENT, payload);
+            return Ok("premarket-due".into());
+        }
+        Err(error) => {
+            let payload = json!({
+                "status": "error",
+                "success": false,
+                "error": error.chars().take(512).collect::<String>(),
+                "at": Utc::now().to_rfc3339(),
+            });
+            let _ = app.emit(STATUS_EVENT, payload);
+            return Err(error);
+        }
+        Ok(None) => {}
+    }
     let result = reconcile_inner(app, credentials);
     let payload = match &result {
         Ok(status) => json!({
@@ -918,6 +1048,54 @@ mod tests {
         assert_eq!(due_state(&state, now), DueState::Due);
         state.briefing_schedule.last_success_key = "close:2026-08-31".into();
         assert_eq!(due_state(&state, now), DueState::Completed);
+    }
+
+    #[test]
+    fn native_premarket_due_gate_is_idempotent_and_calendar_aware() {
+        let mut state = UserState::default();
+        state.briefing_schedule.premarket_enabled = true;
+        state
+            .portfolio_positions
+            .push(crate::user_state::PortfolioPosition {
+                id: "p1".into(),
+                symbol: "600519".into(),
+                name: "贵州茅台".into(),
+                market: "沪深".into(),
+                quantity: 1.0,
+                average_cost: 100.0,
+                take_profit_price: None,
+                stop_loss_price: None,
+                take_profit_triggered: false,
+                stop_loss_triggered: false,
+                plan_thesis: String::new(),
+                plan_horizon: None,
+                plan_status: None,
+                plan_created_at: None,
+                plan_updated_at: None,
+                plan_actions: Vec::new(),
+            });
+        let now = Shanghai
+            .with_ymd_and_hms(2026, 8, 31, 8, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            premarket_due_state(&state, now),
+            PremarketDueState::CalendarNeeded
+        );
+        state.briefing_schedule.premarket_last_attempt_at = "2026-08-30T23:55:00Z".into();
+        assert_eq!(
+            premarket_due_state(&state, now),
+            PremarketDueState::RetryWait
+        );
+        state.briefing_schedule.premarket_last_attempt_at.clear();
+        state.briefing_schedule.calendar_date = "2026-08-31".into();
+        state.briefing_schedule.calendar_status = "trading".into();
+        assert_eq!(premarket_due_state(&state, now), PremarketDueState::Due);
+        state.briefing_schedule.premarket_last_success_key = "premarket:2026-08-31".into();
+        assert_eq!(
+            premarket_due_state(&state, now),
+            PremarketDueState::Completed
+        );
     }
 
     #[test]

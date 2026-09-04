@@ -1,5 +1,6 @@
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
@@ -28,6 +29,8 @@ const MAX_PORTFOLIO_POSITIONS: usize = 200;
 const MAX_MONITOR_HISTORY: usize = 500;
 const MAX_PORTFOLIO_REVIEWS: usize = 90;
 const MAX_INSTALLED_SKILLS: usize = 100;
+const MAX_PREMARKET_BYTES: usize = 1_000_000;
+const MAX_PREMARKET_ITEMS: usize = 20;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
 
 struct StateFileLock {
@@ -321,12 +324,24 @@ pub struct PortfolioReview {
 pub struct BriefingSchedule {
     pub enabled: bool,
     pub close_time: String,
+    #[serde(default)]
+    pub premarket_enabled: bool,
+    #[serde(default = "default_premarket_time")]
+    pub premarket_time: String,
     pub time_zone: String,
     pub retry_minutes: u64,
     pub last_attempt_at: String,
     pub last_success_key: String,
     pub last_result: String,
     pub last_error: String,
+    #[serde(default)]
+    pub premarket_last_attempt_at: String,
+    #[serde(default)]
+    pub premarket_last_success_key: String,
+    #[serde(default = "default_briefing_result")]
+    pub premarket_last_result: String,
+    #[serde(default)]
+    pub premarket_last_error: String,
     #[serde(default)]
     pub calendar_date: String,
     #[serde(default = "default_calendar_status")]
@@ -343,17 +358,31 @@ fn default_calendar_status() -> String {
     "unknown".into()
 }
 
+fn default_premarket_time() -> String {
+    "08:00".into()
+}
+
+fn default_briefing_result() -> String {
+    "idle".into()
+}
+
 impl Default for BriefingSchedule {
     fn default() -> Self {
         Self {
             enabled: false,
             close_time: "15:35".into(),
+            premarket_enabled: false,
+            premarket_time: default_premarket_time(),
             time_zone: "Asia/Shanghai".into(),
             retry_minutes: 15,
             last_attempt_at: String::new(),
             last_success_key: String::new(),
             last_result: "idle".into(),
             last_error: String::new(),
+            premarket_last_attempt_at: String::new(),
+            premarket_last_success_key: String::new(),
+            premarket_last_result: default_briefing_result(),
+            premarket_last_error: String::new(),
             calendar_date: String::new(),
             calendar_status: default_calendar_status(),
             calendar_checked_at: String::new(),
@@ -379,6 +408,8 @@ pub struct UserState {
     pub portfolio_reviews: Vec<PortfolioReview>,
     #[serde(default)]
     pub briefing_schedule: BriefingSchedule,
+    #[serde(default)]
+    pub premarket_briefing: Option<Value>,
     #[serde(default = "default_installed_skill_ids")]
     pub installed_skill_ids: Vec<String>,
 }
@@ -412,6 +443,7 @@ impl Default for UserState {
             monitor_history: Vec::new(),
             portfolio_reviews: Vec::new(),
             briefing_schedule: BriefingSchedule::default(),
+            premarket_briefing: None,
             installed_skill_ids: default_installed_skill_ids(),
         }
     }
@@ -798,8 +830,8 @@ pub fn validate(state: &UserState) -> Result<(), String> {
     }
     let schedule = &state.briefing_schedule;
     if schedule.time_zone != "Asia/Shanghai"
-        || schedule.close_time.len() != 5
-        || schedule.close_time.as_bytes().get(2) != Some(&b':')
+        || !valid_clock_time(&schedule.close_time)
+        || !valid_clock_time(&schedule.premarket_time)
         || !(5..=60).contains(&schedule.retry_minutes)
         || !matches!(
             schedule.last_result.as_str(),
@@ -809,22 +841,27 @@ pub fn validate(state: &UserState) -> Result<(), String> {
             schedule.calendar_status.as_str(),
             "unknown" | "trading" | "closed" | "error"
         )
+        || !matches!(
+            schedule.premarket_last_result.as_str(),
+            "idle" | "success" | "waiting-data" | "waiting-calendar" | "market-closed" | "error"
+        )
     {
         return Err("briefing schedule is invalid".into());
-    }
-    let time_bytes = schedule.close_time.as_bytes();
-    let valid_time = time_bytes
-        .iter()
-        .enumerate()
-        .all(|(index, byte)| index == 2 || byte.is_ascii_digit())
-        && ((time_bytes[0] - b'0') * 10 + time_bytes[1] - b'0') < 24
-        && ((time_bytes[3] - b'0') * 10 + time_bytes[4] - b'0') < 60;
-    if !valid_time {
-        return Err("briefing schedule time is invalid".into());
     }
     validate_text_allow_empty(&schedule.last_attempt_at, "briefing last attempt", 64)?;
     validate_text_allow_empty(&schedule.last_success_key, "briefing success key", 128)?;
     validate_text_allow_empty(&schedule.last_error, "briefing last error", 512)?;
+    validate_text_allow_empty(
+        &schedule.premarket_last_attempt_at,
+        "premarket last attempt",
+        64,
+    )?;
+    validate_text_allow_empty(
+        &schedule.premarket_last_success_key,
+        "premarket success key",
+        128,
+    )?;
+    validate_text_allow_empty(&schedule.premarket_last_error, "premarket last error", 512)?;
     validate_text_allow_empty(&schedule.calendar_date, "briefing calendar date", 10)?;
     validate_text_allow_empty(
         &schedule.calendar_checked_at,
@@ -833,6 +870,60 @@ pub fn validate(state: &UserState) -> Result<(), String> {
     )?;
     validate_text_allow_empty(&schedule.calendar_source, "briefing calendar source", 128)?;
     validate_text_allow_empty(&schedule.calendar_tool_id, "briefing calendar tool id", 256)?;
+    validate_premarket_briefing(state.premarket_briefing.as_ref())?;
+    Ok(())
+}
+
+fn valid_clock_time(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 5
+        && bytes.get(2) == Some(&b':')
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 2 || byte.is_ascii_digit())
+        && ((bytes[0] - b'0') * 10 + bytes[1] - b'0') < 24
+        && ((bytes[3] - b'0') * 10 + bytes[4] - b'0') < 60
+}
+
+fn validate_premarket_briefing(value: Option<&Value>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let bytes =
+        serde_json::to_vec(value).map_err(|_| "premarket briefing is invalid".to_string())?;
+    if bytes.len() > MAX_PREMARKET_BYTES {
+        return Err("premarket briefing exceeds size limit".into());
+    }
+    let object = value.as_object().ok_or("premarket briefing is invalid")?;
+    for field in ["id", "kind", "createdAt", "asOf", "disclaimer"] {
+        if let Some(text) = object.get(field).and_then(Value::as_str) {
+            if text.len() > 1_024 {
+                return Err("premarket briefing text is too long".into());
+            }
+        }
+    }
+    let sections = object
+        .get("sections")
+        .and_then(Value::as_object)
+        .ok_or("premarket briefing sections are invalid")?;
+    for id in ["holdings", "industry", "macro", "overseas"] {
+        let Some(section) = sections.get(id).and_then(Value::as_object) else {
+            return Err("premarket briefing section is invalid".into());
+        };
+        let items = section
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or("premarket briefing items are invalid")?;
+        if items.len() > MAX_PREMARKET_ITEMS {
+            return Err("premarket briefing items exceed size limit".into());
+        }
+        for item in items {
+            if !item.is_object() {
+                return Err("premarket briefing item is invalid".into());
+            }
+        }
+    }
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { briefingSlot, hasFreshPortfolioQuote, marketCodeForPosition, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE, SZSE_MARKET_CODE } from "./briefingSchedule.js";
+import { briefingSlot, hasFreshPortfolioQuote, marketCodeForPosition, marketCodesForPositions, normalizeBriefingSchedule, premarketSlot, SSE_MARKET_CODE, SZSE_MARKET_CODE } from "./briefingSchedule.js";
 
 describe("portfolio briefing schedule", () => {
   const enabled = { enabled: true, closeTime: "15:35", retryMinutes: 15, calendarDate: "2026-09-01", calendarStatus: "trading" };
@@ -13,6 +13,13 @@ describe("portfolio briefing schedule", () => {
     const now = "2026-09-01T08:00:00Z";
     expect(briefingSlot({ now, schedule: enabled, positionCount: 1, reviews: [{ kind: "close", tradingDate: "2026-09-01" }] }).status).toBe("completed");
     expect(briefingSlot({ now, schedule: { ...enabled, lastAttemptAt: "2026-09-01T07:50:00Z" }, positionCount: 1 }).status).toBe("retry-wait");
+  });
+  it("supports an independent Shanghai-time premarket slot", () => {
+    const schedule = { ...enabled, premarketEnabled: true, premarketTime: "08:00" };
+    expect(premarketSlot({ now: "2026-08-31T23:00:00Z", schedule, positionCount: 1 }).status).toBe("not-due");
+    expect(premarketSlot({ now: "2026-09-01T00:00:00Z", schedule, positionCount: 1 })).toMatchObject({ status: "due", key: "premarket:2026-09-01" });
+    expect(premarketSlot({ now: "2026-09-01T00:00:00Z", schedule: { ...schedule, premarketLastSuccessKey: "premarket:2026-09-01" }, positionCount: 1 }).status).toBe("completed");
+    expect(premarketSlot({ now: "2026-09-01T00:00:00Z", schedule: { ...schedule, calendarStatus: "closed" }, positionCount: 1 }).status).toBe("market-closed");
   });
   it("requires a same-day real quote and sanitizes configuration", () => {
     const positions = [{ symbol: "AAPL" }];

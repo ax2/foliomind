@@ -12,7 +12,7 @@ import { sendSystemNotification } from "../lib/systemNotifications.js";
 import { conditionPrompt, conditionsForRule, evaluateRuleConditions, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { normalizeWatchlistItem } from "../lib/watchlist.js";
 import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
-import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
+import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, premarketSlot, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
 import { isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteSymbolKey } from "../lib/quoteFormatting.js";
@@ -77,7 +77,7 @@ function abortPendingDataRequests() {
 }
 
 function persistenceState(snapshot) {
-  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id) });
+  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, premarketBriefing: snapshot.premarketBriefing, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id) });
 }
 const samePersistenceState = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 function persistSnapshot(snapshot) {
@@ -625,7 +625,7 @@ async function executeMonitorForItem(rule, item) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -664,7 +664,7 @@ export const useLabStore = create((set, get) => ({
       premarketRequestGeneration += 1;
       anomalyAttributionGenerations.clear();
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingError: "", events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "", premarketLastAttemptAt: "", premarketLastSuccessKey: "", premarketLastResult: "idle", premarketLastError: "" }, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
   cancelLiveDataRefresh: () => {
     if (!get().liveDataLoading) return false;
@@ -1056,7 +1056,7 @@ export const useLabStore = create((set, get) => ({
             const selectedSymbol = nextWatchlist.some((item) => item.symbol === state.selectedSymbol)
               ? state.selectedSymbol
               : nextWatchlist[0]?.symbol || state.selectedSymbol;
-            return { watchlist: nextWatchlist, selectedSymbol, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
+            return { watchlist: nextWatchlist, selectedSymbol, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), premarketBriefing: hydrated.premarketBriefing, monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
           });
           if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
         } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true, userStateLoading: false, userStateError: "" }); await persistSnapshot(get()); }
@@ -1080,6 +1080,7 @@ export const useLabStore = create((set, get) => ({
     const portfolioPositions = Array.isArray(snapshot.portfolioPositions) ? snapshot.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean) : [];
     const portfolioReviews = Array.isArray(snapshot.portfolioReviews) ? snapshot.portfolioReviews.slice(0, 90) : [];
     const briefingSchedule = normalizeBriefingSchedule(snapshot.briefingSchedule);
+    const premarketBriefing = normalizeUserState(snapshot).premarketBriefing;
     const monitorHistory = Array.isArray(snapshot.monitorHistory) ? snapshot.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : [];
     liveRequestGeneration += 1;
     detailsRequestGeneration += 1;
@@ -1090,8 +1091,8 @@ export const useLabStore = create((set, get) => ({
     anomalyAttributionGenerations.clear();
     const previous = get();
     const nextSkillItems = skillItemsForIds(previous.skillItems, snapshot.installedSkillIds);
-    const optimistic = { watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, skillItems: nextSkillItems, selectedSymbol };
-    set((state) => ({ ...optimistic, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingError: "", anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
+    const optimistic = { watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, premarketBriefing, monitorHistory, skillItems: nextSkillItems, selectedSymbol };
+    set((state) => ({ ...optimistic, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
     try {
       await get().persistUserState();
       return true;
@@ -1103,6 +1104,7 @@ export const useLabStore = create((set, get) => ({
         portfolioPositions: JSON.stringify(state.portfolioPositions) === JSON.stringify(optimistic.portfolioPositions) ? previous.portfolioPositions : state.portfolioPositions,
         portfolioReviews: JSON.stringify(state.portfolioReviews) === JSON.stringify(optimistic.portfolioReviews) ? previous.portfolioReviews : state.portfolioReviews,
         briefingSchedule: JSON.stringify(state.briefingSchedule) === JSON.stringify(optimistic.briefingSchedule) ? previous.briefingSchedule : state.briefingSchedule,
+        premarketBriefing: JSON.stringify(state.premarketBriefing) === JSON.stringify(optimistic.premarketBriefing) ? previous.premarketBriefing : state.premarketBriefing,
         monitorHistory: JSON.stringify(state.monitorHistory) === JSON.stringify(optimistic.monitorHistory) ? previous.monitorHistory : state.monitorHistory,
         skillItems: JSON.stringify(state.skillItems) === JSON.stringify(optimistic.skillItems) ? previous.skillItems : state.skillItems,
         selectedSymbol: state.selectedSymbol === optimistic.selectedSymbol ? previous.selectedSymbol : state.selectedSymbol,
@@ -1222,17 +1224,17 @@ export const useLabStore = create((set, get) => ({
       next = { ...next, planThesis: "", planHorizon: null, takeProfitPrice: null, stopLossPrice: null, takeProfitTriggered: false, stopLossTriggered: false };
     }
     const portfolioPositions = exists ? current.map((position) => position.id === next.id ? next : position) : [...current, next];
-    set({ portfolioPositions });
+    const previousPremarket = get().premarketBriefing;
+    set({ portfolioPositions, premarketBriefing: null, premarketBriefingError: "" });
     try {
       await get().persistUserState();
-      set({ premarketBriefing: null, premarketBriefingError: "" });
       return next;
     } catch (error) {
       set((state) => ({ portfolioPositions: state.portfolioPositions.map((position) => {
         if (position.id !== next.id) return position;
         const optimisticPosition = position.id === next.id && JSON.stringify(position) === JSON.stringify(next);
         return optimisticPosition ? previous || null : position;
-      }).filter(Boolean) }));
+      }).filter(Boolean), premarketBriefing: state.premarketBriefing ? state.premarketBriefing : previousPremarket }));
       throw error;
     }
   },
@@ -1246,13 +1248,13 @@ export const useLabStore = create((set, get) => ({
     const importedBySymbol = new Map(nextImported.map((position) => [position.symbol, position]));
     const next = previous.map((position) => importedBySymbol.get(position.symbol) || position);
     next.push(...nextImported.filter((position) => !previous.some((candidate) => candidate.symbol === position.symbol)));
-    set({ portfolioPositions: next });
+    const previousPremarket = get().premarketBriefing;
+    set({ portfolioPositions: next, premarketBriefing: null, premarketBriefingError: "" });
     try {
       await get().persistUserState();
-      set({ premarketBriefing: null, premarketBriefingError: "" });
       return nextImported;
     } catch (error) {
-      set((state) => JSON.stringify(state.portfolioPositions) === JSON.stringify(next) ? { portfolioPositions: previous } : {});
+      set((state) => JSON.stringify(state.portfolioPositions) === JSON.stringify(next) ? { portfolioPositions: previous, premarketBriefing: previousPremarket } : {});
       throw error;
     }
   },
@@ -1277,16 +1279,16 @@ export const useLabStore = create((set, get) => ({
     const removedIndex = previous.findIndex((position) => position.id === id);
     const portfolioPositions = previous.filter((position) => position.id !== id);
     if (removedIndex < 0) return false;
-    set({ portfolioPositions });
+    const previousPremarket = get().premarketBriefing;
+    set({ portfolioPositions, premarketBriefing: null, premarketBriefingError: "" });
     try {
       await get().persistUserState();
-      set({ premarketBriefing: null, premarketBriefingError: "" });
       return true;
     } catch (error) {
       const removed = previous[removedIndex];
       set((state) => state.portfolioPositions.some((position) => position.id === id)
         ? {}
-        : { portfolioPositions: [...state.portfolioPositions.slice(0, removedIndex), removed, ...state.portfolioPositions.slice(removedIndex)] });
+        : { portfolioPositions: [...state.portfolioPositions.slice(0, removedIndex), removed, ...state.portfolioPositions.slice(removedIndex)], premarketBriefing: previousPremarket });
       throw error;
     }
   },
@@ -1364,8 +1366,16 @@ export const useLabStore = create((set, get) => ({
       macroNews.push(...normalizePremarketMarketNews(macroResult));
       for (const result of contextResults.slice(categories.length + 1, categories.length + 1 + indexSymbols.length)) if (result.status === "fulfilled") overseas.push(...normalizePremarketIndices(result.value));
       for (const result of contextResults.slice(categories.length + 1 + indexSymbols.length)) if (result.status === "fulfilled") overseas.push(...normalizePremarketCommodities(result.value));
-      const briefing = buildPremarketBriefing({ positions: get().portfolioPositions, newsBySymbol, events: [...get().events, ...eventRows], industryNews, macroNews, overseas, createdAt, id: createId("premarket") });
+      const normalizedCreatedAt = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt || new Date().toISOString());
+      const briefing = buildPremarketBriefing({ positions: get().portfolioPositions, newsBySymbol, events: [...get().events, ...eventRows], industryNews, macroNews, overseas, createdAt: normalizedCreatedAt, id: createId("premarket") });
+      const previousBriefing = get().premarketBriefing;
       set({ premarketBriefing: briefing, premarketBriefingLoading: false, premarketBriefingError: received ? "" : "当前渠道暂未返回持仓公告或事件" });
+      try {
+        await get().persistUserState();
+      } catch (error) {
+        set((current) => current.premarketBriefing?.id === briefing.id ? { premarketBriefing: previousBriefing, premarketBriefingError: friendlyDataMessage(error, "盘前摘要已生成但暂时无法保存，请稍后重试") } : {});
+        return false;
+      }
       return true;
     } catch (error) {
       if (requestGeneration !== premarketRequestGeneration) return false;
@@ -1373,6 +1383,60 @@ export const useLabStore = create((set, get) => ({
       return false;
     } finally {
       if (premarketRequestController === requestController) premarketRequestController = null;
+    }
+  },
+  runDuePremarketBriefing: async (now = new Date()) => {
+    let acquired = false;
+    let slot;
+    let calendarQuerying = false;
+    const attemptedAt = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+    set((state) => {
+      slot = premarketSlot({ now, schedule: state.briefingSchedule, positionCount: state.portfolioPositions.length });
+      if (!["due", "calendar-needed"].includes(slot.status) || state.premarketBriefingScheduleBusy || state.premarketBriefingLoading) return {};
+      acquired = true;
+      calendarQuerying = slot.status === "calendar-needed";
+      return { premarketBriefingScheduleBusy: true, briefingSchedule: { ...state.briefingSchedule, premarketLastAttemptAt: attemptedAt, premarketLastResult: calendarQuerying ? "waiting-calendar" : "waiting-data", premarketLastError: calendarQuerying ? "正在核对真实交易日历" : "正在获取真实盘前数据" } };
+    });
+    if (!acquired) return slot?.status || false;
+    try {
+      await get().persistUserState();
+      if (calendarQuerying) {
+        const marketcodes = marketCodesForPositions(get().portfolioPositions);
+        const calendars = await Promise.all(marketcodes.map((marketcode) => marketcode === SSE_MARKET_CODE
+          ? queryTradingCalendar(slot.tradingDate)
+          : queryTradingCalendar(slot.tradingDate, marketcode)));
+        const calendarStatus = calendars.every((calendar) => calendar?.isTradingDay === true) ? "trading" : "closed";
+        const sources = [...new Set(calendars.map((calendar) => String(calendar?.source || "数据服务")))];
+        const toolIds = [...new Set(calendars.map((calendar) => String(calendar?.toolId || "")).filter(Boolean))];
+        set((current) => ({ briefingSchedule: { ...current.briefingSchedule, calendarDate: slot.tradingDate, calendarStatus, calendarCheckedAt: attemptedAt, calendarSource: sources.join(", "), calendarToolId: toolIds.join(", "), premarketLastResult: calendarStatus === "closed" ? "market-closed" : "waiting-data", premarketLastError: "" } }));
+        await get().persistUserState();
+        if (calendarStatus === "closed") {
+          set({ premarketBriefingScheduleBusy: false });
+          return "market-closed";
+        }
+        slot = { ...slot, status: "due" };
+      }
+      const generated = await get().generatePremarketBriefing(now);
+      if (!generated) {
+        set((current) => ({ premarketBriefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, premarketLastResult: "error", premarketLastError: current.premarketBriefingError || "盘前摘要暂时无法生成" } }));
+        await get().persistUserState().catch(() => null);
+        return "error";
+      }
+      const notification = { id: createId("notification"), kind: "briefing", symbol: "", name: "", ruleId: "", eventKey: slot.key, reminderPhase: "completed", title: `${slot.tradingDate} 盘前摘要已更新`, body: "已完成持仓公告、行业/宏观与隔夜市场的真实数据聚合。", severity: "info", createdAt: attemptedAt, read: false, source: "data-service" };
+      set((current) => ({ notifications: [notification, ...current.notifications].slice(0, 500), premarketBriefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, premarketLastSuccessKey: slot.key, premarketLastResult: "success", premarketLastError: "" } }));
+      try {
+        await get().persistUserState();
+      } catch (error) {
+        set((current) => ({ premarketBriefingScheduleBusy: false, notifications: current.notifications.filter((candidate) => candidate.id !== notification.id), briefingSchedule: { ...current.briefingSchedule, premarketLastResult: "error", premarketLastError: friendlyDataMessage(error, "盘前摘要已生成但通知暂时无法保存") } }));
+        return "error";
+      }
+      void sendSystemNotification(notification);
+      return "success";
+    } catch (error) {
+      const message = friendlyDataMessage(error, "盘前真实数据暂时无法获取，可稍后重试");
+      set((current) => ({ premarketBriefingScheduleBusy: false, briefingSchedule: { ...current.briefingSchedule, ...(calendarQuerying ? { calendarDate: slot?.tradingDate || "", calendarStatus: "error", calendarCheckedAt: attemptedAt } : {}), premarketLastResult: calendarQuerying ? "waiting-calendar" : "error", premarketLastError: message } }));
+      await get().persistUserState().catch(() => null);
+      return "error";
     }
   },
   updateBriefingSchedule: async (input) => {
@@ -1386,6 +1450,7 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
     if (briefingSchedule.enabled && !isDesktopRuntime()) void get().runDuePortfolioReview();
+    if (briefingSchedule.premarketEnabled && !isDesktopRuntime()) void get().runDuePremarketBriefing();
     return briefingSchedule;
   },
   runDuePortfolioReview: async (now = new Date()) => {

@@ -2,6 +2,7 @@ import { normalizeConditions } from "./monitorConditions.js";
 import { normalizeWatchlistItem } from "./watchlist.js";
 import { normalizeBriefingSchedule } from "./briefingSchedule.js";
 import { normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "./monitorLifecycle.js";
+import { safeExternalUrl } from "./urlSafety.js";
 
 const text = (value, max = 512) => String(value ?? "").trim().slice(0, max);
 const finiteNumber = (value) => {
@@ -112,6 +113,31 @@ function sanitizePortfolioReviews(items) {
   })).filter((review) => review.id && review.tradingDate && review.createdAt && review.pricedCount != null && review.pricedCount > 0 && review.totalCount != null && review.totalCount >= review.pricedCount);
 }
 
+const PREMARKET_ITEM_LIMIT = 20;
+
+function sanitizePremarketItem(value) {
+  if (!value || typeof value !== "object") return null;
+  const item = {
+    symbol: text(value.symbol, 64).toUpperCase(), name: text(value.name, 128), title: text(value.title, 256), summary: text(value.summary, 1_000), detail: text(value.detail, 1_000),
+    date: text(value.date, 64), publishedAt: text(value.publishedAt ?? value.published_at, 128), source: text(value.source, 128), url: safeExternalUrl(value.url), sentiment: text(value.sentiment, 64),
+  };
+  return item.title || item.summary || item.detail ? item : null;
+}
+
+function sanitizePremarketBriefing(value) {
+  if (!value || typeof value !== "object") return null;
+  const sections = Object.fromEntries(["holdings", "industry", "macro", "overseas"].map((id) => {
+    const section = value.sections?.[id];
+    const items = (Array.isArray(section?.items) ? section.items : []).slice(0, PREMARKET_ITEM_LIMIT).map(sanitizePremarketItem).filter(Boolean);
+    return [id, { id, title: text(section?.title || id, 128), status: items.length ? "available" : "empty", items, emptyCopy: text(section?.emptyCopy || "当前没有返回可展示的真实数据。", 256) }];
+  }));
+  const normalized = {
+    id: text(value.id, 128), kind: "premarket", createdAt: text(value.createdAt, 64), asOf: text(value.asOf, 128), sections,
+    sources: [...new Set((Array.isArray(value.sources) ? value.sources : []).slice(0, 12).map((source) => text(source, 128)).filter(Boolean))], disclaimer: text(value.disclaimer, 512),
+  };
+  return normalized.id && normalized.createdAt ? normalized : null;
+}
+
 function sanitizeReviewPosition(value) {
   if (!value || typeof value !== "object") return null;
   const position = { symbol: text(value.symbol, 64).toUpperCase(), name: text(value.name, 128), currentPrice: finiteNumber(value.currentPrice), pnl: finiteNumber(value.pnl), pnlPercent: finiteNumber(value.pnlPercent), weight: finiteNumber(value.weight), asOf: text(value.asOf, 128), source: text(value.source, 128) };
@@ -124,7 +150,7 @@ export function normalizeUserState(state = {}) {
   const notifications = sanitizeNotifications(value.notifications);
   const monitorHistory = sanitizeMonitorHistory(value.monitorHistory);
   const monitorRules = migrateLegacySeedRules(sanitizeRules(value.monitorRules ?? value.rules), notifications, monitorHistory);
-  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules, notifications, portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory, portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills) };
+  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules, notifications, portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory, portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), premarketBriefing: sanitizePremarketBriefing(value.premarketBriefing), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills) };
 }
 
-export { sanitizeInstalledSkillIds, sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };
+export { sanitizeInstalledSkillIds, sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePremarketBriefing, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };

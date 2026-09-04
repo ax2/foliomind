@@ -17,7 +17,7 @@ import { CopilotPanel } from "./CopilotPanel.jsx";
 import { DataState } from "./DataState.jsx";
 import { CONDITION_TYPES, conditionOperatorsFor, conditionTypeFor, conditionsForRule, defaultConditionFor, normalizeConditions, ruleConditionSummary } from "../lib/monitorConditions.js";
 import { anomalyLabel, detectMarketAnomalies } from "../lib/anomalyDetection.js";
-import { nextBriefingLabel } from "../lib/briefingSchedule.js";
+import { nextBriefingLabel, nextPremarketLabel } from "../lib/briefingSchedule.js";
 import { loadDesktopLifecycleStatus, reconcileDesktopNow } from "../lib/desktopLifecycle.js";
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { marketBreadth, marketWatchlistSummary } from "../lib/marketBreadth.js";
@@ -164,6 +164,7 @@ export function PortfolioView() {
   const premarketBriefingError = useLabStore((state) => state.premarketBriefingError);
   const briefingSchedule = useLabStore((state) => state.briefingSchedule);
   const briefingScheduleBusy = useLabStore((state) => state.briefingScheduleBusy);
+  const premarketBriefingScheduleBusy = useLabStore((state) => state.premarketBriefingScheduleBusy);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const savePortfolioPosition = useLabStore((state) => state.savePortfolioPosition);
   const importPortfolioItems = useLabStore((state) => state.importPortfolioItems);
@@ -175,6 +176,7 @@ export function PortfolioView() {
   const removePortfolioReview = useLabStore((state) => state.removePortfolioReview);
   const updateBriefingSchedule = useLabStore((state) => state.updateBriefingSchedule);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
+  const runDuePremarketBriefing = useLabStore((state) => state.runDuePremarketBriefing);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
   const cancelLiveDataRefresh = useLabStore((state) => state.cancelLiveDataRefresh);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
@@ -352,6 +354,10 @@ export function PortfolioView() {
       {premarketBriefingError ? <p className="premarket-briefing-status" role="status">{premarketBriefingError}</p> : null}
       {!positions.length ? <p className="risk-empty">添加持仓后，这里会聚合真实公告与事件。</p> : premarketBriefingLoading ? <p className="risk-empty">正在按持仓获取真实新闻与公司事件，请稍候…</p> : !premarketBriefing ? <p className="risk-empty">点击“盘前摘要”获取真实数据；没有返回结果时不会显示示例内容。</p> : <div className="premarket-briefing-grid">{Object.values(premarketBriefing.sections).map((section) => <article className={`premarket-briefing-section ${section.status}`} key={section.id}><div><strong>{section.title}</strong><small>{section.status === "available" ? `${section.items.length} 条真实记录` : "暂无数据"}</small></div>{section.items.length ? <ul>{section.items.slice(0, 12).map((item, index) => { const sourceUrl = safeExternalUrl(item.url); return <li key={`${item.symbol}-${item.title}-${index}`}><div><strong>{item.title || item.detail || "未命名记录"}</strong><small>{item.name || item.symbol}{item.date || item.publishedAt ? ` · ${item.date || item.publishedAt}` : ""} · {item.source || "数据服务"}</small>{item.summary && item.summary !== item.title ? <p>{item.summary}</p> : item.detail && item.detail !== item.title ? <p>{item.detail}</p> : null}</div>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">来源</a> : null}</li>; })}</ul> : <p>{section.emptyCopy}</p>}</article>)}</div>}
       {premarketBriefing ? <small className="security-note">{premarketBriefing.disclaimer}{premarketBriefing.sources.length ? ` · 来源：${premarketBriefing.sources.join("、")}` : ""}</small> : null}
+    </section>
+    <section className="briefing-automation-overview" aria-label="盘前自动摘要">
+      <div className="briefing-schedule-card"><div><strong>自动生成盘前摘要</strong><small>{nextPremarketLabel(briefingSchedule)} · 先核对真实交易日历；休市或无持仓时不会生成。</small>{briefingSchedule.calendarDate ? <small>日历：{briefingSchedule.calendarDate} · {briefingSchedule.calendarStatus === "trading" ? "交易日" : briefingSchedule.calendarStatus === "closed" ? "休市" : "待核实"} · {briefingSchedule.calendarSource || "数据服务"}</small> : null}</div><label className="briefing-time">执行时间<input type="time" aria-label="自动盘前摘要时间" value={briefingSchedule.premarketTime} disabled={!briefingSchedule.premarketEnabled} onChange={(event) => updateBriefingSchedule({ premarketTime: event.target.value })} /></label><label className="briefing-toggle"><input type="checkbox" checked={briefingSchedule.premarketEnabled} onChange={(event) => updateBriefingSchedule({ premarketEnabled: event.target.checked })} />{briefingSchedule.premarketEnabled ? "已启用" : "未启用"}</label><button type="button" className="secondary-button" disabled={!briefingSchedule.premarketEnabled || premarketBriefingScheduleBusy} onClick={() => { void (runDuePremarketBriefing()); }}>{premarketBriefingScheduleBusy ? "执行中…" : "立即检查"}</button></div>
+      {briefingSchedule.premarketEnabled && briefingSchedule.premarketLastResult !== "idle" ? <p className={`briefing-schedule-status ${briefingSchedule.premarketLastResult}`} role="status">{briefingSchedule.premarketLastResult === "success" ? "最近一次自动盘前摘要已完成" : briefingSchedule.premarketLastResult === "waiting-data" ? "正在等待真实盘前数据" : briefingSchedule.premarketLastResult === "waiting-calendar" ? "正在等待交易日历恢复" : briefingSchedule.premarketLastResult === "market-closed" ? "交易所休市，本日不会生成盘前摘要" : "最近一次盘前摘要未完成"}{briefingSchedule.premarketLastAttemptAt ? ` · ${new Date(briefingSchedule.premarketLastAttemptAt).toLocaleString("zh-CN")}` : ""}{briefingSchedule.premarketLastError ? ` · ${briefingSchedule.premarketLastError}` : ""}</p> : null}
     </section>
     <section className="portfolio-review-overview" aria-label="盘后复盘记录">
       <div className="portfolio-review-heading"><div><h2>盘后复盘</h2><small>保存当前真实行情快照、组合表现、风险信号和未来 7 天已返回事件。</small></div><span>{portfolioReviews.length} 份记录</span></div>

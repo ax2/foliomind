@@ -5,7 +5,7 @@ export const SSE_MARKET_CODE = "212001";
 export const SZSE_MARKET_CODE = "212100";
 export const HKEX_MARKET_CODE = "212200";
 export const CFFEX_MARKET_CODE = "212020001";
-export const DEFAULT_BRIEFING_SCHEDULE = Object.freeze({ enabled: false, closeTime: "15:35", timeZone: BRIEFING_TIME_ZONE, retryMinutes: 15, lastAttemptAt: "", lastSuccessKey: "", lastResult: "idle", lastError: "", calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" });
+export const DEFAULT_BRIEFING_SCHEDULE = Object.freeze({ enabled: false, closeTime: "15:35", premarketEnabled: false, premarketTime: "08:00", timeZone: BRIEFING_TIME_ZONE, retryMinutes: 15, lastAttemptAt: "", lastSuccessKey: "", lastResult: "idle", lastError: "", premarketLastAttemptAt: "", premarketLastSuccessKey: "", premarketLastResult: "idle", premarketLastError: "", calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" });
 
 const RESULT_STATES = new Set(["idle", "success", "waiting-data", "waiting-calendar", "market-closed", "error"]);
 const CALENDAR_STATES = new Set(["unknown", "trading", "closed", "error"]);
@@ -50,16 +50,36 @@ function dateParts(value, timeZone = BRIEFING_TIME_ZONE) {
 
 export function normalizeBriefingSchedule(value = {}) {
   const closeTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value?.closeTime || "")) ? String(value.closeTime) : DEFAULT_BRIEFING_SCHEDULE.closeTime;
+  const premarketTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value?.premarketTime || "")) ? String(value.premarketTime) : DEFAULT_BRIEFING_SCHEDULE.premarketTime;
   const retry = Number(value?.retryMinutes);
   return {
-    enabled: value?.enabled === true, closeTime, timeZone: BRIEFING_TIME_ZONE,
+    enabled: value?.enabled === true, closeTime, premarketEnabled: value?.premarketEnabled === true, premarketTime, timeZone: BRIEFING_TIME_ZONE,
     retryMinutes: Number.isInteger(retry) ? Math.min(60, Math.max(5, retry)) : DEFAULT_BRIEFING_SCHEDULE.retryMinutes,
     lastAttemptAt: String(value?.lastAttemptAt || "").slice(0, 64), lastSuccessKey: String(value?.lastSuccessKey || "").slice(0, 128),
     lastResult: RESULT_STATES.has(value?.lastResult) ? value.lastResult : "idle", lastError: String(value?.lastError || "").trim().slice(0, 512),
+    premarketLastAttemptAt: String(value?.premarketLastAttemptAt || "").slice(0, 64), premarketLastSuccessKey: String(value?.premarketLastSuccessKey || "").slice(0, 128),
+    premarketLastResult: RESULT_STATES.has(value?.premarketLastResult) ? value.premarketLastResult : "idle", premarketLastError: String(value?.premarketLastError || "").trim().slice(0, 512),
     calendarDate: /^\d{4}-\d{2}-\d{2}$/.test(String(value?.calendarDate || "")) ? String(value.calendarDate) : "",
     calendarStatus: CALENDAR_STATES.has(value?.calendarStatus) ? value.calendarStatus : "unknown",
     calendarCheckedAt: String(value?.calendarCheckedAt || "").slice(0, 64), calendarSource: String(value?.calendarSource || "").slice(0, 128), calendarToolId: String(value?.calendarToolId || "").slice(0, 256),
   };
+}
+
+export function premarketSlot({ now = new Date(), schedule = DEFAULT_BRIEFING_SCHEDULE, positionCount = 0 } = {}) {
+  const config = normalizeBriefingSchedule(schedule);
+  const local = dateParts(now, config.timeZone);
+  if (!local) return { status: "invalid-time" };
+  const key = `premarket:${local.day}`;
+  if (!config.premarketEnabled) return { status: "disabled", key, tradingDate: local.day };
+  if (!positionCount) return { status: "no-positions", key, tradingDate: local.day };
+  const [hour, minute] = config.premarketTime.split(":").map(Number);
+  if (local.minutes < hour * 60 + minute) return { status: "not-due", key, tradingDate: local.day };
+  if (config.premarketLastSuccessKey === key) return { status: "completed", key, tradingDate: local.day };
+  if (config.calendarDate !== local.day || !["trading", "closed"].includes(config.calendarStatus)) return { status: "calendar-needed", key, tradingDate: local.day };
+  if (config.calendarStatus === "closed") return { status: "market-closed", key, tradingDate: local.day };
+  const lastAttempt = Date.parse(config.premarketLastAttemptAt);
+  if (Number.isFinite(lastAttempt) && new Date(now).getTime() - lastAttempt < config.retryMinutes * 60_000) return { status: "retry-wait", key, tradingDate: local.day };
+  return { status: "due", key, tradingDate: local.day };
 }
 
 export function briefingSlot({ now = new Date(), schedule = DEFAULT_BRIEFING_SCHEDULE, reviews = [], positionCount = 0 } = {}) {
@@ -94,4 +114,12 @@ export function nextBriefingLabel(schedule, now = new Date()) {
   const local = dateParts(now, config.timeZone);
   if (!local) return `交易日 ${config.closeTime}`;
   return `交易日 ${config.closeTime}（北京时间）`;
+}
+
+export function nextPremarketLabel(schedule, now = new Date()) {
+  const config = normalizeBriefingSchedule(schedule);
+  if (!config.premarketEnabled) return "未启用";
+  const local = dateParts(now, config.timeZone);
+  if (!local) return `交易日 ${config.premarketTime}`;
+  return `交易日 ${config.premarketTime}（北京时间）`;
 }

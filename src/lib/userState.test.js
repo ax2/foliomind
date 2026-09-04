@@ -165,6 +165,19 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw).portfolioReviews).toMatchObject([{ id: "review-1", pricedCount: 1, positions: [{ symbol: "AAPL", currentPrice: 120 }] }]);
   });
 
+  it("round-trips the bounded real-data premarket briefing", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "AAPL", name: "Apple" }],
+      premarketBriefing: {
+        id: "premarket-1", createdAt: "2026-09-01T00:00:00Z", asOf: "2026-09-01T00:00:00Z", disclaimer: "不构成投资建议",
+        sections: { holdings: { title: "持仓", items: [{ symbol: "AAPL", title: "真实公告", source: "provider", url: "javascript:alert(1)" }] }, industry: { title: "行业", items: [] }, macro: { title: "宏观", items: [] }, overseas: { title: "外盘", items: [] } },
+        sources: ["provider"], rawResponse: "drop-me",
+      },
+    });
+    expect(raw).not.toContain("drop-me");
+    expect(parseUserStateBackup(raw).premarketBriefing).toMatchObject({ id: "premarket-1", kind: "premarket", sections: { holdings: { status: "available", items: [{ title: "真实公告", url: "" }] } } });
+  });
+
   it("uses one bounded contract for malformed state from every transport", () => {
     const normalized = normalizeUserState({
       watchlist: [{ symbol: " 600519 ", name: " 贵州茅台 ", market: "沪深" }, { symbol: "", name: "bad" }],

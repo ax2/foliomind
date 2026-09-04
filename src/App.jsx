@@ -7,7 +7,7 @@ import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
-import { listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
+import { listenForBackgroundPremarket, listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
@@ -46,6 +46,7 @@ export function App() {
   const rules = useLabStore((state) => state.rules);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
+  const runDuePremarketBriefing = useLabStore((state) => state.runDuePremarketBriefing);
   const [refreshPolicy, setRefreshPolicy] = useState(loadRefreshPolicy);
   const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
@@ -60,14 +61,31 @@ export function App() {
   useEffect(() => {
     if (!userStateLoaded) return undefined;
     if (isDesktopRuntime()) return undefined;
-    const reconcile = () => { void runDuePortfolioReview(); };
+    const reconcile = () => { void runDuePortfolioReview(); void runDuePremarketBriefing(); };
     reconcile();
     const timer = window.setInterval(reconcile, BRIEFING_RECONCILE_INTERVAL_MS);
     const onVisible = () => { if (document.visibilityState === "visible") reconcile(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", reconcile);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", reconcile); };
-  }, [userStateLoaded, runDuePortfolioReview]);
+  }, [userStateLoaded, runDuePortfolioReview, runDuePremarketBriefing]);
+  useEffect(() => {
+    if (!userStateLoaded || !isDesktopRuntime()) return undefined;
+    let disposed = false;
+    let unlisten = () => {};
+    void listenForBackgroundPremarket(() => {
+      void runDuePremarketBriefing().catch((error) => {
+        if (!disposed) setSettingsNotice({ type: "error", text: friendlyDataMessage(error, "桌面盘前摘要暂时无法生成，请稍后重试") });
+      });
+    }).then((cleanup) => {
+      if (disposed) cleanup();
+      else unlisten = cleanup;
+    }).catch((error) => {
+      if (!disposed) setSettingsNotice({ type: "error", text: friendlyDataMessage(error, "桌面盘前调度事件暂时不可用，请稍后重试") });
+    });
+    void runDuePremarketBriefing();
+    return () => { disposed = true; unlisten(); };
+  }, [userStateLoaded, runDuePremarketBriefing, setSettingsNotice]);
   useEffect(() => {
     if (!userStateLoaded) return undefined;
     let disposed = false;
