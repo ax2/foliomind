@@ -19,6 +19,7 @@ import { firstQuoteRecord, isValidQuotePrice, marketRegionFor, quoteForSymbol, q
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
+import { capabilityArray, capabilityData, capabilitySource } from "../lib/capabilityEnvelope.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -286,25 +287,16 @@ function monitorHistoryFromResult(rule, item, result, reply, checkedAt, evaluati
 }
 function quoteFromReply(text) {
   const value = findJsonObject(text);
-  const structuredPrice = value && numberOrNull(value.price);
-  if (value && structuredPrice != null && structuredPrice > 0) {
-    return {
-      price: structuredPrice,
-      change: numberOrNull(value.change),
-      asOf: String(value.asOf || ""),
-      source: String(value.source || "数据服务"),
-      series: Array.isArray(value.series) ? value.series : [],
-      fundamentals: value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {},
-      companyDescription: typeof value.companyDescription === "string" ? value.companyDescription : "",
-    };
-  }
-  const source = String(text ?? "");
-  const priceMatch = source.match(/(?:最新价|当前价|收盘价|last\s*price)[^\d$￥¥]{0,24}[$￥¥]?\s*([\d,]+(?:\.\d+)?)/i);
+  const source = capabilityData(value);
+  const structured = normalizeLiveQuote(source || value);
+  if (structured) return structured;
+  const rawText = String(text ?? "");
+  const priceMatch = rawText.match(/(?:最新价|当前价|收盘价|last\s*price)[^\d$￥¥]{0,24}[$￥¥]?\s*([\d,]+(?:\.\d+)?)/i);
   const parsedPrice = priceMatch ? numberOrNull(priceMatch[1].replaceAll(",", "")) : null;
   if (parsedPrice == null || parsedPrice <= 0) return null;
-  const changeMatch = source.match(/(?:涨跌幅|涨幅|change)[^\d+\-]{0,18}([+\-]?\d+(?:\.\d+)?)\s*%/i);
-  const asOfMatch = source.match(/(?:数据时间|截至|as\s*of)[：:\s]*([^\n|]+)/i);
-  const sourceMatch = source.match(/(?:数据来源|来源|source)[：:\s]*([^\n|]+)/i);
+  const changeMatch = rawText.match(/(?:涨跌幅|涨幅|change)[^\d+\-]{0,18}([+\-]?\d+(?:\.\d+)?)\s*%/i);
+  const asOfMatch = rawText.match(/(?:数据时间|截至|as\s*of)[：:\s]*([^\n|]+)/i);
+  const sourceMatch = rawText.match(/(?:数据来源|来源|source)[：:\s]*([^\n|]+)/i);
   return {
     price: parsedPrice,
     change: changeMatch ? numberOrNull(changeMatch[1]) : null,
@@ -362,11 +354,12 @@ function normalizeLiveQuote(value) {
 
 function detailedQuoteFromReply(text) {
   const value = findJsonObject(text) || {};
-  const source = value.data && typeof value.data === "object" ? value.data : value.result && typeof value.result === "object" ? value.result : value;
+  const source = capabilityData(value) || {};
   const quote = normalizeLiveQuote(value);
   const rawSeries = source.seriesByRange || source.series_by_range || {};
   const seriesByRange = Object.fromEntries(Object.entries(rawSeries).filter(([, points]) => Array.isArray(points)));
   if (Array.isArray(source.series) && !seriesByRange["分时"]) seriesByRange["分时"] = source.series;
+  if (Array.isArray(source.bars) && !seriesByRange["分时"]) seriesByRange["分时"] = source.bars;
   const fundamentals = source.fundamentals && typeof source.fundamentals === "object" ? source.fundamentals : {};
   if (!quote && !Object.keys(fundamentals).length && !source.companyDescription && !source.company_description && !Object.keys(seriesByRange).length) return null;
   return {
@@ -376,16 +369,17 @@ function detailedQuoteFromReply(text) {
 }
 function seriesFromReply(text) {
   const value = findJsonObject(text);
-  const source = value?.data && typeof value.data === "object" ? value.data : value?.result && typeof value.result === "object" ? value.result : value;
-  const series = Array.isArray(source?.series) ? source.series : Array.isArray(source?.data) ? source.data : findJsonArray(text);
-  return series.filter((point) => point && typeof point === "object");
+  const source = capabilityData(value);
+  const series = capabilityArray(source, ["series", "bars", "items", "data"]);
+  const fallback = series.length ? series : findJsonArray(text);
+  return fallback.filter((point) => point && typeof point === "object");
 }
 
 function eventsFromReply(text) {
   const value = findJsonObject(text) || {};
-  const source = value?.data && typeof value.data === "object" ? value.data : value?.result && typeof value.result === "object" ? value.result : value;
-  const items = Array.isArray(source.events) ? source.events : Array.isArray(source.data) ? source.data : Array.isArray(source) ? source : [];
-  const fallbackSource = String(source.source || value.source || "数据服务");
+  const source = capabilityData(value) || {};
+  const items = capabilityArray(source, ["events", "items", "data"]);
+  const fallbackSource = String(source.source || capabilitySource(value) || value.source || "数据服务");
   return items.filter((event) => event && typeof event === "object").map((event) => ({
     date: String(event.date || event.event_date || event.effective_date || ""),
     type: String(event.type || event.event_type || "其他"),
@@ -419,12 +413,12 @@ function monitorDataKind(conditionType) {
 
 function monitorFieldsFromReply(text, symbol) {
   const value = findJsonObject(text) || {};
-  const source = value?.data && typeof value.data === "object" ? value.data : value?.result && typeof value.result === "object" ? value.result : value;
+  const source = capabilityData(value) || {};
   const quote = Object.values(liveQuotesFromReply(text, [symbol]))[0] || normalizeLiveQuote(source.quote) || normalizeLiveQuote(source);
-  const events = Array.isArray(source.events) ? source.events : [];
-  const flow = Array.isArray(source.capitalFlow) ? source.capitalFlow : Array.isArray(source.capital_flow) ? source.capital_flow : [];
-  const news = Array.isArray(source.news) ? source.news : [];
-  const series = Array.isArray(source.series) ? source.series : [];
+  const events = capabilityArray(source, ["events", "items", "data"]);
+  const flow = capabilityArray(source, ["capitalFlow", "capital_flow", "rows", "data"]);
+  const news = capabilityArray(source, ["news", "articles", "items", "data"]);
+  const series = capabilityArray(source, ["series", "bars", "items", "data"]);
   const fields = quote ? { ...quote } : {};
   if (source.eventCount !== null && source.eventCount !== undefined && source.eventCount !== "" && Number.isFinite(Number(source.eventCount))) fields.eventCount = Number(source.eventCount);
   if (source.mainNetInflow !== null && source.mainNetInflow !== undefined && source.mainNetInflow !== "" && Number.isFinite(Number(source.mainNetInflow))) fields.mainNetInflow = Number(source.mainNetInflow);
@@ -435,7 +429,7 @@ function monitorFieldsFromReply(text, symbol) {
   if (news.length) fields.news = news;
   if (series.length) fields.series = series;
   if (!fields.asOf && source.asOf) fields.asOf = String(source.asOf);
-  if (!fields.source && source.source) fields.source = String(source.source);
+  if (!fields.source && (source.source || capabilitySource(value))) fields.source = String(source.source || capabilitySource(value));
   return fields;
 }
 

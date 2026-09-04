@@ -1,6 +1,7 @@
 import { eventDateKey } from "./eventCalendar.js";
 import { quoteSymbolKey } from "./quoteFormatting.js";
 import { safeExternalUrl } from "./urlSafety.js";
+import { capabilityArray, capabilityData } from "./capabilityEnvelope.js";
 
 const MAX_NEWS = 60;
 const MAX_EVENTS = 40;
@@ -11,21 +12,11 @@ function text(value, max = MAX_TEXT) {
 }
 
 function unwrap(value) {
-  let current = value;
-  for (let index = 0; index < 3; index += 1) {
-    if (Array.isArray(current) || !current || typeof current !== "object") break;
-    if (current.data && typeof current.data === "object") current = current.data;
-    else if (current.result && typeof current.result === "object") current = current.result;
-    else break;
-  }
-  return current;
+  return capabilityData(value);
 }
 
 function arrayField(value, fields) {
-  const source = unwrap(value);
-  if (Array.isArray(source)) return source;
-  for (const field of fields) if (Array.isArray(source?.[field])) return source[field];
-  return [];
+  return capabilityArray(unwrap(value), fields);
 }
 
 function parsedTime(value) {

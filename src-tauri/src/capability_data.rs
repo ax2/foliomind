@@ -15,6 +15,45 @@ const MAX_RESPONSE_SIZE: u64 = 20_480;
 const MAX_CACHE_ENTRIES: usize = 128;
 const MAX_RETRY_ATTEMPTS: usize = 1;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
+const MAX_ENVELOPE_DEPTH: usize = 4;
+const ENVELOPE_KEYS: [&str; 3] = ["data", "payload", "result"];
+const LEAF_KEYS: [&str; 35] = [
+    "price",
+    "lastPrice",
+    "last_price",
+    "last",
+    "close",
+    "symbol",
+    "code",
+    "name",
+    "title",
+    "headline",
+    "description",
+    "summary",
+    "date",
+    "time",
+    "timestamp",
+    "event_date",
+    "events",
+    "news",
+    "articles",
+    "series",
+    "bars",
+    "rows",
+    "items",
+    "indices",
+    "commodities",
+    "quotes",
+    "company",
+    "fundamentals",
+    "capitalFlow",
+    "capital_flow",
+    "mainNetInflow",
+    "main_net_inflow",
+    "sentiment",
+    "sentimentScore",
+    "tradingDates",
+];
 
 struct CacheEntry {
     data: Value,
@@ -341,13 +380,80 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
     Ok(json!({ "symbol": symbol }))
 }
 
+fn has_payload_leaf(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return matches!(value, Value::Array(_));
+    };
+    LEAF_KEYS.iter().any(|key| object.contains_key(*key))
+}
+
+fn payload_at(value: &Value, depth: usize) -> Value {
+    if depth >= MAX_ENVELOPE_DEPTH || has_payload_leaf(value) {
+        return value.clone();
+    }
+    let Some(object) = value.as_object() else {
+        return value.clone();
+    };
+    for key in ENVELOPE_KEYS {
+        if let Some(nested) = object.get(key) {
+            return payload_at(nested, depth + 1);
+        }
+    }
+    value.clone()
+}
+
 fn payload(value: &Value) -> Value {
+    payload_at(value, 0)
+}
+
+fn numeric_status(value: &Value) -> Option<u16> {
     value
-        .pointer("/result/data")
-        .or_else(|| value.get("data"))
-        .or_else(|| value.get("result"))
-        .cloned()
-        .unwrap_or_else(|| value.clone())
+        .as_u64()
+        .and_then(|status| u16::try_from(status).ok())
+        .or_else(|| {
+            value
+                .as_str()
+                .and_then(|status| status.trim().parse::<u16>().ok())
+        })
+}
+
+fn status_code_at(value: &Value, depth: usize) -> Option<u16> {
+    if depth > MAX_ENVELOPE_DEPTH {
+        return None;
+    }
+    let Some(object) = value.as_object() else {
+        return None;
+    };
+    for key in ["status_code", "statusCode", "http_status", "httpStatus"] {
+        if let Some(status) = object.get(key).and_then(numeric_status) {
+            return Some(status);
+        }
+    }
+    for key in ENVELOPE_KEYS {
+        if let Some(nested) = object.get(key) {
+            if let Some(status) = status_code_at(nested, depth + 1) {
+                return Some(status);
+            }
+        }
+    }
+    None
+}
+
+fn explicit_failure_at(value: &Value, depth: usize) -> bool {
+    if depth > MAX_ENVELOPE_DEPTH {
+        return false;
+    }
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.get("success").and_then(Value::as_bool) == Some(false) {
+        return true;
+    }
+    ENVELOPE_KEYS.iter().any(|key| {
+        object
+            .get(*key)
+            .is_some_and(|nested| explicit_failure_at(nested, depth + 1))
+    })
 }
 
 fn numeric_value(value: &Value) -> Option<f64> {
@@ -437,8 +543,12 @@ fn audit(
     }
     if let Some(body) = body {
         value["response"] = json!({
-            "success": body.get("success").and_then(Value::as_bool),
-            "statusCode": body.pointer("/result/status_code").or_else(|| body.get("status_code")),
+            "success": if explicit_failure_at(body, 0) {
+                Some(false)
+            } else {
+                body.get("success").and_then(Value::as_bool)
+            },
+            "statusCode": status_code_at(body, 0),
             "cost": cost(body),
         });
         if let Some(found) = cost(body) {
@@ -510,13 +620,9 @@ fn execute(
                 return Err("金融数据渠道返回内容无法解析".into());
             }
         };
-        let nested_status = body
-            .pointer("/result/status_code")
-            .or_else(|| body.get("status_code"))
-            .and_then(Value::as_u64)
-            .unwrap_or(200);
+        let nested_status = status_code_at(&body, 0).unwrap_or(200);
         if (200..300).contains(&status) {
-            if body.get("success").and_then(Value::as_bool) == Some(false) || nested_status >= 400 {
+            if explicit_failure_at(&body, 0) || nested_status >= 400 {
                 return Err("金融数据渠道暂未返回可用结果".into());
             }
             return Ok((
@@ -684,6 +790,43 @@ mod tests {
     fn unwraps_qveris_envelopes() {
         let value = json!({"result": {"data": {"price": 1.2}}});
         assert_eq!(payload(&value)["price"], 1.2);
+    }
+
+    #[test]
+    fn unwraps_bounded_multi_layer_envelopes_without_scanning_arbitrary_objects() {
+        let value = json!({
+            "success": true,
+            "result": {
+                "payload": {
+                    "data": {
+                        "bars": [{"date": "2026-09-04", "close": 12.3}],
+                        "_meta": {"source": "qveris_finance"}
+                    }
+                }
+            }
+        });
+        let result = payload(&value);
+        assert_eq!(result["bars"][0]["close"], 12.3);
+        assert_eq!(result["_meta"]["source"], "qveris_finance");
+
+        let unrelated = json!({
+            "result": {"nested": {"price": 99.0}},
+            "debug": {"price": 1.0}
+        });
+        assert_eq!(payload(&unrelated), json!({"nested": {"price": 99.0}}));
+    }
+
+    #[test]
+    fn finds_nested_failure_status_and_explicit_success_flag() {
+        let value = json!({
+            "result": {
+                "payload": {
+                    "data": {"statusCode": "503", "success": false}
+                }
+            }
+        });
+        assert_eq!(status_code_at(&value, 0), Some(503));
+        assert!(explicit_failure_at(&value, 0));
     }
 
     #[test]

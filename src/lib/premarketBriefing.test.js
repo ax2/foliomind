@@ -3,7 +3,7 @@ import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremark
 
 describe("premarket briefing", () => {
   it("normalizes nested real CAP news and rejects unsafe links", () => {
-    const news = normalizePremarketNews({ data: { news: [{ headline: "真实公告", published_at: "2026-09-04T01:00:00Z", sourceName: "交易所", link: "javascript:alert(1)" }] } }, { symbol: "600519", name: "贵州茅台" });
+    const news = normalizePremarketNews({ result: { payload: { data: { news: [{ headline: "真实公告", published_at: "2026-09-04T01:00:00Z", sourceName: "交易所", link: "javascript:alert(1)" }] } } } }, { symbol: "600519", name: "贵州茅台" });
     expect(news).toEqual([expect.objectContaining({ symbol: "600519", name: "贵州茅台", title: "真实公告", source: "交易所", url: "" })]);
   });
 

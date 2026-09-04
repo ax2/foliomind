@@ -1275,6 +1275,26 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().quoteSeriesLoaded["600519"]["日K"]).toBe(true);
   });
 
+  it("normalizes a multi-layer native CAP series envelope", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      liveDataLastRefreshAt: "2026-08-28T08:00:00.000Z",
+      quoteDetailsLoaded: { "600519": true },
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: { result: { payload: { data: { bars: [{ date: "2026-09-04", close: 1297.4, volume: 1612600 }] } } } },
+      mode: "qveris-cap",
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshQuoteSeries("600519", "日K")).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes["600519"].seriesByRange["日K"]).toEqual([
+      expect.objectContaining({ date: "2026-09-04", close: 1297.4 }),
+    ]);
+  });
+
   it("replaces partial output with an error instead of appending another message", async () => {
     runtime.askPi.mockImplementation(async (_prompt, { onProgress }) => {
       onProgress({ text: "未完成内容" });
