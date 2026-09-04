@@ -145,7 +145,19 @@ jobs:
         with:
           components: clippy,rustfmt
       - run: npm ci
-      - run: npm run audit:security
+      - name: Run security audit with transient retry
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm run audit:security; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "npm registry audit failed; retrying ($((attempt + 1))/3)"
+              sleep 15
+            fi
+          done
+          exit 1
       - run: npm test
       - run: npm run build
       - run: npm run test:sites
