@@ -96,6 +96,8 @@ standalone Local Host 为每个 HTTP 请求绑定独立的客户端生命周期�
 
 Rust Host 清理继承环境，不向 Pi 传递任何 `QVERIS_*`、OAuth 或控制面 token。未知工具结果不会在崩溃恢复后自动重放。
 
+版本发布采用幂等的主干门禁：`main` 推送与手工触发均进入同一 Release workflow。准备阶段从包配置读取并校验统一 SemVer；已正式存在的 `v<version>` 直接跳过，draft 可以恢复，新的版本才进入隔离 Web QA、跨平台安装包构建、SHA-256 校验和发布。发布并发按版本串行，不能覆盖已发布资产，也不改变合并权限、用户数据或运行时配置。
+
 桌面构建从 `scripts/pi-version.json` 读取固定版本和 SHA-256，下载后放入应用资源目录。Host 优先启动随包 Pi，并用 `--extension .../qveris-bridge.mjs --mode rpc --no-session` 显式加载受管桥；开发时可用 `FOLIOMIND_PI_BINARY` 与 `FOLIOMIND_BRIDGE_EXTENSION` 覆盖路径。
 
 ## Windows 与 macOS

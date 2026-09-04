@@ -1,6 +1,8 @@
 name: release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -17,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -27,6 +29,9 @@ jobs:
       contents: read
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      should_release: ${{ steps.version.outputs.should_release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -43,15 +48,45 @@ jobs:
           }
       - id: version
         env:
-          VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ inputs.version || '' }}
+          REQUESTED_PRERELEASE: ${{ inputs.prerelease || 'false' }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
         run: |
           set -euo pipefail
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid SemVer: $VERSION" >&2; exit 1; }
-          node -e 'const fs=require("fs"); const v=process.env.VERSION; const values=[require("./package.json").version,require("./package-lock.json").version,require("./src-tauri/tauri.conf.json").version]; const cargo=fs.readFileSync("src-tauri/Cargo.toml","utf8").match(/^version\s*=\s*"([^"]+)"/m)?.[1]; values.push(cargo); if(values.some(x=>x!==v)) throw new Error(`Version mismatch: expected ${v}, found ${values.join(", ")}`)'
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            version="$REQUESTED_VERSION"
+          else
+            version="$(node -p 'require("./package.json").version')"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid SemVer: $version" >&2; exit 1; }
+          VERSION="$version" node -e 'const fs=require("fs"); const v=process.env.VERSION; const values=[require("./package.json").version,require("./package-lock.json").version,require("./src-tauri/tauri.conf.json").version]; const cargo=fs.readFileSync("src-tauri/Cargo.toml","utf8").match(/^version\s*=\s*"([^"]+)"/m)?.[1]; values.push(cargo); if(values.some(x=>x!==v)) throw new Error(`Version mismatch: expected ${v}, found ${values.join(", ")}`)'
+          prerelease=false
+          if [ "$REQUESTED_PRERELEASE" = "true" ]; then prerelease=true; fi
+          should_release=true
+          release_json=''
+          if release_json="$(gh release view "v$version" --repo "$REPOSITORY" --json isDraft,isPrerelease 2>/dev/null)"; then
+            if [ "$(jq -r .isDraft <<<"$release_json")" = "false" ]; then
+              # A published tag already represents this package version. A
+              # later same-version commit must not rebuild or overwrite it.
+              should_release=false
+            else
+              expected_prerelease=false
+              if [ "$prerelease" = "true" ]; then expected_prerelease=true; fi
+              test "$(jq -r .isPrerelease <<<"$release_json")" = "$expected_prerelease" || { echo "Draft release v$version has a different prerelease setting" >&2; exit 1; }
+            fi
+          fi
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "prerelease=$prerelease"
+            echo "should_release=$should_release"
+          } >> "$GITHUB_OUTPUT"
 
   web-qa:
     needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -116,6 +151,7 @@ jobs:
 
   build:
     needs: [prepare, web-qa]
+    if: needs.prepare.outputs.should_release == 'true'
     permissions:
       contents: read
     strategy:
@@ -186,6 +222,7 @@ jobs:
 
   publish:
     needs: [prepare, build]
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -202,7 +239,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
           release_json=''
