@@ -17,6 +17,7 @@ const portfolio = await load("src/lib/portfolio.js");
 const marketBreadth = await load("src/lib/marketBreadth.js");
 const anomalyDetection = await load("src/lib/anomalyDetection.js");
 const liveQuotes = await load("src/components/LiveQuotesStrip.jsx");
+const eventCalendar = await load("src/lib/eventCalendar.js");
 const piRuntime = await load("src/lib/piRuntime.js");
 const localHostClient = await load("src/lib/localHost.js");
 const integrations = await load("src/lib/integrations.js");
@@ -147,6 +148,7 @@ check("首屏包体积门禁", packageJson.scripts?.build?.includes("check:bundl
 check("构建产物清理边界", packageJson.scripts?.clean === "node scripts/clean-generated.mjs" && cleanGenerated.includes('"src-tauri/target"') && cleanGenerated.includes('"src-tauri/target-linux"') && cleanGenerated.includes("Runtime resources such as Pi") && prd.includes("Stage 3DR 构建产物清理"), "构建后只能清理明确列出的生成目录，不得触碰 Pi、portable-git 或用户配置资源");
 check("跨入口证券代码匹配", quoteFormatting.includes("export function quoteSymbolKey") && quoteFormatting.includes("export function quoteForSymbol") && portfolio.includes("quoteForSymbol(liveQuotes") && labStore.includes("quoteForSymbol(quotes") && prd.includes("Stage 3DS 跨入口证券代码匹配"), "行情、持仓、提醒和详情跳转需要在保留原始代码的同时兼容 provider 交易所后缀，避免真实报价无法进入各入口");
 check("跨入口行情解析一致性", quoteFormatting.includes("export function quoteForSymbol") && portfolio.includes("quoteForSymbol(liveQuotes") && briefingSchedule.includes("quoteForSymbol(liveQuotes") && marketBreadth.includes("quoteForSymbol(liveQuotes") && research.includes("quoteForSymbol(quotes") && watchlist.includes("quoteForSymbol(quotes") && liveQuotes.includes("quoteForSymbol(liveQuotes") && marketViews.includes("quoteForSymbol(liveQuotes") && anomalyDetection.includes("quoteForSymbol(liveQuotes") && labStore.includes("quoteForSymbol(quotes") && prd.includes("Stage 3DT 跨入口行情解析一致性"), "所有行情消费入口必须共享安全证券代码解析，唯一后缀匹配才可回填，歧义时保持空态");
+check("事件日历跨市场一致性", eventCalendar.includes('EVENT_TIME_ZONE = "Asia/Shanghai"') && eventCalendar.includes("dateKeyFromTimestamp") && marketViews.includes("quoteSymbolKey") && marketViews.includes('timeZone: "Asia/Shanghai"') && prd.includes("Stage 3DU 事件日历跨市场一致性"), "事件日期必须按北京时间归一化，事件与持仓/自选关联必须复用统一证券代码 key，避免跨市场错日或漏匹配");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

@@ -1,4 +1,18 @@
 const pad = (value) => String(value).padStart(2, "0");
+const EVENT_TIME_ZONE = "Asia/Shanghai";
+
+function dateKeyFromTimestamp(value) {
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(String(value ?? ""));
+  if (!Number.isFinite(timestamp)) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: EVENT_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp)).filter((part) => part.type !== "literal");
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return values.year && values.month && values.day ? `${values.year}-${values.month}-${values.day}` : "";
+}
 
 /**
  * Keep provider date-only values as calendar dates. Parsing `YYYY-MM-DD` with
@@ -7,7 +21,7 @@ const pad = (value) => String(value).padStart(2, "0");
  */
 export function eventDateKey(value) {
   const text = String(value ?? "").trim();
-  const match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  const match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
   if (match) {
     const year = Number(match[1]);
     const month = Number(match[2]);
@@ -15,10 +29,7 @@ export function eventDateKey(value) {
     const date = new Date(year, month - 1, day);
     if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) return `${year}-${pad(month)}-${pad(day)}`;
   }
-  const timestamp = Date.parse(text);
-  if (!Number.isFinite(timestamp)) return "";
-  const date = new Date(timestamp);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return dateKeyFromTimestamp(text);
 }
 
 export function monthKey(date = new Date()) {
@@ -53,7 +64,7 @@ export function buildMonthGrid(cursor) {
       date,
       key: eventDateKey(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`),
       inMonth: date.getMonth() === cursor.getMonth() && date.getFullYear() === cursor.getFullYear(),
-      isToday: eventDateKey(date.toISOString()) === eventDateKey(new Date().toISOString()),
+      isToday: eventDateKey(date) === eventDateKey(new Date()),
     };
   });
 }

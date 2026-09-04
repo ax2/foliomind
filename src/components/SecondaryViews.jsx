@@ -3,7 +3,7 @@ import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarD
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels, testModelConnection as testModelGateway } from "../lib/integrations.js";
-import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
+import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, parsePortfolioImport, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlyModelMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
@@ -674,7 +674,7 @@ export function MonitorView() {
 
 function eventDateLabel(value) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value || "日期待定") : date.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+  return Number.isNaN(date.getTime()) ? String(value || "日期待定") : new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
 function eventDateValue(value) {
@@ -683,7 +683,7 @@ function eventDateValue(value) {
 }
 
 function eventSymbolKey(value) {
-  return String(value || "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "");
+  return quoteSymbolKey(value);
 }
 
 export function EventsView() {

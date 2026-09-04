@@ -8,6 +8,11 @@ describe("event calendar helpers", () => {
     expect(eventDateKey("not-a-date")).toBe("");
   });
 
+  it("normalizes timestamp events to the Shanghai calendar day", () => {
+    expect(eventDateKey("2026-09-01T23:30:00-04:00")).toBe("2026-09-02");
+    expect(eventDateKey("2026-09-01T00:30:00+08:00")).toBe("2026-09-01");
+  });
+
   it("builds a Monday-first six-week grid", () => {
     const cursor = monthCursorFromKey("2026-09");
     const grid = buildMonthGrid(cursor);
