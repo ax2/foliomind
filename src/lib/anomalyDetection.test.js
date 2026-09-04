@@ -30,6 +30,10 @@ describe("market anomaly detection", () => {
     expect(detectMarketAnomalies(watchlist, { "600519": { price: 100, change: 20 } }, { priceThreshold: 0 })).toEqual([]);
   });
 
+  it("resolves provider exchange suffixes", () => {
+    expect(detectMarketAnomalies([{ symbol: "600519.SS", name: "贵州茅台" }], { "600519": { price: 1500, change: 8, asOf: new Date().toISOString() } })).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "600519.SS", type: "price" })]));
+  });
+
   it("does not turn an old quote into a current anomaly", () => {
     expect(detectMarketAnomalies(watchlist, {
       "600519": { price: 100, change: 9, volumeRatio: 4, asOf: "2026-09-01T09:00:00Z" },

@@ -31,6 +31,11 @@ describe("marketBreadth", () => {
       { now },
     )).toMatchObject({ pricedCount: 2, staleCount: 1, missingCount: 0, upCount: 2, downCount: 0 });
   });
+
+  it("counts a quote returned under a different exchange suffix", () => {
+    const result = marketBreadth([{ symbol: "600519.SS", name: "贵州茅台" }], { "600519": { price: 125, change: 1 } });
+    expect(result).toMatchObject({ pricedCount: 1, upCount: 1 });
+  });
 });
 
 describe("marketWatchlistSummary", () => {

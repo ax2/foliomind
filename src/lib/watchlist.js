@@ -1,4 +1,4 @@
-import { isValidQuotePrice, marketRegionFor } from "./quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor, quoteForSymbol } from "./quoteFormatting.js";
 
 export const WATCHLIST_DEFAULT_GROUP = "自选";
 
@@ -40,7 +40,7 @@ export function sortWatchlistItems(items, quotes = {}, sortKey = "custom", direc
   if (sortKey === "custom") return [...values];
   const multiplier = direction === "desc" ? -1 : 1;
   const numericValue = (item) => {
-    const quote = quotes?.[item.symbol];
+    const quote = quoteForSymbol(quotes, item.symbol);
     if (sortKey === "price") return isValidQuotePrice(quote?.price) ? Number(quote.price) : null;
     if (sortKey === "change") return Number.isFinite(Number(quote?.change)) ? Number(quote.change) : null;
     return null;

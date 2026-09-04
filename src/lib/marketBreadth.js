@@ -1,4 +1,4 @@
-import { quoteFreshness } from "./quoteFormatting.js";
+import { quoteForSymbol, quoteFreshness } from "./quoteFormatting.js";
 
 const SUMMARY_FIELDS = Object.freeze(["price", "change", "volume", "turnover", "turnoverRate", "pe", "pb"]);
 
@@ -7,7 +7,7 @@ function currentQuoteRows(watchlist = [], liveQuotes = {}, options = {}) {
   const staleRows = [];
   const rows = items.map((item) => {
     const symbol = String(item?.symbol || "").trim().toUpperCase();
-    const quote = liveQuotes?.[symbol] || liveQuotes?.[item?.symbol];
+    const quote = quoteForSymbol(liveQuotes, item?.symbol);
     const price = Number(quote?.price);
     if (!Number.isFinite(price) || price <= 0) return null;
     const freshness = quoteFreshness(quote?.asOf, options.now, options.staleAfterMs);

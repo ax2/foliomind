@@ -15,7 +15,7 @@ import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
-import { isValidQuotePrice, marketRegionFor, quoteSymbolKey } from "../lib/quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
 
@@ -227,7 +227,7 @@ function mergeLiveQuotesWithPortfolio(state, quotes) {
   let portfolioChanged = false;
   const delivered = [];
   for (const position of state.portfolioPositions) {
-    const quote = quotes[position.symbol];
+    const quote = quoteForSymbol(quotes, position.symbol);
     if (!quote) continue;
     const checks = portfolioAlertChecks(position, quote);
     const nextPosition = { ...position, ...checks.updates };
@@ -807,7 +807,7 @@ export const useLabStore = create((set, get) => ({
     const requestGeneration = (anomalyAttributionGenerations.get(id) || 0) + 1;
     anomalyAttributionGenerations.set(id, requestGeneration);
     set((current) => ({ anomalyAttributionLoading: { ...current.anomalyAttributionLoading, [id]: true }, anomalyAttributionError: { ...current.anomalyAttributionError, [id]: "" } }));
-    const quote = state.liveQuotes[symbol];
+    const quote = quoteForSymbol(state.liveQuotes, symbol);
     const portfolio = portfolioContextForSymbol(state.portfolioPositions, symbol, quote);
     let evidence = normalizeAttributionEvidence({ quote });
     let audits = [];

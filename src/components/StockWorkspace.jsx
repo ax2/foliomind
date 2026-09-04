@@ -1,7 +1,7 @@
 import { ArrowsClockwise, BookmarkSimple, DotsThree, SlidersHorizontal, Sparkle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { stocks } from "../data/market.js";
-import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
+import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { hasModelAccess, hasRealDataAccess } from "../lib/dataStatus.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
@@ -71,7 +71,7 @@ export function StockWorkspace() {
   const [actionBusy, setActionBusy] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
   const stock = watchlist.find((item) => item.symbol === symbol) ?? stocks[symbol] ?? { symbol, name: symbol, market: "", category: "" };
-  const quote = liveQuotes[symbol];
+  const quote = quoteForSymbol(liveQuotes, symbol);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const isWatched = watchlist.some((item) => item.symbol === symbol);
   useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && !quoteDetailsLoading[symbol] && !quoteDetailsLoaded[symbol]) void refreshQuoteDetails(symbol); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, refreshQuoteDetails, quoteDetailsLoading, quoteDetailsLoaded]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteFreshness, quoteSymbolKey } from "./quoteFormatting.js";
+import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteForSymbol, quoteFreshness, quoteSymbolKey } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -91,6 +91,13 @@ describe("quote formatting", () => {
     expect(quoteSymbolKey("SSE:600519")).toBe("600519");
     expect(quoteSymbolKey("aapl.us")).toBe("AAPL");
     expect(quoteSymbolKey("RUSSELL 2000")).toBe("RUSSELL 2000");
+  });
+
+  it("resolves a unique quote and fails closed on normalized ambiguity", () => {
+    const quote = { price: 125 };
+    expect(quoteForSymbol({ "600519": quote }, "600519.SS")).toBe(quote);
+    expect(quoteForSymbol({ "600519.SS": quote }, "600519.SS")).toBe(quote);
+    expect(quoteForSymbol({ "600519": quote, "600519.SS": { price: 126 } }, "600519.BJ")).toBeUndefined();
   });
 
   it("accepts unix-second and unix-millisecond provider timestamps", () => {

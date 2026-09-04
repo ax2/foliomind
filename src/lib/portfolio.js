@@ -1,4 +1,4 @@
-import { quoteSymbolKey } from "./quoteFormatting.js";
+import { quoteForSymbol } from "./quoteFormatting.js";
 
 export const PORTFOLIO_PLAN_HORIZONS = Object.freeze([
   { id: "short", label: "短线（1–5 个交易日）" },
@@ -221,17 +221,8 @@ export function portfolioPlanProgress(position, quote) {
 }
 
 export function portfolioMetrics(positions, liveQuotes) {
-  const quotesByKey = new Map();
-  for (const [symbol, quote] of Object.entries(liveQuotes && typeof liveQuotes === "object" ? liveQuotes : {})) {
-    const key = quoteSymbolKey(symbol);
-    if (!key) continue;
-    const candidates = quotesByKey.get(key) || [];
-    candidates.push(quote);
-    quotesByKey.set(key, candidates);
-  }
   const rows = (Array.isArray(positions) ? positions : []).map((position) => {
-    const candidates = quotesByKey.get(quoteSymbolKey(position.symbol)) || [];
-    const quote = liveQuotes?.[position.symbol] || (candidates.length === 1 ? candidates[0] : undefined);
+    const quote = quoteForSymbol(liveQuotes, position.symbol);
     const currentPrice = finitePositiveValue(quote?.price);
     const costValue = position.quantity * position.averageCost;
     const marketValue = currentPrice == null ? null : position.quantity * currentPrice;

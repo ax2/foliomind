@@ -19,6 +19,12 @@ describe("watchlist organization", () => {
     expect(sortWatchlistItems(items, { A: { price: 0 }, B: { price: 10 }, C: { price: -2 } }, "price", "asc").map((item) => item.symbol)).toEqual(["B", "A", "C"]);
   });
 
+  it("sorts when provider quotes use another exchange suffix", () => {
+    const items = [{ symbol: "600519.SS", name: "贵州茅台" }, { symbol: "AAPL.US", name: "Apple" }];
+    const quotes = { "600519": { price: 125, change: 2 }, AAPL: { price: 200, change: -1 } };
+    expect(sortWatchlistItems(items, quotes, "price", "desc").map((item) => item.symbol)).toEqual(["AAPL.US", "600519.SS"]);
+  });
+
   it("round-trips the user watchlist without quotes and parses CSV/TXT imports", () => {
     const csv = watchlistCsv([{ symbol: "600519", name: "贵州茅台", market: "A股", category: "白酒", group: "核心" }, { symbol: "AAPL", name: "Apple", market: "美股", group: "海外" }]);
     expect(csv).not.toContain("price");

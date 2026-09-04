@@ -3,7 +3,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
-import { changeToneClass, formatCompactQuoteFreshness, formatQuoteFreshness, isValidQuotePrice, quoteFreshness } from "../lib/quoteFormatting.js";
+import { changeToneClass, formatCompactQuoteFreshness, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { useLabStore } from "../store/useLabStore.js";
 
 async function readTextFile(file) {
@@ -75,7 +75,7 @@ export function WatchlistSidebar() {
   }, [query, watchlist]);
   const groupedItems = useMemo(() => {
     const filtered = groupFilter === "all" ? normalizedWatchlist : normalizedWatchlist.filter((item) => item.group === groupFilter);
-    const sortableQuotes = previewMode ? Object.fromEntries(filtered.map((item) => [item.symbol, liveQuotes[item.symbol] || stocks[item.symbol]])) : liveQuotes;
+    const sortableQuotes = previewMode ? Object.fromEntries(filtered.map((item) => [item.symbol, quoteForSymbol(liveQuotes, item.symbol) || stocks[item.symbol]])) : liveQuotes;
     const sorted = sortWatchlistItems(filtered, sortableQuotes, sortKey, sortDirection);
     const grouped = new Map();
     sorted.forEach((item) => {
@@ -155,7 +155,7 @@ export function WatchlistSidebar() {
     </div>
     {sortKey === "custom" && normalizedWatchlist.length > 1 && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={liveQuotes[item.symbol] || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && index > 0} canMoveDown={sortKey === "custom" && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
+      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && index > 0} canMoveDown={sortKey === "custom" && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}

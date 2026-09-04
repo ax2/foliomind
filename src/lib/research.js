@@ -1,3 +1,5 @@
+import { quoteForSymbol } from "./quoteFormatting.js";
+
 export const RESEARCH_SORT_OPTIONS = Object.freeze([
   { id: "default", label: "默认顺序", field: null },
   { id: "price", label: "最新价", field: "price" },
@@ -40,7 +42,7 @@ export function normalizeResearchFilters(value) {
 export function filterResearchItems(items, quotes = {}, filters = DEFAULT_RESEARCH_FILTERS) {
   const normalized = normalizeResearchFilters(filters);
   return (Array.isArray(items) ? items : []).filter((item) => {
-    const quote = quotes?.[item?.symbol];
+    const quote = quoteForSymbol(quotes, item?.symbol);
     return RESEARCH_FILTER_FIELDS.every(({ id, field }) => {
       const bound = finiteFilter(normalized[id]);
       if (bound == null) return true;
@@ -68,8 +70,8 @@ export function sortResearchItems(items, quotes = {}, sortKey = "default", direc
       const number = Number(value);
       return Number.isFinite(number) ? number : null;
     };
-    const leftValue = numericValue(quotes?.[left.item.symbol]?.[option.field]);
-    const rightValue = numericValue(quotes?.[right.item.symbol]?.[option.field]);
+    const leftValue = numericValue(quoteForSymbol(quotes, left.item.symbol)?.[option.field]);
+    const rightValue = numericValue(quoteForSymbol(quotes, right.item.symbol)?.[option.field]);
     if (leftValue === null && rightValue === null) return left.index - right.index;
     if (leftValue === null) return 1;
     if (rightValue === null) return -1;

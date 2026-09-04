@@ -1,4 +1,4 @@
-import { quoteFreshness } from "./quoteFormatting.js";
+import { quoteForSymbol, quoteFreshness } from "./quoteFormatting.js";
 
 const numberValue = (value) => {
   const number = Number(value);
@@ -22,7 +22,7 @@ export function detectMarketAnomalies(watchlist = [], liveQuotes = {}, options =
 
   const anomalies = [];
   for (const item of watchlist) {
-    const quote = liveQuotes?.[item.symbol];
+    const quote = quoteForSymbol(liveQuotes, item.symbol);
     const price = numberValue(quote?.price);
     const change = numberValue(quote?.change);
     const asOf = String(quote?.asOf || "");

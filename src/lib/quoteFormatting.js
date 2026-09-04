@@ -42,6 +42,25 @@ export function quoteSymbolKey(value) {
     .replace(/\.(?:SH|SS|SZ|BJ|HK|US)$/i, "");
 }
 
+/**
+ * Resolve one quote across provider exchange-name variants without guessing
+ * when a normalized key is ambiguous. Exact raw keys always win.
+ */
+export function quoteForSymbol(quotes, symbol) {
+  if (!quotes || typeof quotes !== "object") return undefined;
+  const raw = String(symbol ?? "").trim();
+  if (raw && Object.prototype.hasOwnProperty.call(quotes, raw)) return quotes[raw];
+  const key = quoteSymbolKey(raw);
+  if (!key) return undefined;
+  let match;
+  for (const [candidate, quote] of Object.entries(quotes)) {
+    if (quoteSymbolKey(candidate) !== key) continue;
+    if (match) return undefined;
+    match = quote;
+  }
+  return match;
+}
+
 /** A quote price is displayable only when the provider returned a finite positive value. */
 export function isValidQuotePrice(value) {
   const number = numberValue(value);

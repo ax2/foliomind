@@ -399,6 +399,20 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications).toHaveLength(1);
   });
 
+  it("joins exchange-suffixed portfolio alerts to provider quote keys", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519.SS", name: "贵州茅台", market: "沪深", category: "白酒" }],
+      portfolioPositions: [{ id: "p1", symbol: "600519.SS", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000, takeProfitPrice: 1200, stopLossPrice: 800, takeProfitTriggered: false, stopLossTriggered: false }],
+    });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(useLabStore.getState().portfolioPositions[0].takeProfitTriggered).toBe(true);
+    expect(useLabStore.getState().notifications[0]).toMatchObject({ symbol: "600519.SS", kind: "portfolio-alert" });
+  });
+
   it("does not deliver a portfolio alert when its canonical save fails", async () => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },

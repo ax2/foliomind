@@ -29,4 +29,11 @@ describe("research numeric filters", () => {
     expect(filterResearchItems(items, quotes, { minChange: "  ", maxPe: "not-a-number" })).toHaveLength(4);
     expect(activeResearchFilterCount({ minChange: "2", maxPe: "", maxPb: "1.5" })).toBe(2);
   });
+
+  it("matches filters and sorting across provider exchange suffixes", () => {
+    const crossMarketItems = [{ symbol: "600519.SS", name: "贵州茅台" }, { symbol: "AAPL.US", name: "Apple" }];
+    const crossMarketQuotes = { "600519": { price: 125, change: 2, pe: 20, pb: 3, volume: 10 }, AAPL: { price: 200, change: -1, pe: 30, pb: 5, volume: 20 } };
+    expect(filterResearchItems(crossMarketItems, crossMarketQuotes, { minChange: "1" })).toEqual([crossMarketItems[0]]);
+    expect(sortResearchItems(crossMarketItems, crossMarketQuotes, "price", "desc")).toEqual([crossMarketItems[1], crossMarketItems[0]]);
+  });
 });

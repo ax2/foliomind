@@ -1,4 +1,4 @@
-import { isValidQuotePrice, marketRegionFor } from "./quoteFormatting.js";
+import { isValidQuotePrice, marketRegionFor, quoteForSymbol } from "./quoteFormatting.js";
 
 export const BRIEFING_TIME_ZONE = "Asia/Shanghai";
 export const SSE_MARKET_CODE = "212001";
@@ -83,7 +83,7 @@ export function hasFreshPortfolioQuote({ positions = [], liveQuotes = {}, now = 
   const today = dateParts(now, timeZone)?.day;
   if (!today) return false;
   return positions.some((position) => {
-    const quote = liveQuotes[position?.symbol];
+    const quote = quoteForSymbol(liveQuotes, position?.symbol);
     return isValidQuotePrice(quote?.price) && dateParts(quote?.asOf, timeZone)?.day === today;
   });
 }
