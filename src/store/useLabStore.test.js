@@ -441,6 +441,33 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().portfolioReviews).toEqual([]);
   });
 
+  it("builds a premarket brief from real news and events without inventing unsupported sections", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { dataProvider: "qveris_finance" } },
+      portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000 }],
+      events: [],
+    });
+    runtime.queryCachedData.mockImplementation(async ({ kind }) => kind === "sentiment"
+      ? { data: { news: [{ title: "真实新闻", published_at: "2026-09-04T01:00:00Z", source: "数据服务" }] } }
+      : { data: { events: [{ date: "2026-09-05", title: "分红日", source: "交易所" }] } });
+    await expect(useLabStore.getState().generatePremarketBriefing(new Date("2026-09-04T02:00:00Z"))).resolves.toBe(true);
+    expect(useLabStore.getState().premarketBriefing).toMatchObject({ kind: "premarket", sections: { industry: { status: "empty" }, macro: { status: "empty" }, overseas: { status: "empty" } } });
+    expect(useLabStore.getState().premarketBriefing.sections.holdings.items).toHaveLength(2);
+  });
+
+  it("cancels an in-flight premarket brief without committing late CAP results", async () => {
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true }, portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000 }] });
+    const releases = [];
+    runtime.queryCachedData.mockImplementation(() => new Promise((resolve) => { releases.push(() => resolve({ data: { news: [{ title: "迟到结果" }] } })); }));
+    const pending = useLabStore.getState().generatePremarketBriefing();
+    expect(useLabStore.getState().premarketBriefingLoading).toBe(true);
+    expect(useLabStore.getState().cancelPremarketBriefing()).toBe(true);
+    releases.forEach((resolve) => resolve());
+    await expect(pending).resolves.toBe(false);
+    expect(useLabStore.getState().premarketBriefing).toBeNull();
+    expect(useLabStore.getState().premarketBriefingLoading).toBe(false);
+  });
+
   it("creates one scheduled close review from same-day real quotes", async () => {
     useLabStore.setState({
       portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000 }],

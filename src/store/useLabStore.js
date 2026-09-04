@@ -18,6 +18,7 @@ import { collectEventReminders } from "../lib/eventReminders.js";
 import { isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
+import { buildPremarketBriefing, normalizePremarketEvents, normalizePremarketNews } from "../lib/premarketBriefing.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -49,6 +50,8 @@ let seriesRequestController = null;
 let seriesRequestContext = null;
 let eventsRequestGeneration = 0;
 let eventsRequestController = null;
+let premarketRequestGeneration = 0;
+let premarketRequestController = null;
 const anomalyAttributionGenerations = new Map();
 
 function abortController(controller) {
@@ -69,6 +72,8 @@ function abortPendingDataRequests() {
   seriesRequestContext = null;
   abortController(eventsRequestController);
   eventsRequestController = null;
+  abortController(premarketRequestController);
+  premarketRequestController = null;
 }
 
 function persistenceState(snapshot) {
@@ -620,7 +625,7 @@ async function executeMonitorForItem(rule, item) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -656,9 +661,10 @@ export const useLabStore = create((set, get) => ({
       detailsRequestGeneration += 1;
       seriesRequestGeneration += 1;
       eventsRequestGeneration += 1;
+      premarketRequestGeneration += 1;
       anomalyAttributionGenerations.clear();
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
+    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "" }, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingError: "", events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
   cancelLiveDataRefresh: () => {
     if (!get().liveDataLoading) return false;
@@ -1079,12 +1085,13 @@ export const useLabStore = create((set, get) => ({
     detailsRequestGeneration += 1;
     seriesRequestGeneration += 1;
     eventsRequestGeneration += 1;
+    premarketRequestGeneration += 1;
     const selectedSymbol = watchlist.some((item) => item.symbol === current.selectedSymbol) ? current.selectedSymbol : watchlist[0].symbol;
     anomalyAttributionGenerations.clear();
     const previous = get();
     const nextSkillItems = skillItemsForIds(previous.skillItems, snapshot.installedSkillIds);
     const optimistic = { watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, skillItems: nextSkillItems, selectedSymbol };
-    set((state) => ({ ...optimistic, anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
+    set((state) => ({ ...optimistic, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingError: "", anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
     try {
       await get().persistUserState();
       return true;
@@ -1218,6 +1225,7 @@ export const useLabStore = create((set, get) => ({
     set({ portfolioPositions });
     try {
       await get().persistUserState();
+      set({ premarketBriefing: null, premarketBriefingError: "" });
       return next;
     } catch (error) {
       set((state) => ({ portfolioPositions: state.portfolioPositions.map((position) => {
@@ -1241,6 +1249,7 @@ export const useLabStore = create((set, get) => ({
     set({ portfolioPositions: next });
     try {
       await get().persistUserState();
+      set({ premarketBriefing: null, premarketBriefingError: "" });
       return nextImported;
     } catch (error) {
       set((state) => JSON.stringify(state.portfolioPositions) === JSON.stringify(next) ? { portfolioPositions: previous } : {});
@@ -1271,6 +1280,7 @@ export const useLabStore = create((set, get) => ({
     set({ portfolioPositions });
     try {
       await get().persistUserState();
+      set({ premarketBriefing: null, premarketBriefingError: "" });
       return true;
     } catch (error) {
       const removed = previous[removedIndex];
@@ -1290,6 +1300,60 @@ export const useLabStore = create((set, get) => ({
     } catch (error) {
       set((current) => ({ portfolioReviews: current.portfolioReviews.filter((candidate) => candidate.id !== review.id) }));
       throw error;
+    }
+  },
+  cancelPremarketBriefing: () => {
+    if (!get().premarketBriefingLoading) return false;
+    premarketRequestGeneration += 1;
+    abortController(premarketRequestController);
+    premarketRequestController = null;
+    set({ premarketBriefingLoading: false, premarketBriefingError: "已停止本轮盘前摘要更新，可稍后重试" });
+    return true;
+  },
+  generatePremarketBriefing: async (createdAt = new Date()) => {
+    const state = get();
+    if (!hasRealDataAccess(state.integrationStatus)) {
+      set({ premarketBriefingError: "请先在设置中保存 API Key，再获取真实盘前数据" });
+      return false;
+    }
+    if (!state.portfolioPositions.length || state.premarketBriefingLoading) return false;
+    const requestGeneration = ++premarketRequestGeneration;
+    const requestController = new AbortController();
+    abortController(premarketRequestController);
+    premarketRequestController = requestController;
+    set({ premarketBriefingLoading: true, premarketBriefingError: "" });
+    const newsBySymbol = {};
+    const eventRows = [];
+    let received = 0;
+    try {
+      await mapWithConcurrency(state.portfolioPositions, resolveLiveQuoteConcurrency(), async (position) => {
+        if (requestGeneration !== premarketRequestGeneration) return false;
+        const input = { symbol: qverisSymbol(position.symbol, position.market) };
+        const results = await Promise.allSettled([
+          queryCapabilityData({ kind: "sentiment", ...input }, { timeoutMs: 60_000, signal: requestController.signal }),
+          queryCapabilityData({ kind: "core_event", ...input }, { timeoutMs: 60_000, signal: requestController.signal }),
+        ]);
+        if (requestGeneration !== premarketRequestGeneration) return false;
+        const newsResult = results[0]?.status === "fulfilled" ? results[0].value : null;
+        const eventResult = results[1]?.status === "fulfilled" ? results[1].value : null;
+        const key = String(position.symbol || "").trim().toUpperCase();
+        const normalizedNews = normalizePremarketNews(newsResult, position);
+        const normalizedEvents = normalizePremarketEvents(eventResult, position);
+        newsBySymbol[key] = normalizedNews;
+        eventRows.push(...normalizedEvents);
+        if (normalizedNews.length || normalizedEvents.length) received += 1;
+        return true;
+      });
+      if (requestGeneration !== premarketRequestGeneration) return false;
+      const briefing = buildPremarketBriefing({ positions: get().portfolioPositions, newsBySymbol, events: [...get().events, ...eventRows], createdAt, id: createId("premarket") });
+      set({ premarketBriefing: briefing, premarketBriefingLoading: false, premarketBriefingError: received ? "" : "当前渠道暂未返回持仓公告或事件" });
+      return true;
+    } catch (error) {
+      if (requestGeneration !== premarketRequestGeneration) return false;
+      set({ premarketBriefingLoading: false, premarketBriefingError: friendlyDataMessage(error, "盘前真实数据暂时无法获取，可稍后重试") });
+      return false;
+    } finally {
+      if (premarketRequestController === requestController) premarketRequestController = null;
     }
   },
   updateBriefingSchedule: async (input) => {

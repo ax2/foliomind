@@ -1978,6 +1978,26 @@ textarea:focus-visible {
 .plan-metrics span, .plan-metrics small { color: var(--muted); font-size: 10px; }
 .plan-metrics strong { color: #263346; font-size: 19px; font-variant-numeric: tabular-nums; }
 .portfolio-review-overview { margin-top: 24px; border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: #fff; }
+.premarket-briefing-overview { margin-top: 24px; border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: #fff; }
+.premarket-briefing-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.premarket-briefing-heading h2 { margin: 0; color: #273449; font-size: 15px; }
+.premarket-briefing-heading small, .premarket-briefing-heading > span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.premarket-briefing-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.premarket-briefing-actions > span { color: var(--muted); font-size: 10px; }
+.premarket-briefing-status { margin: 12px 0 0; border-radius: 7px; padding: 9px 11px; background: #fff7ed; color: #9a5b1c; font-size: 10px; line-height: 1.5; }
+.premarket-briefing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.premarket-briefing-section { display: grid; gap: 9px; min-width: 0; border: 1px solid #e6ebf2; border-radius: 8px; padding: 11px; background: #fbfcfe; }
+.premarket-briefing-section > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.premarket-briefing-section > div strong { color: #37465b; font-size: 11px; }
+.premarket-briefing-section > div small { color: var(--muted); font-size: 10px; }
+.premarket-briefing-section > p { margin: 0; color: #7a8492; font-size: 10px; line-height: 1.55; }
+.premarket-briefing-section ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.premarket-briefing-section li { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; border-top: 1px solid #edf0f4; padding-top: 8px; }
+.premarket-briefing-section li > div { min-width: 0; }
+.premarket-briefing-section li strong { display: block; color: #455469; font-size: 11px; line-height: 1.4; }
+.premarket-briefing-section li small, .premarket-briefing-section li p { display: block; margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.premarket-briefing-section li a { flex: 0 0 auto; color: var(--blue); font-size: 10px; }
+.premarket-briefing-section.empty { background: #f8fafc; }
 .portfolio-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .portfolio-review-heading h2 { margin: 0; color: #273449; font-size: 15px; }
 .portfolio-review-heading small, .portfolio-review-heading > span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
@@ -2211,6 +2231,9 @@ textarea:focus-visible {
   .portfolio-performance-summary { grid-template-columns: 1fr; }
   .portfolio-performance-axis { flex-direction: column; gap: 3px; }
   .portfolio-review-heading { flex-direction: column; gap: 4px; }
+  .premarket-briefing-heading { flex-direction: column; gap: 8px; }
+  .premarket-briefing-actions { align-items: flex-start; flex-wrap: wrap; }
+  .premarket-briefing-grid { grid-template-columns: 1fr; }
   .briefing-schedule-card { grid-template-columns: 1fr; align-items: start; }
   .portfolio-review-card summary { grid-template-columns: minmax(0, 1fr); }
   .portfolio-review-card summary > div:last-child { justify-items: start; }

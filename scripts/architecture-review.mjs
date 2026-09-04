@@ -16,6 +16,7 @@ const viteConfig = await load("vite.config.mjs");
 const portfolio = await load("src/lib/portfolio.js");
 const marketBreadth = await load("src/lib/marketBreadth.js");
 const anomalyDetection = await load("src/lib/anomalyDetection.js");
+const premarketBriefing = await load("src/lib/premarketBriefing.js");
 const liveQuotes = await load("src/components/LiveQuotesStrip.jsx");
 const eventCalendar = await load("src/lib/eventCalendar.js");
 const piRuntime = await load("src/lib/piRuntime.js");
@@ -150,6 +151,7 @@ check("跨入口证券代码匹配", quoteFormatting.includes("export function q
 check("跨入口行情解析一致性", quoteFormatting.includes("export function quoteForSymbol") && portfolio.includes("quoteForSymbol(liveQuotes") && briefingSchedule.includes("quoteForSymbol(liveQuotes") && marketBreadth.includes("quoteForSymbol(liveQuotes") && research.includes("quoteForSymbol(quotes") && watchlist.includes("quoteForSymbol(quotes") && liveQuotes.includes("quoteForSymbol(liveQuotes") && marketViews.includes("quoteForSymbol(liveQuotes") && anomalyDetection.includes("quoteForSymbol(liveQuotes") && labStore.includes("quoteForSymbol(quotes") && prd.includes("Stage 3DT 跨入口行情解析一致性"), "所有行情消费入口必须共享安全证券代码解析，唯一后缀匹配才可回填，歧义时保持空态");
 check("事件日历跨市场一致性", eventCalendar.includes('EVENT_TIME_ZONE = "Asia/Shanghai"') && eventCalendar.includes("dateKeyFromTimestamp") && marketViews.includes("quoteSymbolKey") && marketViews.includes('timeZone: "Asia/Shanghai"') && prd.includes("Stage 3DU 事件日历跨市场一致性"), "事件日期必须按北京时间归一化，事件与持仓/自选关联必须复用统一证券代码 key，避免跨市场错日或漏匹配");
 check("组合复盘事件窗口一致性", portfolioReview.includes('import { eventDateKey } from "./eventCalendar.js"') && portfolioReview.includes("quoteSymbolKey(symbol)") && portfolioReview.includes("const endKey") && portfolioReview.includes("eventKey < startKey") && prd.includes("Stage 3DV 组合复盘事件窗口一致性"), "组合复盘的事件关联必须复用北京时间日期 key 和规范化证券代码，并以本地日历窗口筛选，避免跨时区错日、交易所后缀漏匹配或毫秒窗口漂移");
+check("盘前真实数据摘要", premarketBriefing.includes("buildPremarketBriefing") && premarketBriefing.includes("normalizePremarketNews") && premarketBriefing.includes("不显示推测内容") && labStore.includes("generatePremarketBriefing") && labStore.includes("kind: \"sentiment\"") && marketViews.includes("盘前数据摘要") && marketViews.includes("停止更新") && prd.includes("Stage 3DW 盘前真实数据摘要"), "盘前摘要必须按持仓读取真实新闻/事件 CAP，未接入的行业、宏观和外盘能力保持明确空态，并支持取消、重试和来源追溯");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

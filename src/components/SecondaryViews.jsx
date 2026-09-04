@@ -158,6 +158,9 @@ export function PortfolioView() {
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
   const portfolioReviews = useLabStore((state) => state.portfolioReviews);
+  const premarketBriefing = useLabStore((state) => state.premarketBriefing);
+  const premarketBriefingLoading = useLabStore((state) => state.premarketBriefingLoading);
+  const premarketBriefingError = useLabStore((state) => state.premarketBriefingError);
   const briefingSchedule = useLabStore((state) => state.briefingSchedule);
   const briefingScheduleBusy = useLabStore((state) => state.briefingScheduleBusy);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
@@ -166,6 +169,8 @@ export function PortfolioView() {
   const updatePortfolioPlanStatus = useLabStore((state) => state.updatePortfolioPlanStatus);
   const removePortfolioPosition = useLabStore((state) => state.removePortfolioPosition);
   const createPortfolioReview = useLabStore((state) => state.createPortfolioReview);
+  const generatePremarketBriefing = useLabStore((state) => state.generatePremarketBriefing);
+  const cancelPremarketBriefing = useLabStore((state) => state.cancelPremarketBriefing);
   const removePortfolioReview = useLabStore((state) => state.removePortfolioReview);
   const updateBriefingSchedule = useLabStore((state) => state.updateBriefingSchedule);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
@@ -224,6 +229,12 @@ export function PortfolioView() {
       const review = await createPortfolioReview();
       setReviewNotice(`已保存 ${review.tradingDate} 复盘；仅使用 ${review.pricedCount}/${review.totalCount} 个持仓的真实行情。`);
     } catch (reviewError) { setReviewNotice(errorMessage(reviewError)); }
+  };
+  const generatePremarket = () => {
+    setReviewNotice("");
+    void generatePremarketBriefing().then((ok) => {
+      if (ok) setReviewNotice("盘前摘要已更新；只展示已返回的真实持仓公告与事件。");
+    }).catch((briefingError) => setReviewNotice(errorMessage(briefingError)));
   };
   const openCreate = () => {
     const first = watchlist[0];
@@ -311,7 +322,7 @@ export function PortfolioView() {
       setImportBusy(false);
     }
   };
-  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><div className="page-header-actions"><button className="secondary-button" onClick={() => { void generateReview(); }} disabled={!positions.length}><CalendarDots size={17} />生成复盘</button><button className="secondary-button" onClick={exportReport} disabled={!positions.length}><DownloadSimple size={17} />导出报告</button><button className="secondary-button" onClick={() => portfolioImportInput.current?.click()} disabled={importBusy}><UploadSimple size={17} />{importBusy ? "导入中…" : "导入持仓"}</button><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></div></header>
+  return <div className="secondary-page portfolio-page"><header><div><h1>投资组合</h1><p>持仓、市值与未实现盈亏</p></div><div className="page-header-actions"><button className="secondary-button" onClick={generatePremarket} disabled={!positions.length || premarketBriefingLoading}><CalendarBlank size={17} />{premarketBriefingLoading ? "获取中…" : "盘前摘要"}</button><button className="secondary-button" onClick={() => { void generateReview(); }} disabled={!positions.length}><CalendarDots size={17} />生成复盘</button><button className="secondary-button" onClick={exportReport} disabled={!positions.length}><DownloadSimple size={17} />导出报告</button><button className="secondary-button" onClick={() => portfolioImportInput.current?.click()} disabled={importBusy}><UploadSimple size={17} />{importBusy ? "导入中…" : "导入持仓"}</button><button className="primary-action" onClick={openCreate}><Plus size={17} />添加持仓</button></div></header>
     <input ref={portfolioImportInput} className="visually-hidden" type="file" accept=".csv,text/csv" aria-label="导入持仓文件" onChange={(event) => { void importPortfolioFile(event); }} />
     <p className="security-note">只使用已返回的真实行情计算；缺少现价的持仓会显示为“—”，不会用预览数字填充。导入支持 FolioMind 导出 CSV 或最小字段 CSV（代码、名称、市场、数量、平均成本）。</p>
     {importNotice ? <p className="portfolio-import-notice" role="status">{importNotice}</p> : null}
@@ -334,6 +345,12 @@ export function PortfolioView() {
     <section className="plan-overview" aria-label="交易计划概览">
       <div className="plan-overview-heading"><div><h2>交易计划</h2><small>记录买入逻辑与目标价；只做提醒和留痕，不会自动下单。</small></div><CheckCircle size={22} /></div>
       <div className="plan-metrics"><article><span>跟踪中</span><strong>{positions.filter((position) => position.planStatus === "active").length}</strong><small>需要持续观察</small></article><article><span>已执行</span><strong>{positions.filter((position) => position.planStatus === "executed").length}</strong><small>保留操作记录</small></article><article><span>未建立</span><strong>{positions.filter((position) => !position.planStatus || position.planStatus === "none").length}</strong><small>可在编辑中补充</small></article></div>
+    </section>
+    <section className="premarket-briefing-overview" aria-label="盘前数据摘要">
+      <div className="premarket-briefing-heading"><div><h2>盘前数据摘要</h2><small>逐个持仓读取真实新闻与公司事件；行业、宏观和外盘能力接入前保持空态。</small></div><div className="premarket-briefing-actions">{premarketBriefing?.asOf ? <span>最近数据 {premarketBriefing.asOf}</span> : null}<button type="button" className="secondary-button" onClick={premarketBriefingLoading ? cancelPremarketBriefing : generatePremarket} disabled={!positions.length}>{premarketBriefingLoading ? "停止更新" : "刷新摘要"}</button></div></div>
+      {premarketBriefingError ? <p className="premarket-briefing-status" role="status">{premarketBriefingError}</p> : null}
+      {!positions.length ? <p className="risk-empty">添加持仓后，这里会聚合真实公告与事件。</p> : premarketBriefingLoading ? <p className="risk-empty">正在按持仓获取真实新闻与公司事件，请稍候…</p> : !premarketBriefing ? <p className="risk-empty">点击“盘前摘要”获取真实数据；没有返回结果时不会显示示例内容。</p> : <div className="premarket-briefing-grid">{Object.values(premarketBriefing.sections).map((section) => <article className={`premarket-briefing-section ${section.status}`} key={section.id}><div><strong>{section.title}</strong><small>{section.status === "available" ? `${section.items.length} 条真实记录` : "暂无数据"}</small></div>{section.items.length ? <ul>{section.items.slice(0, 12).map((item, index) => { const sourceUrl = safeExternalUrl(item.url); return <li key={`${item.symbol}-${item.title}-${index}`}><div><strong>{item.title || item.detail || "未命名记录"}</strong><small>{item.name || item.symbol}{item.date || item.publishedAt ? ` · ${item.date || item.publishedAt}` : ""} · {item.source || "数据服务"}</small>{item.summary && item.summary !== item.title ? <p>{item.summary}</p> : item.detail && item.detail !== item.title ? <p>{item.detail}</p> : null}</div>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">来源</a> : null}</li>; })}</ul> : <p>{section.emptyCopy}</p>}</article>)}</div>}
+      {premarketBriefing ? <small className="security-note">{premarketBriefing.disclaimer}{premarketBriefing.sources.length ? ` · 来源：${premarketBriefing.sources.join("、")}` : ""}</small> : null}
     </section>
     <section className="portfolio-review-overview" aria-label="盘后复盘记录">
       <div className="portfolio-review-heading"><div><h2>盘后复盘</h2><small>保存当前真实行情快照、组合表现、风险信号和未来 7 天已返回事件。</small></div><span>{portfolioReviews.length} 份记录</span></div>
