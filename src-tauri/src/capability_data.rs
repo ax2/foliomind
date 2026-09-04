@@ -2,10 +2,119 @@ use chrono::{Duration as ChronoDuration, Utc};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::{thread, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+    thread,
+    time::{Duration, Instant},
+};
 use uuid::Uuid;
 
 const MAX_RESPONSE_SIZE: u64 = 20_480;
+const MAX_CACHE_ENTRIES: usize = 128;
+
+struct CacheEntry {
+    data: Value,
+    stored_at: Instant,
+}
+
+static DATA_CACHE: OnceLock<Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
+
+fn cache() -> &'static Mutex<HashMap<String, CacheEntry>> {
+    DATA_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache_ttl(kind: &str) -> Duration {
+    match kind {
+        "quote" => Duration::from_secs(15),
+        "details" | "fundamentals" | "core_event" => Duration::from_secs(300),
+        "series" | "capital_flow" | "sentiment" | "market_news" | "commodity" => {
+            Duration::from_secs(60)
+        }
+        "index_levels" => Duration::from_secs(30),
+        _ => Duration::ZERO,
+    }
+}
+
+fn cache_key(base_url: &str, kind: &str, params: &Value) -> String {
+    format!(
+        "{}|{}|{}",
+        base_url.trim().trim_end_matches('/'),
+        kind,
+        serde_json::to_string(params).unwrap_or_default()
+    )
+}
+
+fn has_usable_data(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(map) => !map.is_empty(),
+        Value::Null => false,
+        _ => true,
+    }
+}
+
+fn cached_data(key: &str, ttl: Duration) -> Option<Value> {
+    if ttl.is_zero() {
+        return None;
+    }
+    let Ok(mut entries) = cache().lock() else {
+        return None;
+    };
+    let Some(entry) = entries.get(key) else {
+        return None;
+    };
+    if entry.stored_at.elapsed() >= ttl {
+        entries.remove(key);
+        return None;
+    }
+    Some(entry.data.clone())
+}
+
+fn store_cached_data(key: String, data: &Value) {
+    if !has_usable_data(data) {
+        return;
+    }
+    let Ok(mut entries) = cache().lock() else {
+        return;
+    };
+    if entries.len() >= MAX_CACHE_ENTRIES && !entries.contains_key(&key) {
+        if let Some(oldest) = entries
+            .iter()
+            .min_by_key(|(_, entry)| entry.stored_at)
+            .map(|(key, _)| key.clone())
+        {
+            entries.remove(&oldest);
+        }
+    }
+    entries.insert(
+        key,
+        CacheEntry {
+            data: data.clone(),
+            stored_at: Instant::now(),
+        },
+    );
+}
+
+/// Drop all locally cached CAP results after credentials or endpoints change.
+pub fn clear_cache() {
+    if let Ok(mut entries) = cache().lock() {
+        entries.clear();
+    }
+}
+
+fn cache_audit(spec: &CapabilitySpec, params: &Value) -> Value {
+    json!({
+        "operation": "cap-cache-hit",
+        "outcome": "success",
+        "toolId": spec.tool_id,
+        "capability": spec.capability,
+        "status": 200,
+        "durationMs": 0,
+        "cacheHit": true,
+        "params": params,
+    })
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -410,6 +519,18 @@ pub fn query(
     let kind = input.kind.trim();
     let primary = spec(kind).ok_or("没有对应的金融能力")?;
     let primary_params = parameters(&input, kind)?;
+    let ttl = cache_ttl(kind);
+    let key = cache_key(capability_base_url, kind, &primary_params);
+    if let Some(data) = cached_data(&key, ttl) {
+        return Ok(CapabilityQueryResult {
+            data,
+            mode: "qveris-cap".into(),
+            cache_hit: true,
+            audits: vec![cache_audit(&primary, &primary_params)],
+            tool_id: primary.tool_id.into(),
+            capability: primary.capability.into(),
+        });
+    }
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(30))
@@ -447,8 +568,15 @@ pub fn query(
             .cloned()
             .unwrap_or_default();
         merged.insert("fundamentals".into(), fundamentals_data);
+        let data = Value::Object(merged);
+        if audits
+            .iter()
+            .all(|record| record.get("outcome").and_then(Value::as_str) == Some("success"))
+        {
+            store_cached_data(key, &data);
+        }
         return Ok(CapabilityQueryResult {
-            data: Value::Object(merged),
+            data,
             mode: "qveris-cap".into(),
             cache_hit: false,
             audits,
@@ -458,6 +586,7 @@ pub fn query(
     } else {
         payload(&primary_body)
     };
+    store_cached_data(key, &data);
     Ok(CapabilityQueryResult {
         data,
         mode: "qveris-cap".into(),
@@ -531,5 +660,48 @@ mod tests {
             cost(&json!({"data": {"amount": 99.0, "price": 12.3}})),
             None
         );
+    }
+
+    #[test]
+    fn uses_bounded_ttls_for_live_capabilities() {
+        assert_eq!(cache_ttl("quote"), Duration::from_secs(15));
+        assert_eq!(cache_ttl("index_levels"), Duration::from_secs(30));
+        assert_eq!(cache_ttl("details"), Duration::from_secs(300));
+        assert!(cache_ttl("trading_calendar").is_zero());
+    }
+
+    #[test]
+    fn cache_key_is_scoped_to_endpoint_kind_and_parameters() {
+        let first = cache_key(
+            "https://example.test/api/v1/",
+            "quote",
+            &json!({"symbol": "600519"}),
+        );
+        let same = cache_key(
+            "https://example.test/api/v1",
+            "quote",
+            &json!({"symbol": "600519"}),
+        );
+        let other_kind = cache_key(
+            "https://example.test/api/v1",
+            "series",
+            &json!({"symbol": "600519"}),
+        );
+        let other_params = cache_key(
+            "https://example.test/api/v1",
+            "quote",
+            &json!({"symbol": "000001"}),
+        );
+        assert_eq!(first, same);
+        assert_ne!(first, other_kind);
+        assert_ne!(first, other_params);
+    }
+
+    #[test]
+    fn empty_payloads_are_not_cached() {
+        clear_cache();
+        let key = "test-empty".to_owned();
+        store_cached_data(key.clone(), &Value::Object(Map::new()));
+        assert!(cached_data(&key, Duration::from_secs(60)).is_none());
     }
 }

@@ -1083,12 +1083,14 @@ fn qveris_credential_configured(host: State<'_, PiHost>) -> Result<bool, String>
 #[tauri::command]
 fn qveris_credential_save(host: State<'_, PiHost>, api_key: String) -> Result<(), String> {
     host.credentials.write_qveris_key(&api_key)?;
+    capability_data::clear_cache();
     host.discard_staged_model_catalog(None);
     Ok(())
 }
 #[tauri::command]
 fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> {
     host.credentials.delete_qveris_key()?;
+    capability_data::clear_cache();
     host.discard_staged_model_catalog(None);
     Ok(())
 }
@@ -1193,6 +1195,10 @@ fn apply_integration_settings(
             ),
         });
     }
+    // Endpoint changes must never reuse data fetched under the previous
+    // integration settings. Clearing is safe even if runtime recovery below
+    // is needed, because stale results are worse than a cold cache.
+    capability_data::clear_cache();
     if let Err(error) = host.start(app.clone()) {
         if let Err(restore) = config::save(&app, &previous) {
             return Err(format!(
