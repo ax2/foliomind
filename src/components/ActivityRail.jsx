@@ -24,8 +24,8 @@ export function ActivityRail() {
       </button>
       <div className="rail-links">
         {nav.map(([id, label, Icon]) => (
-          <button key={id} className={activeView === id ? "rail-link active" : "rail-link"} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}>
-            <span className="rail-icon-wrap"><Icon size={22} weight={activeView === id ? "fill" : "regular"} />{id === "notifications" && unreadCount > 0 && <em>{unreadCount > 99 ? "99+" : unreadCount}</em>}</span>
+          <button key={id} className={activeView === id ? "rail-link active" : "rail-link"} aria-label={id === "notifications" && unreadCount > 0 ? `${label}，${unreadCount} 条未读` : label} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}>
+            <span className="rail-icon-wrap"><Icon size={22} weight={activeView === id ? "fill" : "regular"} />{id === "notifications" && unreadCount > 0 && <em aria-hidden="true">{unreadCount > 99 ? "99+" : unreadCount}</em>}</span>
             <span>{label}</span>
           </button>
         ))}

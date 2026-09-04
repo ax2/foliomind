@@ -31,6 +31,7 @@ const qaPlaywright = await load("scripts/qa-playwright.py");
 const commandPalette = await load("src/components/CommandPalette.jsx");
 const systemNotifications = await load("src/lib/systemNotifications.js");
 const refreshPolicy = await load("src/lib/refreshPolicy.js");
+const activityRail = await load("src/components/ActivityRail.jsx");
 const hostLockTest = await load("scripts/local-host.test.mjs");
 const storeTest = await load("src/store/useLabStore.test.js");
 const version = packageJson.version;
@@ -169,6 +170,7 @@ check("CAP 测试主动取消", developerPanel.includes("停止测试") && devel
 
 check("CAP 目录加载主动取消", developerPanel.includes("停止加载") && developerPanel.includes("directoryController") && developerPanel.includes("directoryGeneration") && developerPanel.includes("signal: controller.signal") && prd.includes("Stage 3EJ 能力目录加载主动取消与重试"), "动态能力目录 Search 必须支持本地停止、重试和迟到响应隔离，不得阻塞本地调试或覆盖已有目录");
 check("自选快速筛选", watchlistSidebar.includes("搜索自选") && watchlistSidebar.includes("filterQuery") && watchlistSidebar.includes("清除自选搜索") && watchlistSidebar.includes("category") && watchlistSidebar.includes("market") && prd.includes("Stage 3EK 自选快速筛选"), "自选侧栏必须支持本地名称/代码/分类/市场/分组筛选，显示命中数量并提供可访问清除，不触发网络请求或误导性重排");
+check("导航未读提示可访问性", activityRail.includes("条未读") && activityRail.includes('aria-hidden="true"') && prd.includes("Stage 3EL 导航未读提示可访问性"), "消息导航必须提供稳定的未读语义名称，视觉徽标不得被读屏重复朗读");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
