@@ -75,7 +75,9 @@ const DIRECT_DATA_CACHE_TTL_MS = Object.freeze({
   market_news: 60_000,
   index_levels: 30_000,
   commodity: 60_000,
-  trading_calendar: 12 * 60 * 60_000,
+  // Trading sessions can be amended by the exchange/provider. Keep the
+  // calendar uncached so an automatic review never relies on a stale day.
+  trading_calendar: 0,
 });
 const directDataCache = new Map();
 const directDataInFlight = new Map();

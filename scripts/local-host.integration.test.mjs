@@ -302,6 +302,36 @@ test("客户端断开时取消上游 CAP request", async (context) => {
   assert.equal(overview.payload.state.activeRequest, false);
 });
 
+test("Local Host never caches trading-calendar gates", async (context) => {
+  let calendarCalls = 0;
+  const upstream = createServer((request, response) => {
+    const url = new URL(request.url, "http://127.0.0.1");
+    if (url.pathname !== "/tools/execute") { response.writeHead(404).end(); return; }
+    calendarCalls += 1;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ success: true, result: { data: { time: ["2026-09-01"] } } }));
+  });
+  const capabilityBaseUrl = await listen(upstream);
+  context.after(() => new Promise((resolve) => upstream.close(resolve)));
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-calendar-cache-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+  await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_calendar_cache_test_123456" } });
+  await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl } } });
+
+  const input = { kind: "trading_calendar", date: "2026-09-01", marketcode: "212001" };
+  const first = await hostRequest(host, "/api/data/query", { method: "POST", body: { input } });
+  const second = await hostRequest(host, "/api/data/query", { method: "POST", body: { input } });
+  assert.equal(first.response.status, 200);
+  assert.equal(second.response.status, 200);
+  assert.equal(first.payload.data.isTradingDay, true);
+  assert.equal(second.payload.data.isTradingDay, true);
+  assert.equal(calendarCalls, 2);
+  const overview = await hostRequest(host, "/api/dev/overview");
+  assert.equal(overview.payload.logs.some((entry) => entry.operation === "cap-cache-hit" && entry.kind === "trading_calendar"), false);
+});
+
 test("动态 CAP 测试只允许当前目录已验证的工具", async (context) => {
   const calls = [];
   const upstream = createServer((request, response) => {
