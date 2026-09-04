@@ -43,22 +43,51 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
+  const dialogRef = useRef(null);
+  const returnFocusRef = useRef(null);
+  const openRef = useRef(false);
+
+  const rememberFocus = () => {
+    const active = document.activeElement;
+    returnFocusRef.current = active && typeof active.focus === "function" ? active : null;
+  };
+
+  const close = () => {
+    openRef.current = false;
+    setOpen(false);
+    setQuery("");
+  };
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   useEffect(() => {
     const onGlobalKeyDown = (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
-        setOpen((value) => !value);
+        const nextOpen = !openRef.current;
+        if (nextOpen) rememberFocus();
+        openRef.current = nextOpen;
+        setOpen(nextOpen);
         return;
       }
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape" && openRef.current) {
+        event.preventDefault();
+        close();
+      }
     };
     document.addEventListener("keydown", onGlobalKeyDown);
     return () => document.removeEventListener("keydown", onGlobalKeyDown);
   }, []);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      const target = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (target?.isConnected) requestAnimationFrame(() => target.focus());
+      return undefined;
+    }
     setActiveIndex(0);
     requestAnimationFrame(() => inputRef.current?.focus());
     return undefined;
@@ -75,12 +104,25 @@ export function CommandPalette() {
   const visibleEntries = entries.slice(0, 20);
   useEffect(() => { setActiveIndex(0); }, [query]);
 
-  const close = () => { setOpen(false); setQuery(""); };
   const choose = (entry) => {
     if (!entry) return;
     if (entry.type === "symbol") selectSymbol(entry.id);
     else setActiveView(entry.id);
     close();
+  };
+  const trapFocus = (event) => {
+    if (event.key !== "Tab") return;
+    const focusable = [...(dialogRef.current?.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])") || [])];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
   const onInputKeyDown = (event) => {
     if (event.key === "ArrowDown") {
@@ -97,7 +139,7 @@ export function CommandPalette() {
 
   if (!open) return null;
   return <div className="command-palette-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-    <section className="command-palette" role="dialog" aria-modal="true" aria-label="快速打开">
+    <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-label="快速打开" onKeyDown={trapFocus}>
       <div className="command-palette-search"><MagnifyingGlass size={19} /><input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onInputKeyDown} placeholder="搜索页面、标的或代码…" aria-label="快速搜索" autoComplete="off" /><kbd>Esc</kbd></div>
       <div className="command-palette-hint"><span><Command size={14} />快速打开</span><span>↑↓选择</span><span>Enter确认</span></div>
       <div className="command-palette-results" role="listbox" aria-label="快速打开结果">

@@ -35,4 +35,29 @@ describe("CommandPalette", () => {
     expect(useLabStore.getState().activeView).toBe("watchlist");
     expect(screen.queryByRole("dialog", { name: "快速打开" })).not.toBeInTheDocument();
   });
+
+  it("returns focus to the invoking control after closing", async () => {
+    render(<><button type="button">打开命令面板</button><CommandPalette /></>);
+    const trigger = screen.getByRole("button", { name: "打开命令面板" });
+    trigger.focus();
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "快速搜索" });
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(trigger).toHaveFocus();
+  });
+
+  it("keeps Tab focus inside the dialog", async () => {
+    render(<CommandPalette />);
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "快速搜索" });
+    const options = screen.getAllByRole("option");
+    const lastOption = options.at(-1);
+    lastOption.focus();
+    fireEvent.keyDown(lastOption, { key: "Tab" });
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
+    expect(lastOption).toHaveFocus();
+  });
 });
