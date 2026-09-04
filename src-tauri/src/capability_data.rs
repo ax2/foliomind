@@ -1,4 +1,5 @@
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono_tz::Asia::Shanghai;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -43,6 +44,10 @@ fn cache_key(base_url: &str, kind: &str, params: &Value) -> String {
         kind,
         serde_json::to_string(params).unwrap_or_default()
     )
+}
+
+fn today_in_shanghai(now: DateTime<Utc>) -> chrono::NaiveDate {
+    now.with_timezone(&Shanghai).date_naive()
 }
 
 fn has_usable_data(value: &Value) -> bool {
@@ -188,7 +193,7 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
     if symbol.is_empty() && !matches!(kind, "market_news" | "index_levels" | "commodity") {
         return Err("CAP 查询需要有效的证券代码".into());
     }
-    let today = Utc::now().date_naive();
+    let today = today_in_shanghai(Utc::now());
     if kind == "market_news" {
         let query = input.query.as_deref().unwrap_or_default().trim();
         if query.is_empty() {
@@ -598,6 +603,18 @@ pub fn query(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derives_default_dates_from_the_shanghai_calendar() {
+        let before_midnight = DateTime::parse_from_rfc3339("2026-09-03T15:59:59Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let after_midnight = DateTime::parse_from_rfc3339("2026-09-03T16:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(today_in_shanghai(before_midnight).to_string(), "2026-09-03");
+        assert_eq!(today_in_shanghai(after_midnight).to_string(), "2026-09-04");
+    }
 
     #[test]
     fn builds_bounded_parameters_for_series() {

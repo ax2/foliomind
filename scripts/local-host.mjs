@@ -534,14 +534,25 @@ async function persistCapabilityCatalog(settings) {
   return cache.__catalog;
 }
 
-function directCapabilityParameters(kind, input) {
+export function dateStringInTimeZone(date = new Date(), timeZone = "Asia/Shanghai") {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function directCapabilityParameters(kind, input, now = new Date()) {
   const symbol = String(input?.symbol || "").trim().toUpperCase();
-  const end = new Date();
-  const start = new Date(end);
-  start.setDate(end.getDate() - (kind === "series" ? 90 : 30));
-  const dates = { start_date: String(input?.start_date || start.toISOString().slice(0, 10)), end_date: String(input?.end_date || end.toISOString().slice(0, 10)) };
+  const end = new Date(now);
+  const endDate = dateStringInTimeZone(end);
+  const start = new Date(end.getTime() - (kind === "series" ? 90 : 30) * 86_400_000);
+  const dates = { start_date: String(input?.start_date || dateStringInTimeZone(start)), end_date: String(input?.end_date || endDate) };
   if (kind === "trading_calendar") {
-    const date = String(input?.date || input?.startdate || input?.start_date || end.toISOString().slice(0, 10));
+    const date = String(input?.date || input?.startdate || input?.start_date || endDate);
     return { marketcode: String(input?.marketcode || "212001"), startdate: date, enddate: String(input?.enddate || input?.end_date || date), mode: 1, date_type: 0, period: "D", date_format: 0 };
   }
   if (kind === "market_news") return { query: String(input?.query || "").trim(), ...(input?.category ? { category: String(input.category) } : {}), ...dates, limit: Math.min(20, Math.max(1, Number(input?.limit) || 10)) };

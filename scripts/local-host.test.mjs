@@ -4,10 +4,20 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, debugPayload, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, MAX_DIRECT_DATA_CACHE_ENTRIES, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
+import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, dateStringInTimeZone, debugPayload, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, directCapabilityParameters, MAX_DIRECT_DATA_CACHE_ENTRIES, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+});
+
+test("uses the Shanghai local calendar date for CAP defaults across UTC boundaries", () => {
+  assert.equal(dateStringInTimeZone(new Date("2026-09-03T16:30:00.000Z")), "2026-09-04");
+  assert.equal(dateStringInTimeZone(new Date("2026-09-03T15:59:59.000Z")), "2026-09-03");
+  const parameters = directCapabilityParameters("market_news", { query: "利率" }, new Date("2026-09-03T16:30:00.000Z"));
+  assert.deepEqual(parameters, { query: "利率", start_date: "2026-08-05", end_date: "2026-09-04", limit: 10 });
+  const calendar = directCapabilityParameters("trading_calendar", {}, new Date("2026-09-03T16:30:00.000Z"));
+  assert.equal(calendar.startdate, "2026-09-04");
+  assert.equal(calendar.enddate, "2026-09-04");
 });
 
 test("atomic JSON writes protect private local metadata on POSIX", async (context) => {
