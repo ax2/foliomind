@@ -573,8 +573,72 @@ function directDataCacheKey(kind, settings, parameters) {
   });
 }
 
-function capabilityData(result) {
-  return result?.result?.data ?? result?.data ?? result?.result ?? result;
+const CAPABILITY_ENVELOPE_KEYS = Object.freeze(["data", "payload", "result"]);
+const CAPABILITY_LEAF_KEYS = new Set([
+  "price", "lastPrice", "last_price", "last", "close", "open", "high", "low", "volume", "turnover", "turnover_amount",
+  "symbol", "code", "name", "title", "headline", "description", "summary", "date", "time", "timestamp", "event_date",
+  "events", "news", "articles", "series", "bars", "rows", "items", "indices", "commodities", "quotes", "time", "dates",
+  "pe_ttm", "pb_ratio", "ps_ratio_ttm", "ev_to_ebitda", "market_cap", "main_net", "net_flow", "commodity_name",
+]);
+
+function hasCapabilityLeaf(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).some((key) => CAPABILITY_LEAF_KEYS.has(key));
+}
+
+/**
+ * QVeris-compatible providers can wrap the same CAP payload in several
+ * transport envelopes (`result.data`, `payload`, or another `result`). Walk
+ * only those documented keys, keep the depth bounded, and stop at a likely
+ * domain record so a real record containing a nested `data` field is not
+ * accidentally unwrapped. Arrays are already payload collections and are
+ * returned as-is for the capability-specific normalizer below.
+ */
+function capabilityData(value, depth = 0) {
+  if (value == null || depth > 4 || typeof value !== "object" || Array.isArray(value) || hasCapabilityLeaf(value)) return value;
+  for (const key of CAPABILITY_ENVELOPE_KEYS) {
+    if (!Object.hasOwn(value, key) || value[key] === value) continue;
+    const nested = capabilityData(value[key], depth + 1);
+    if (nested !== undefined && nested !== null) return nested;
+  }
+  return value;
+}
+
+function capabilityStatusCode(value, depth = 0) {
+  if (value == null || depth > 4 || typeof value !== "object") return null;
+  for (const key of ["status_code", "statusCode", "http_status", "httpStatus"]) {
+    const candidate = Number(value[key]);
+    if (Number.isFinite(candidate)) return candidate;
+  }
+  for (const key of CAPABILITY_ENVELOPE_KEYS) {
+    if (Object.hasOwn(value, key)) {
+      const nested = capabilityStatusCode(value[key], depth + 1);
+      if (nested != null) return nested;
+    }
+  }
+  return null;
+}
+
+function capabilityExplicitFailure(value, depth = 0) {
+  if (value == null || depth > 4 || typeof value !== "object") return false;
+  if (value.success === false) return true;
+  return CAPABILITY_ENVELOPE_KEYS.some((key) => Object.hasOwn(value, key) && capabilityExplicitFailure(value[key], depth + 1));
+}
+
+function capabilitySource(result, depth = 0) {
+  if (result == null || depth > 4 || typeof result !== "object" || Array.isArray(result)) return null;
+  const meta = result._meta;
+  if (meta && typeof meta === "object") {
+    const source = meta.source_provider || meta.source_tool_id || meta.source || meta.provider;
+    if (source) return String(source);
+  }
+  for (const key of CAPABILITY_ENVELOPE_KEYS) {
+    if (Object.hasOwn(result, key)) {
+      const nested = capabilitySource(result[key], depth + 1);
+      if (nested) return nested;
+    }
+  }
+  return null;
 }
 
 /**
@@ -617,13 +681,12 @@ function latestDataTimestamp(points) {
 
 export function normalizeCapabilityResult(kind, input, result) {
   const data = capabilityData(result);
-  const statusCode = Number(result?.result?.status_code ?? result?.status_code ?? 200);
+  const statusCode = capabilityStatusCode(result) ?? 200;
   const hasPayload = Array.isArray(data) ? data.length > 0 : Boolean(data && typeof data === "object" ? Object.keys(data).length : data);
-  if (hasPayload && (result?.success === false || (Number.isFinite(statusCode) && statusCode >= 400))) {
+  if (hasPayload && (capabilityExplicitFailure(result) || (Number.isFinite(statusCode) && statusCode >= 400))) {
     throw new Error("金融数据渠道暂未返回可用结果");
   }
-  const meta = result?.result?._meta || result?._meta || {};
-  const source = meta.source_provider || meta.source_tool_id || DEFAULT_DATA_PROVIDER;
+  const source = capabilitySource(result) || DEFAULT_DATA_PROVIDER;
   if (kind === "quote") {
     const quote = quoteRecord(data);
     const price = Number(quote?.price ?? quote?.lastPrice ?? quote?.last_price ?? quote?.last ?? quote?.close);
@@ -638,7 +701,7 @@ export function normalizeCapabilityResult(kind, input, result) {
     return { companyDescription: data.description || "", company: data, source, capability: "REF.COMPANY_PROFILE", asOf: null };
   }
   if (kind === "series") {
-    const points = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+    const points = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.bars) ? data.bars : Array.isArray(data?.items) ? data.items : [];
     return { series: points.map((point) => ({ ...point, time: point.time || point.date, value: point.value ?? point.close })).filter((point) => point.time || point.date), source, capability: "MKT.BARS.EOD", asOf: latestDataTimestamp(points) };
   }
   if (kind === "core_event") {

@@ -173,6 +173,34 @@ test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () 
   assert.equal(commodities.commodities[0].name, "WTI");
 });
 
+test("unwraps bounded multi-layer CAP envelopes for every read-only data kind", () => {
+  const envelope = (payload, meta = {}) => ({ success: true, result: { payload: { data: payload, _meta: meta } } });
+  const details = normalizeCapabilityResult("details", { symbol: "AAPL" }, envelope({ name: "Apple", industry: "Technology" }, { source_provider: "profile-provider" }));
+  assert.equal(details.company.name, "Apple");
+  assert.equal(details.source, "profile-provider");
+  const series = normalizeCapabilityResult("series", { symbol: "AAPL" }, envelope({ bars: [{ date: "2026-09-01", close: 231.4 }] }));
+  assert.deepEqual(series.series[0], { date: "2026-09-01", close: 231.4, time: "2026-09-01", value: 231.4 });
+  const events = normalizeCapabilityResult("core_event", { symbol: "AAPL" }, envelope({ events: [{ event_date: "2026-09-02", title: "股东会" }] }));
+  assert.equal(events.events[0].title, "股东会");
+  const flow = normalizeCapabilityResult("capital_flow", { symbol: "AAPL" }, envelope({ rows: [{ date: "2026-09-02", net_flow: 12 }] }));
+  assert.equal(flow.mainNetInflow, 12);
+  const sentiment = normalizeCapabilityResult("sentiment", { symbol: "AAPL" }, envelope({ news: [{ title: "结果发布", published_at: "2026-09-02" }] }));
+  assert.equal(sentiment.news[0].title, "结果发布");
+  const marketNews = normalizeCapabilityResult("market_news", { query: "利率" }, envelope({ articles: [{ headline: "议息会议", published_at: "2026-09-02" }] }));
+  assert.equal(marketNews.news[0].title, "议息会议");
+  const indices = normalizeCapabilityResult("index_levels", { symbol: "SPX" }, envelope({ indices: [{ symbol: "SPX", price: 5_500 }] }));
+  assert.equal(indices.indices[0].price, 5_500);
+  const commodities = normalizeCapabilityResult("commodity", { symbol: "WTI" }, envelope({ commodities: [{ symbol: "WTI", price: 72 }] }));
+  assert.equal(commodities.commodities[0].price, 72);
+});
+
+test("rejects explicit failures hidden in nested CAP envelopes", () => {
+  assert.throws(
+    () => normalizeCapabilityResult("details", { symbol: "AAPL" }, { result: { payload: { data: { name: "Apple" }, status_code: 503 } } }),
+    /金融数据渠道暂未返回可用结果/,
+  );
+});
+
 test("rejects explicit CAP failure envelopes instead of exposing partial fields", () => {
   assert.throws(
     () => normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { success: false, result: { data: { price: 1 }, status_code: 200 } }),

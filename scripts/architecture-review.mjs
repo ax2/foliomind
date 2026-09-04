@@ -184,6 +184,7 @@ check("CAP 目录加载主动取消", developerPanel.includes("停止加载") &&
 check("自选快速筛选", watchlistSidebar.includes("搜索自选") && watchlistSidebar.includes("filterQuery") && watchlistSidebar.includes("清除自选搜索") && watchlistSidebar.includes("category") && watchlistSidebar.includes("market") && prd.includes("Stage 3EK 自选快速筛选"), "自选侧栏必须支持本地名称/代码/分类/市场/分组筛选，显示命中数量并提供可访问清除，不触发网络请求或误导性重排");
 check("导航未读提示可访问性", activityRail.includes("条未读") && activityRail.includes('aria-hidden="true"') && prd.includes("Stage 3EL 导航未读提示可访问性"), "消息导航必须提供稳定的未读语义名称，视觉徽标不得被读屏重复朗读");
 check("站内消息交互语义隔离", settingsView.includes("function NotificationCard") && settingsView.includes('className="notification-main"') && settingsView.includes('role="button"') && settingsView.includes("notification-item-actions") && appTest.includes("keeps notification actions outside the interactive message surface") && prd.includes("Stage 3EM 站内消息交互语义隔离"), "消息卡片容器不得承载 role=button 并嵌套子按钮，整卡阅读与查看标的/盯盘操作必须保持独立焦点和事件边界");
+check("跨端 CAP 通用响应外壳", localHost.includes("const CAPABILITY_ENVELOPE_KEYS") && localHost.includes("function capabilityData") && localHost.includes("function capabilityStatusCode") && localHost.includes("function capabilitySource") && hostLockTest.includes("multi-layer CAP envelopes") && prd.includes("Stage 3ET 跨端 CAP 通用响应外壳"), "详情、序列、事件、新闻、指数和商品等只读 CAP 必须沿受限 envelope 统一解析并传播状态、来源，不能成功传输后误判为空");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
