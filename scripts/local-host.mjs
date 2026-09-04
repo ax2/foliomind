@@ -577,6 +577,35 @@ function capabilityData(result) {
   return result?.result?.data ?? result?.data ?? result?.result ?? result;
 }
 
+/**
+ * Providers do not all use the same response envelope for a single quote.
+ * The stable CAP contract promises a quote, but the transport may return it
+ * directly, under `quote`, as the first item in `quotes`, or one level deeper
+ * in `data`/`payload`. Walk only those documented container keys and accept a
+ * record once it contains a finite positive price. This keeps malformed or
+ * empty responses fail-closed while avoiding a false empty state for a valid
+ * provider response.
+ */
+function quoteRecord(value, depth = 0) {
+  if (depth > 4 || value == null) return null;
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 32)) {
+      const found = quoteRecord(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value !== "object") return null;
+  const price = Number(value.price ?? value.lastPrice ?? value.last_price ?? value.last ?? value.close);
+  if (Number.isFinite(price) && price > 0) return value;
+  for (const key of ["quote", "quotes", "data", "payload", "result"]) {
+    if (!Object.hasOwn(value, key)) continue;
+    const found = quoteRecord(value[key], depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 function latestDataTimestamp(points) {
   const values = points.map((point) => String(point?.date || point?.time || point?.timestamp || "")).filter(Boolean);
   const parsed = values
@@ -596,12 +625,13 @@ export function normalizeCapabilityResult(kind, input, result) {
   const meta = result?.result?._meta || result?._meta || {};
   const source = meta.source_provider || meta.source_tool_id || DEFAULT_DATA_PROVIDER;
   if (kind === "quote") {
-    const price = Number(data?.price);
+    const quote = quoteRecord(data);
+    const price = Number(quote?.price ?? quote?.lastPrice ?? quote?.last_price ?? quote?.last ?? quote?.close);
     // Reject non-positive quotes at the Host boundary.  The UI also guards
     // this value, but allowing it into the shared cache would let an invalid
     // upstream response contaminate later consumers and derived signals.
-    if (!data || typeof data !== "object" || Array.isArray(data) || !Number.isFinite(price) || price <= 0) throw new Error("CAP 未返回可识别的实时行情");
-    return { quotes: [{ ...data, price, changePercent: data.change_percent, changeAmount: data.change, previousClose: data.previous_close, turnover: data.turnover_amount, asOf: data.timestamp, source }], source, capability: "MKT.L1.RT", asOf: data.timestamp || null };
+    if (!quote || !Number.isFinite(price) || price <= 0) throw new Error("CAP 未返回可识别的实时行情");
+    return { quotes: [{ ...quote, price, changePercent: quote.change_percent ?? quote.changePercent ?? quote.pct_change, changeAmount: quote.change_amount ?? quote.changeAmount ?? quote.change, previousClose: quote.previous_close ?? quote.previousClose ?? quote.prev_close, turnover: quote.turnover_amount ?? quote.turnoverAmount ?? quote.turnover, asOf: quote.timestamp ?? quote.as_of ?? quote.asOf, source }], source, capability: "MKT.L1.RT", asOf: quote.timestamp ?? quote.as_of ?? quote.asOf ?? null };
   }
   if (kind === "details") {
     if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回公司资料");

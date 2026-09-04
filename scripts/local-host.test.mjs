@@ -93,12 +93,18 @@ test("redacts nested credentials from developer payloads", () => {
   assert.equal(debugPayload({ values: Array.from({ length: 101 }, (_, index) => index) }).includes("100"), false);
 });
 
-test("keeps the qveris_finance CAP contract local and normalizes real envelopes", () => {
+test("keeps the qveris_finance CAP contract local and normalizes nested quote envelopes", () => {
   assert.equal(DEFAULT_DATA_PROVIDER, "qveris_finance");
   assert.equal(BUILTIN_CAPABILITY_CATALOG.quote.toolId, "qveris_finance.mkt_l1_rt");
   const result = normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { result: { data: { price: 1297.4, change: 5.1, change_percent: 0.39, timestamp: "2026-08-28T16:01:30", symbol: "600519.SH" }, _meta: { source_provider: "ths_ifind" } } });
   assert.equal(result.quotes[0].price, 1297.4);
   assert.equal(result.quotes[0].source, "ths_ifind");
+  const nestedQuote = normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { result: { data: { payload: { quotes: [{ last_price: "1298.6", change_percent: 0.21, timestamp: "2026-08-28T16:01:31", symbol: "600519.SH" }] } } } });
+  assert.equal(nestedQuote.quotes[0].price, 1298.6);
+  assert.equal(nestedQuote.quotes[0].changePercent, 0.21);
+  const directArrayQuote = normalizeCapabilityResult("quote", { symbol: "600519.SH" }, { data: [{ quote: { lastPrice: 1299.2, changeAmount: 1.8, asOf: "2026-08-28T16:01:32" } }] });
+  assert.equal(directArrayQuote.quotes[0].price, 1299.2);
+  assert.equal(directArrayQuote.quotes[0].changeAmount, 1.8);
   const series = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-28", close: 1297.4 }] } });
   assert.deepEqual(series.series[0], { date: "2026-08-28", close: 1297.4, time: "2026-08-28", value: 1297.4 });
   const ascendingSeries = normalizeCapabilityResult("series", { symbol: "600519.SH" }, { result: { data: [{ date: "2026-08-26", close: 1290 }, { date: "2026-08-28", close: 1297.4 }] } });
