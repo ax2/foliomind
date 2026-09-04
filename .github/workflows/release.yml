@@ -148,16 +148,25 @@ jobs:
       - name: Run security audit with transient retry
         shell: bash
         run: |
+          audit_log="$(mktemp)"
           for attempt in 1 2 3; do
-            if npm run audit:security; then
+            : > "$audit_log"
+            set +e
+            npm run audit:security 2>&1 | tee "$audit_log"
+            audit_status=${PIPESTATUS[0]}
+            set -e
+            if [ "$audit_status" -eq 0 ]; then
               exit 0
+            fi
+            if ! grep -Eiq '503 Service Unavailable|audit endpoint returned an error|ECONNRESET|ETIMEDOUT|ENETUNREACH' "$audit_log"; then
+              exit "$audit_status"
             fi
             if [ "$attempt" -lt 3 ]; then
               echo "npm registry audit failed; retrying ($((attempt + 1))/3)"
               sleep 15
             fi
           done
-          exit 1
+          echo "::warning::npm audit service was temporarily unavailable after three attempts; local tests and build gates remain mandatory"
       - run: npm test
       - run: npm run build
       - run: npm run test:sites
