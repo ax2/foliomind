@@ -26,7 +26,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 公司事件日历：按自选标的展示未来 90 天真实分红、拆股、股东会和财报日期，支持列表/月视图、月份导航、范围筛选、关键词搜索和来源追溯；无数据时保持明确空态。
 - 公司事件提醒：真实事件进入未来 7 天窗口时提供一次提前提醒，事件当天再提醒一次；按事件和阶段幂等去重，并支持站内/系统通知。
 - 盯盘告警按触发边沿去重：条件持续成立时不重复刷屏，恢复后再次触发才生成新消息。
-- 盯盘消息支持可选的系统通知；用户主动授权后，桌面端和 localhost 调试页可在站内消息之外收到提醒。
+- 盯盘消息支持可选的系统通知；用户主动授权后，桌面端和 localhost 调试页可选择接收全部提醒或仅关键提醒，普通消息始终保留在站内。
 - 桌面端与本地 Web Host 均支持按间隔执行真实盯盘检查；普通浏览器预览不会伪造检查结果。
 - 市场行情总览与跨市场自选列表，缺失数据保持为空；支持核心估值、交易盘面、完整字段和自定义命名行情视图。
 - 市场页顶部行情概览卡支持鼠标、Enter 和空格快捷进入标的详情；缺失涨跌幅保持中性，不误显示方向。
@@ -87,7 +87,7 @@ Rust Host
 3. 点击“同步模型”，从网关的 `/models` 原子读取并保存当前可用模型，再选择 Pi 默认模型并应用。更换网关地址后必须重新同步，已下线的默认模型会安全回退到目录中的首个可用模型。
 4. 在自选股页面点击“获取实时数据”可直接刷新当前标的；需要解释时再点击“交给 Agent”。行情卡会根据 provider 时间标记“数据时间未知”或“可能已延迟”，不会把缺少时间戳的数据冒充实时数据；没有可识别真实价格的数据不会进入行情、组合或盯盘结果。
 
-盯盘消息页的“系统通知”开关默认关闭。开启时仅在当前桌面/localhost 环境请求系统通知权限；拒绝权限不会影响站内消息保存和盯盘任务执行。
+盯盘消息页的“系统通知”开关默认关闭。开启时仅在当前桌面/localhost 环境请求系统通知权限，并可选择“全部提醒”或“仅关键提醒”；分级只影响系统通知，站内消息仍完整保存。拒绝权限不会影响站内消息保存和盯盘任务执行。
 
 桌面版关闭主窗口后会隐藏到系统托盘并保持本地 Host 与自动复盘协调器运行。托盘菜单提供“显示 FolioMind”“立即检查盘后复盘”和“退出 FolioMind”；需要完全停止后台进程时请使用托盘退出。Web 本地调试页关闭后不会继续运行。
 
@@ -160,10 +160,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.180`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.181`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.180 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.181 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

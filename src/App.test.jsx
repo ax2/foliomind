@@ -7,6 +7,7 @@ import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
+import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFICATION_MODES } from "./lib/systemNotifications.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
 const originalHydrateUserState = useLabStore.getState().hydrateUserState;
@@ -609,6 +610,24 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState().selectedSymbol).toBe("300750");
     expect(useLabStore.getState().activeView).toBe("watchlist");
     expect(useLabStore.getState().notifications[0].read).toBe(true);
+  });
+
+  it("lets users reduce system notification noise without filtering the inbox", () => {
+    setSystemNotificationsEnabled(true);
+    setSystemNotificationMode(SYSTEM_NOTIFICATION_MODES.ALL);
+    useLabStore.setState({
+      activeView: "notifications",
+      notifications: [{ id: "n-critical", kind: "monitor", symbol: "600519", name: "贵州茅台", title: "关键提醒", body: "真实数据", severity: "critical", createdAt: "2026-08-30T08:00:00Z", read: false, source: "data-service" }],
+    });
+    render(<NotificationsView />);
+    const mode = screen.getByRole("combobox", { name: "系统通知级别" });
+    expect(mode).toBeEnabled();
+    expect(mode).toHaveValue(SYSTEM_NOTIFICATION_MODES.ALL);
+    fireEvent.change(mode, { target: { value: SYSTEM_NOTIFICATION_MODES.CRITICAL } });
+    expect(mode).toHaveValue(SYSTEM_NOTIFICATION_MODES.CRITICAL);
+    expect(screen.getByText("关键提醒")).toBeInTheDocument();
+    setSystemNotificationsEnabled(false);
+    setSystemNotificationMode(SYSTEM_NOTIFICATION_MODES.ALL);
   });
 
   it("opens Skills and toggles install state", async () => {

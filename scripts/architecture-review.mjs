@@ -27,6 +27,7 @@ const userStateClient = await load("src/lib/userState.js");
 const labStore = await load("src/store/useLabStore.js");
 const qaPlaywright = await load("scripts/qa-playwright.py");
 const commandPalette = await load("src/components/CommandPalette.jsx");
+const systemNotifications = await load("src/lib/systemNotifications.js");
 const hostLockTest = await load("scripts/local-host.test.mjs");
 const storeTest = await load("src/store/useLabStore.test.js");
 const version = packageJson.version;
@@ -156,6 +157,7 @@ check("跨端稳定 CAP Agent 工具", nativeMain.includes("foliomind_data") && 
 check("桌面 CAP 缓存与失效", capabilityData.includes("cache_ttl") && capabilityData.includes("MAX_CACHE_ENTRIES") && capabilityData.includes("cap-cache-hit") && capabilityData.includes("pub fn clear_cache") && nativeMain.includes("capability_data::clear_cache()") && prd.includes("Stage 3DZ 桌面 CAP 缓存与成本边界"), "桌面固定 CAP 查询必须使用有界短 TTL 缓存，空/失败结果不得缓存，凭证或端点变更后必须失效并写入缓存命中审计");
 check("Local Host CAP 缓存容量与回收", localHost.includes("MAX_DIRECT_DATA_CACHE_ENTRIES = 256") && localHost.includes("cache.delete(key)") && localHost.includes("while (cache.size > limit)") && localHost.includes("if (cached) directDataCache.delete(cacheKeyValue)") && hostLockTest.includes("keeps the direct CAP cache bounded") && prd.includes("Stage 3EA Local Host CAP 缓存容量与长驻回收"), "Local Host direct CAP 缓存必须有界、命中续期并清理过期条目，长驻调试不能无限增长或复用过期真实数据");
 check("Local Host 交易日历实时门禁", localHost.includes("trading_calendar: 0") && capabilityData.includes('cache_ttl("trading_calendar").is_zero()') && hostIntegrationTest.includes("never caches trading-calendar gates") && prd.includes("Stage 3EB 交易日历实时门禁"), "交易日历不得使用 Local Host 或桌面缓存，自动复盘必须基于当前真实交易日历判断");
+check("系统通知分级与站内留痕", systemNotifications.includes("SYSTEM_NOTIFICATION_MODES") && systemNotifications.includes("shouldSendSystemNotification") && systemNotifications.includes("systemNotificationMode()") && systemNotifications.includes('notification?.severity === "critical"') && settingsView.includes("系统通知级别") && prd.includes("Stage 3EC 系统通知分级策略"), "系统通知可按关键级别过滤，但站内消息、审计和费用不受影响");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

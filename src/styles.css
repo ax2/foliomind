@@ -1806,6 +1806,7 @@ textarea:focus-visible {
 .notification-actions { display: flex; align-items: center; gap: 10px; }
 .notification-preference { display: inline-flex; align-items: center; gap: 6px; color: #607188; font-size: 11px; white-space: nowrap; }
 .notification-preference input { accent-color: var(--blue); }
+.notification-preference select { border: 1px solid #d8e1ed; border-radius: 5px; padding: 4px 6px; background: #fff; color: #52667e; font: inherit; }
 .notification-item-actions { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
 .notification-link { border: 1px solid #d8e5f7; border-radius: 6px; padding: 5px 8px; background: #f7faff; color: #3c72b1; cursor: pointer; font-size: 10px; }
 .notification-link:hover { border-color: #a9c8ed; background: #edf5ff; }
