@@ -7,7 +7,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 
 ## 当前能力
 
-- 自选股分组、分组筛选与按名称/最新价/涨跌幅排序；自定义顺序下可用行级上移/下移操作整理同组标的，顺序会通过 canonical Host 持久化并在 Web/桌面端保持一致；缺失行情始终保持为空，侧栏会显示真实报价的新鲜度、来源和交易所时区；长名称会安全省略并保留完整悬浮提示；未知市场使用明确的 UTC 参考而不会猜测本地时区；支持 FolioMind CSV/TradingView 风格 TXT 的批量导入导出。
+- 自选股分组、分组筛选与按名称/最新价/涨跌幅排序；侧栏支持按名称、代码、分类、市场和分组即时搜索，筛选只作用于本地视图并显示命中数量；自定义顺序下可用行级上移/下移操作整理同组标的，顺序会通过 canonical Host 持久化并在 Web/桌面端保持一致；缺失行情始终保持为空，侧栏会显示真实报价的新鲜度、来源和交易所时区；长名称会安全省略并保留完整悬浮提示；未知市场使用明确的 UTC 参考而不会猜测本地时区；支持 FolioMind CSV/TradingView 风格 TXT 的批量导入导出。
 - 投资组合持仓、成本、市值、未实现盈亏与行情覆盖率。
 - 组合盘后复盘快照：保存真实行情覆盖、组合盈亏、风险信号和未来 7 天已返回事件，可展开回顾并随本地备份迁移。
 - 组合风险洞察在已有真实历史序列上展示加权样本波动、平均相关性、有效配对数和历史覆盖率；序列不足时保持空值，结果明确标注未年化，不生成综合风险评分。
@@ -161,10 +161,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.188`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.189`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.188 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.189 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

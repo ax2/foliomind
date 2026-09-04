@@ -1,4 +1,4 @@
-import { CaretDown, CaretUp, DownloadSimple, DotsThree, Plus, UploadSimple, X } from "@phosphor-icons/react";
+import { CaretDown, CaretUp, DownloadSimple, DotsThree, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
@@ -52,6 +52,7 @@ export function WatchlistSidebar() {
   const moveWatchlistItem = useLabStore((state) => state.moveWatchlistItem);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [filterQuery, setFilterQuery] = useState("");
   const [error, setError] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [sortKey, setSortKey] = useState("custom");
@@ -74,7 +75,13 @@ export function WatchlistSidebar() {
     return Object.values(stocks).filter((item) => `${item.name} ${item.symbol}`.toLocaleLowerCase("zh-CN").includes(value) && !watchlist.some((entry) => entry.symbol === item.symbol)).slice(0, 6);
   }, [query, watchlist]);
   const groupedItems = useMemo(() => {
-    const filtered = groupFilter === "all" ? normalizedWatchlist : normalizedWatchlist.filter((item) => item.group === groupFilter);
+    const normalizedFilter = filterQuery.trim().toLocaleLowerCase("zh-CN");
+    const filtered = normalizedWatchlist.filter((item) => {
+      if (groupFilter !== "all" && item.group !== groupFilter) return false;
+      if (!normalizedFilter) return true;
+      return [item.symbol, item.name, item.category, item.market, item.group]
+        .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedFilter));
+    });
     const sortableQuotes = previewMode ? Object.fromEntries(filtered.map((item) => [item.symbol, quoteForSymbol(liveQuotes, item.symbol) || stocks[item.symbol]])) : liveQuotes;
     const sorted = sortWatchlistItems(filtered, sortableQuotes, sortKey, sortDirection);
     const grouped = new Map();
@@ -84,7 +91,7 @@ export function WatchlistSidebar() {
       grouped.get(group).push(item);
     });
     return [...grouped.entries()];
-  }, [groupFilter, liveQuotes, normalizedWatchlist, previewMode, sortDirection, sortKey]);
+  }, [filterQuery, groupFilter, liveQuotes, normalizedWatchlist, previewMode, sortDirection, sortKey]);
   const openDialog = () => {
     setGroupChoice(groups[0] || "自选");
     setNewGroupMode(false);
@@ -148,14 +155,20 @@ export function WatchlistSidebar() {
   };
   return <aside className="watchlist-sidebar">
     <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><small>支持 FolioMind CSV 或 TradingView 交易所前缀列表</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
+    <div className="watchlist-search-wrap">
+      <MagnifyingGlass size={15} aria-hidden="true" />
+      <input type="search" value={filterQuery} onChange={(event) => setFilterQuery(event.target.value)} placeholder="搜索名称、代码或分类" aria-label="搜索自选" />
+      {filterQuery && <button type="button" className="watchlist-search-clear" aria-label="清除自选搜索" onClick={() => setFilterQuery("")}><X size={13} /></button>}
+    </div>
     <div className="watchlist-controls" aria-label="自选视图控制">
       <label><span>分组</span><select aria-label="自选分组" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}><option value="all">全部（{normalizedWatchlist.length}）</option>{groups.map((group) => <option key={group} value={group}>{group}（{groupCounts.get(group)}）</option>)}</select></label>
       <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
     </div>
-    {sortKey === "custom" && normalizedWatchlist.length > 1 && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
+    {filterQuery && <p className="watchlist-search-result" role="status">已筛选 {groupedItems.reduce((count, [, items]) => count + items.length, 0)}/{normalizedWatchlist.length} 个标的</p>}
+    {sortKey === "custom" && normalizedWatchlist.length > 1 && !filterQuery && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && index > 0} canMoveDown={sortKey === "custom" && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>该分组暂无标的</strong><span>切换分组或添加新的自选。</span></div>}
+      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => setFilterQuery("")}>清除搜索</button>}</div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}

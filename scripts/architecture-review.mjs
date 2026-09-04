@@ -168,6 +168,7 @@ check("盯盘条件策略语义", ["price_change", "volume_spike", "technical", 
 check("CAP 测试主动取消", developerPanel.includes("停止测试") && developerPanel.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && integrations.includes("marketcode = \"212001\", options = {}") && integrations.includes("{ ...options, method") && prd.includes("Stage 3EI CAP 调用测试主动取消"), "开发面板的长耗时能力测试必须可主动取消，取消后不得提交迟到结果或误报失败");
 
 check("CAP 目录加载主动取消", developerPanel.includes("停止加载") && developerPanel.includes("directoryController") && developerPanel.includes("directoryGeneration") && developerPanel.includes("signal: controller.signal") && prd.includes("Stage 3EJ 能力目录加载主动取消与重试"), "动态能力目录 Search 必须支持本地停止、重试和迟到响应隔离，不得阻塞本地调试或覆盖已有目录");
+check("自选快速筛选", watchlistSidebar.includes("搜索自选") && watchlistSidebar.includes("filterQuery") && watchlistSidebar.includes("清除自选搜索") && watchlistSidebar.includes("category") && watchlistSidebar.includes("market") && prd.includes("Stage 3EK 自选快速筛选"), "自选侧栏必须支持本地名称/代码/分类/市场/分组筛选，显示命中数量并提供可访问清除，不触发网络请求或误导性重排");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

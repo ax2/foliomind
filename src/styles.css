@@ -293,6 +293,56 @@ textarea:focus-visible {
   font-size: 10px;
   line-height: 1.35;
 }
+.watchlist-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  margin: 4px 10px 0;
+  padding: 0 8px;
+  border: 1px solid #dfe3e9;
+  border-radius: 7px;
+  background: #fff;
+  color: #8b94a1;
+}
+.watchlist-search-wrap:focus-within {
+  border-color: #9fc5f5;
+  box-shadow: 0 0 0 2px rgba(43, 108, 176, .08);
+  color: var(--blue);
+}
+.watchlist-search-wrap input {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: #3f4a59;
+  font-size: 11px;
+}
+.watchlist-search-wrap input::-webkit-search-cancel-button { appearance: none; }
+.watchlist-search-wrap input::placeholder { color: #9aa3af; }
+.watchlist-search-clear {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: #8b94a1;
+  background: transparent;
+  cursor: pointer;
+}
+.watchlist-search-clear:hover,
+.watchlist-search-clear:focus-visible { color: var(--blue); background: #edf5ff; }
+.watchlist-search-result {
+  margin: 3px 10px 0;
+  color: #6f7a89;
+  font-size: 10px;
+}
 .watch-groups {
   overflow: auto;
   padding-top: 7px;
