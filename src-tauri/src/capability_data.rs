@@ -421,19 +421,18 @@ fn status_code_at(value: &Value, depth: usize) -> Option<u16> {
     if depth > MAX_ENVELOPE_DEPTH {
         return None;
     }
-    let Some(object) = value.as_object() else {
-        return None;
-    };
+    let object = value.as_object()?;
     for key in ["status_code", "statusCode", "http_status", "httpStatus"] {
         if let Some(status) = object.get(key).and_then(numeric_status) {
             return Some(status);
         }
     }
     for key in ENVELOPE_KEYS {
-        if let Some(nested) = object.get(key) {
-            if let Some(status) = status_code_at(nested, depth + 1) {
-                return Some(status);
-            }
+        if let Some(status) = object
+            .get(key)
+            .and_then(|nested| status_code_at(nested, depth + 1))
+        {
+            return Some(status);
         }
     }
     None
