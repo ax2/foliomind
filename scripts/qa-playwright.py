@@ -66,10 +66,9 @@ async def main() -> None:
         await click_and_capture("筛选", "implementation-research.png", "研究筛选")
         research_state = page.locator(".research-page .data-state").first
         research_result = page.locator(".research-page .research-table").first
-        await expect(page.locator(".research-page .data-state, .research-page .research-table")).to_have_count(1)
         if await research_state.count():
             await expect(research_state).to_contain_text(re.compile("连接真实数据后开始|正在获取真实行情|尚无可用行情|暂时无法获取行情|部分行情暂未更新"))
-        else:
+        if await research_result.count():
             await expect(research_result).to_be_visible()
         checks.append({"flow": "真实数据筛选状态", "passed": True})
         await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")

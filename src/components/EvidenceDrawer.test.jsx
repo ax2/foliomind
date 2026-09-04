@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
 
 describe("EvidenceDrawer", () => {
@@ -34,5 +35,31 @@ describe("EvidenceDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新获取当前行情" }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps keyboard focus in the drawer and restores the trigger", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return <>
+        <button type="button" onClick={() => setOpen(true)}>打开行情证据</button>
+        <EvidenceDrawer open={open} onClose={() => setOpen(false)} onRefresh={vi.fn()} quote={null} symbol="AAPL" />
+      </>;
+    }
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "打开行情证据" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const drawer = screen.getByRole("dialog", { name: "行情证据" });
+    const buttons = screen.getAllByRole("button");
+    const refresh = screen.getByRole("button", { name: "重新获取当前行情" });
+    refresh.focus();
+    fireEvent.keyDown(refresh, { key: "Tab" });
+    expect(buttons.find((button) => button.getAttribute("aria-label") === "关闭行情证据")).toHaveFocus();
+    const close = screen.getByRole("button", { name: "关闭行情证据" });
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(refresh).toHaveFocus();
+    fireEvent.keyDown(drawer, { key: "Escape" });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(trigger).toHaveFocus();
   });
 });

@@ -25,10 +25,40 @@ function evidenceState(quote) {
 
 export function EvidenceDrawer({ open, onClose, quote, symbol, name, market = "", provider, channel, lastRefreshAt, loading = false, onRefresh, refreshLabel = "重新获取当前行情" }) {
   const closeButton = useRef(null);
+  const drawerRef = useRef(null);
+  const returnFocusRef = useRef(null);
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      const target = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (target?.isConnected) window.requestAnimationFrame(() => target.focus());
+      return undefined;
+    }
+    const active = document.activeElement;
+    returnFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
     closeButton.current?.focus();
-    const onKeyDown = (event) => { if (event.key === "Escape") onClose?.(); };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const drawer = drawerRef.current;
+      if (!drawer) return;
+      const focusable = [...drawer.querySelectorAll("button, input, select, textarea, a[href], [tabindex]:not([tabindex=\"-1\"])")]
+        .filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
@@ -39,7 +69,7 @@ export function EvidenceDrawer({ open, onClose, quote, symbol, name, market = ""
   const available = EVIDENCE_FIELDS.filter(([key]) => quote?.[key] != null && quote?.[key] !== "");
   const missing = EVIDENCE_FIELDS.filter(([key]) => quote?.[key] == null || quote?.[key] === "");
   return <div className="evidence-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
-    <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-drawer-title">
+    <aside ref={drawerRef} className="evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-drawer-title">
       <header className="evidence-drawer-heading">
         <div><span className="evidence-icon"><ShieldCheck size={20} /></span><div><h2 id="evidence-drawer-title">行情证据</h2><p>{name || symbol} · {symbol}</p></div></div>
         <button ref={closeButton} type="button" className="icon-button" aria-label="关闭行情证据" onClick={onClose}><X size={18} /></button>
