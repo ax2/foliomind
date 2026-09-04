@@ -61,9 +61,7 @@ fn cached_data(key: &str, ttl: Duration) -> Option<Value> {
     let Ok(mut entries) = cache().lock() else {
         return None;
     };
-    let Some(entry) = entries.get(key) else {
-        return None;
-    };
+    let entry = entries.get(key)?;
     if entry.stored_at.elapsed() >= ttl {
         entries.remove(key);
         return None;
