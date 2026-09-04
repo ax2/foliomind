@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 const MAX_RESPONSE_SIZE: u64 = 20_480;
 const MAX_CACHE_ENTRIES: usize = 128;
+const MAX_RETRY_ATTEMPTS: usize = 1;
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 
 struct CacheEntry {
     data: Value,
@@ -48,6 +50,19 @@ fn cache_key(base_url: &str, kind: &str, params: &Value) -> String {
 
 fn today_in_shanghai(now: DateTime<Utc>) -> chrono::NaiveDate {
     now.with_timezone(&Shanghai).date_naive()
+}
+
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504)
+}
+
+fn retry_delay(attempt: usize, retry_after: Option<&str>) -> Duration {
+    let server_delay = retry_after
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| Duration::from_secs(seconds).min(MAX_RETRY_AFTER));
+    server_delay.unwrap_or_else(|| {
+        Duration::from_millis(500_u64.saturating_mul(1_u64 << attempt.min(4))).min(MAX_RETRY_AFTER)
+    })
 }
 
 fn has_usable_data(value: &Value) -> bool {
@@ -467,18 +482,34 @@ fn execute(
         "respond_with": "full",
     });
     let mut last_status = 502;
-    for attempt in 0..=1 {
-        let response = client
-            .post(&url)
-            .bearer_auth(api_key)
-            .json(&request)
-            .send()
-            .map_err(|_| "金融数据渠道连接失败")?;
+    for attempt in 0..=MAX_RETRY_ATTEMPTS {
+        let response = match client.post(&url).bearer_auth(api_key).json(&request).send() {
+            Ok(response) => response,
+            Err(error) => {
+                if attempt < MAX_RETRY_ATTEMPTS && (error.is_timeout() || error.is_connect()) {
+                    thread::sleep(retry_delay(attempt, None));
+                    continue;
+                }
+                return Err("金融数据渠道连接失败".into());
+            }
+        };
         let status = response.status().as_u16();
         last_status = status;
-        let body = response
-            .json::<Value>()
-            .map_err(|_| "金融数据渠道返回内容无法解析")?;
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = match response.json::<Value>() {
+            Ok(body) => body,
+            Err(_) => {
+                if attempt < MAX_RETRY_ATTEMPTS && retryable_status(status) {
+                    thread::sleep(retry_delay(attempt, retry_after.as_deref()));
+                    continue;
+                }
+                return Err("金融数据渠道返回内容无法解析".into());
+            }
+        };
         let nested_status = body
             .pointer("/result/status_code")
             .or_else(|| body.get("status_code"))
@@ -500,8 +531,8 @@ fn execute(
                 ),
             ));
         }
-        if attempt == 0 && matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504) {
-            thread::sleep(Duration::from_millis(500));
+        if attempt < MAX_RETRY_ATTEMPTS && retryable_status(status) {
+            thread::sleep(retry_delay(attempt, retry_after.as_deref()));
             continue;
         }
         let reason = if matches!(status, 401 | 403) {
@@ -614,6 +645,16 @@ mod tests {
             .with_timezone(&Utc);
         assert_eq!(today_in_shanghai(before_midnight).to_string(), "2026-09-03");
         assert_eq!(today_in_shanghai(after_midnight).to_string(), "2026-09-04");
+    }
+
+    #[test]
+    fn retries_only_transient_statuses_and_honors_bounded_retry_after() {
+        assert!(retryable_status(429));
+        assert!(retryable_status(503));
+        assert!(!retryable_status(400));
+        assert_eq!(retry_delay(0, Some("2")), Duration::from_secs(2));
+        assert_eq!(retry_delay(0, Some("999")), MAX_RETRY_AFTER);
+        assert_eq!(retry_delay(0, Some("invalid")), Duration::from_millis(500));
     }
 
     #[test]
