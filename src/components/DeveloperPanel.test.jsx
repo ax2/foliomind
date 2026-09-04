@@ -8,7 +8,7 @@ const host = vi.hoisted(() => ({
   loadDeveloperOverview: vi.fn().mockResolvedValue({ logs: [{ id: "1", at: "2026-08-29T03:00:00Z", method: "POST", path: "/api/data/query", status: 200, durationMs: 42 }], state: { activeRequest: false, keyPrefix: "cap_demo…", settings: { modelId: "model-a" }, toolCache: [{ kind: "quote" }] }, variables: { toolCacheEnabled: true, requestTimeoutMs: 120000, maxConcurrentDataRequests: 1, logLevel: "info" } }),
   updateDeveloperVariables: vi.fn().mockResolvedValue({ variables: { toolCacheEnabled: false, requestTimeoutMs: 120000, maxConcurrentDataRequests: 1, logLevel: "info" } }),
 }));
-vi.mock("../lib/localHost.js", () => ({ ...host, isLocalWebRuntime: () => true }));
+vi.mock("../lib/localHost.js", () => ({ ...host, LOCAL_HOST_ABORTED: "LOCAL_HOST_ABORTED", isLocalWebRuntime: () => true }));
 import { capabilityTestOutcome, capabilityToolSchema, DeveloperPanel, desktopCostSummary, normalizeCost } from "./DeveloperPanel.jsx";
 
 describe("DeveloperPanel", () => {
@@ -56,7 +56,7 @@ describe("DeveloperPanel", () => {
     expect(screen.getByText("当前支持的金融能力（CAP）")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "测试标的" }), { target: { value: "aapl" } });
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" })[0]);
-    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ kind: "quote", symbol: "AAPL" }));
+    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ kind: "quote", symbol: "AAPL" }, expect.objectContaining({ signal: expect.any(AbortSignal), timeoutMs: 45_000 })));
     expect(await screen.findByText(/测试成功/)).toBeInTheDocument();
   });
 
@@ -78,7 +78,7 @@ describe("DeveloperPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "加载完整目录" }));
     expect(await screen.findByText("RSI")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
-    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "600519", period: 14 } }));
+    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "600519", period: 14 } }, expect.objectContaining({ signal: expect.any(AbortSignal), timeoutMs: 45_000 })));
   });
 
   it("allows discovered CAP parameters to be edited and rejects invalid JSON locally", async () => {
@@ -90,7 +90,7 @@ describe("DeveloperPanel", () => {
     const parameters = screen.getByRole("textbox", { name: "RSI 测试参数" });
     fireEvent.change(parameters, { target: { value: '{"symbol":"AAPL","period":7}' } });
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
-    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "AAPL", period: 7 } }));
+    await waitFor(() => expect(host.testCapability).toHaveBeenCalledWith({ toolId: "qveris_finance.analytics_rsi", searchId: "srch_demo", parameters: { symbol: "AAPL", period: 7 } }, expect.objectContaining({ signal: expect.any(AbortSignal), timeoutMs: 45_000 })));
 
     fireEvent.change(parameters, { target: { value: "{" } });
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" }).at(-1));
@@ -104,6 +104,28 @@ describe("DeveloperPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
     fireEvent.click(screen.getAllByRole("button", { name: "调用测试" })[0]);
     expect(await screen.findByText("调用成功，但没有返回可识别的真实行情")).toBeInTheDocument();
+    expect(screen.queryByText(/测试成功：/)).not.toBeInTheDocument();
+  });
+
+  it("allows a slow local capability test to be stopped without committing its late result", async () => {
+    let resolveTest;
+    host.testCapability.mockImplementationOnce((_input, options = {}) => new Promise((resolve, reject) => {
+      resolveTest = resolve;
+      options.signal?.addEventListener("abort", () => {
+        const error = new Error("本次本地数据请求已取消");
+        error.name = "AbortError";
+        error.code = "LOCAL_HOST_ABORTED";
+        reject(error);
+      }, { once: true });
+    }));
+    render(<DeveloperPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
+    const testButton = (await screen.findAllByRole("button", { name: "调用测试" }))[0];
+    fireEvent.click(testButton);
+    expect(await screen.findByRole("button", { name: "停止测试" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "停止测试" }));
+    expect(await screen.findByText("已停止本次测试，未提交迟到结果。")).toBeInTheDocument();
+    resolveTest?.({ data: { quotes: [{ symbol: "600519", price: 1 }] } });
     expect(screen.queryByText(/测试成功：/)).not.toBeInTheDocument();
   });
 

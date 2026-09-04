@@ -52,6 +52,15 @@ describe("integration client", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("qveris_trading_calendar", { date: "2026-08-31", marketcode: "212001" });
   });
 
+  it("forwards a local trading-calendar cancellation signal", async () => {
+    delete window.__TAURI_INTERNALS__;
+    localHost.isLocalWebRuntime.mockReturnValue(true);
+    localHost.localHostRequest.mockResolvedValue({ data: { isTradingDay: true } });
+    const controller = new AbortController();
+    await expect(queryTradingCalendar("2026-08-31", "212001", { signal: controller.signal, timeoutMs: 12_000 })).resolves.toMatchObject({ isTradingDay: true });
+    expect(localHost.localHostRequest).toHaveBeenCalledWith("/api/data/query", expect.objectContaining({ signal: controller.signal, timeoutMs: 12_000, method: "POST" }));
+  });
+
   it("queries fixed CAP data through the native Host", async () => {
     const input = { kind: "quote", symbol: "600519.SH", range: "" };
     tauri.invoke.mockResolvedValue({ data: { price: 1297.4 }, mode: "qveris-cap", audits: [] });
