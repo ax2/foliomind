@@ -42,6 +42,7 @@ describe("DeveloperPanel", () => {
     expect(capabilityTestOutcome(quote, { data: { quotes: [] } })).toEqual({ state: "empty", message: "调用成功，但没有返回可识别的真实行情" });
     expect(capabilityTestOutcome({ kind: "series" }, { data: { series: [] } })).toEqual({ state: "empty", message: "调用成功，但上游没有返回可展示数据" });
     expect(capabilityTestOutcome({ kind: "details" }, { result: { status_code: 503 } })).toEqual({ state: "error", error: "上游返回失败结果，请展开调用日志查看原因" });
+    expect(capabilityTestOutcome({ kind: "details" }, { result: { status_code: 200, success: true, message: "ok" } })).toEqual({ state: "empty", message: "调用成功，但上游没有返回可展示数据" });
   });
 
   it("keeps nested dynamic CAP tests truthful", () => {

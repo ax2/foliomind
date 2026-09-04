@@ -113,7 +113,14 @@ function hasRenderablePayload(payload) {
   const collectionKeys = ["quotes", "series", "events", "capitalFlow", "capital_flow", "news", "tradingDates", "trading_dates"];
   const collection = collectionKeys.find((key) => Object.hasOwn(payload, key));
   if (collection) return hasRenderablePayload(payload[collection]);
-  return Object.keys(payload).length > 0;
+  // A 2xx transport envelope can still contain only status/diagnostic
+  // metadata. Treat it as an honest empty result instead of claiming that the
+  // capability returned usable financial data.
+  const nonRenderableKeys = new Set([
+    "status_code", "statusCode", "http_status", "httpStatus", "success",
+    "message", "error", "error_message", "request_id", "requestId", "trace_id", "traceId", "_meta",
+  ]);
+  return Object.keys(payload).some((key) => !nonRenderableKeys.has(key));
 }
 
 /**
