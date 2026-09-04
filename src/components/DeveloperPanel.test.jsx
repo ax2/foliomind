@@ -44,6 +44,14 @@ describe("DeveloperPanel", () => {
     expect(capabilityTestOutcome({ kind: "details" }, { result: { status_code: 503 } })).toEqual({ state: "error", error: "上游返回失败结果，请展开调用日志查看原因" });
   });
 
+  it("keeps nested dynamic CAP tests truthful", () => {
+    const quote = { kind: "quote" };
+    expect(capabilityTestOutcome(quote, { success: true, result: { payload: { data: { quotes: [{ last_price: "1297.4" }] } } } })).toEqual({ state: "success" });
+    expect(capabilityTestOutcome(quote, { success: true, result: { payload: { data: { quotes: [] } } } })).toEqual({ state: "empty", message: "调用成功，但没有返回可识别的真实行情" });
+    expect(capabilityTestOutcome({ kind: "series" }, { success: true, result: { payload: { data: { bars: [{ date: "2026-09-05", close: 12 }] } } } })).toEqual({ state: "success" });
+    expect(capabilityTestOutcome({ kind: "details" }, { success: true, result: { payload: { statusCode: 503, data: { name: "不可用资料" } } } })).toEqual({ state: "error", error: "上游返回失败结果，请展开调用日志查看原因" });
+  });
+
   it("stays collapsed until opened and exposes redacted diagnostics", async () => {
     render(<DeveloperPanel />);
     expect(screen.queryByText(/\/api\/data\/query/)).not.toBeInTheDocument();

@@ -797,3 +797,12 @@ Review 结论应记录在对应 PR 或 Release notes 中，至少包含“继续
 - 现在 Rust 通道与前端盘前/Store 均沿 `data`、`payload`、`result` 白名单、最大深度 4 提取；桌面同时递归识别状态码和 `success=false`，前端兼容 `bars`、`rows`、`articles`、`items` 等领域列表。
 - 解析只改变只读 CAP 的本地边界，不改变 tool_id、参数、缓存、费用、取消/重试、模型权限或用户状态；任意调试对象不会被扫描，空/非法响应继续保持真实空态。
 - 后续风险：新 provider 的领域列表字段必须先加入共享白名单和跨端测试；若将原始 CAP 直接暴露给新的 Skill，仍需保持同一深度、来源和失败审计边界。
+
+### 最近一次专项 Review（2026-09-05 · Stage 3EV）
+
+结论：继续演进。
+
+- 发现开发面板的能力测试仍用 `result.data`、`result.result.data` 的浅层判断；动态 CAP 返回 `result.payload.data` 时，可能把包装对象误报为可用结果，或无法识别嵌套失败状态。
+- 现在固定 CAP、动态 CAP 和交易日历测试统一复用共享 `capabilityData`、`capabilityStatusCode`、`capabilityExplicitFailure`、`capabilityArray` 与 `firstQuoteRecord`。只有有限正价格才算行情测试成功，空集合与显式失败分别保持可解释状态。
+- 本次只改变开发面板的本地结果判定，不改变上游调用、费用、缓存、取消、目录授权、用户状态或日志脱敏；任意调试对象不会被递归扫描。
+- 后续风险：新增能力测试类型必须先定义其领域集合和空结果语义，不能以“响应对象非空”替代真实可用性判断。

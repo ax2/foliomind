@@ -4,6 +4,8 @@ import { clearDeveloperLogs, discoverCapabilities, isLocalWebRuntime, loadDevelo
 import { askPi, isDesktopRuntime } from "../lib/piRuntime.js";
 import { BUILTIN_CAPABILITIES } from "../lib/builtinCapabilities.js";
 import { queryCapabilityData, queryTradingCalendar } from "../lib/integrations.js";
+import { capabilityArray, capabilityData, capabilityExplicitFailure, capabilityStatusCode } from "../lib/capabilityEnvelope.js";
+import { firstQuoteRecord } from "../lib/quoteFormatting.js";
 
 function formatTime(value) {
   try { return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return "--:--:--"; }
@@ -102,7 +104,7 @@ function sampleParametersFor(capability, symbol) {
 }
 
 function responsePayload(result) {
-  return result?.data ?? result?.result?.data ?? result?.result ?? result;
+  return capabilityData(result);
 }
 
 function hasRenderablePayload(payload) {
@@ -121,16 +123,18 @@ function hasRenderablePayload(payload) {
  * working market data.
  */
 export function capabilityTestOutcome(capability, result) {
-  const nestedStatus = Number(result?.result?.status_code ?? result?.result?.statusCode ?? result?.status_code ?? result?.statusCode ?? 200);
-  if (result?.success === false || result?.result?.success === false || nestedStatus >= 400) return { state: "error", error: "上游返回失败结果，请展开调用日志查看原因" };
+  const nestedStatus = capabilityStatusCode(result) ?? 200;
+  if (capabilityExplicitFailure(result) || nestedStatus >= 400) return { state: "error", error: "上游返回失败结果，请展开调用日志查看原因" };
   const payload = responsePayload(result);
   if (capability?.kind === "quote") {
-    const quote = Array.isArray(payload?.quotes) ? payload.quotes.find((item) => Number.isFinite(Number(item?.price)) && Number(item.price) > 0) : payload;
-    if (quote && Number.isFinite(Number(quote.price)) && Number(quote.price) > 0) return { state: "success" };
+    const quote = firstQuoteRecord(payload);
+    if (quote) return { state: "success" };
     return { state: "empty", message: "调用成功，但没有返回可识别的真实行情" };
   }
   if (capability?.kind === "trading_calendar") {
-    if (Array.isArray(payload?.tradingDates)) return payload.tradingDates.length ? { state: "success" } : { state: "empty", message: "调用成功，但当前日期范围没有返回交易日" };
+    const dates = capabilityArray(payload, ["tradingDates", "trading_dates", "dates", "time"]);
+    if (dates.length) return { state: "success" };
+    if (payload && typeof payload === "object") return { state: "empty", message: "调用成功，但当前日期范围没有返回交易日" };
   }
   return hasRenderablePayload(payload) ? { state: "success" } : { state: "empty", message: "调用成功，但上游没有返回可展示数据" };
 }
