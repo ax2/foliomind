@@ -46,8 +46,8 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - FolioMind Agent 对话支持逐步显示 Pi 流式回答，可在应用内停止正在运行的分析，并以安全的 Markdown 展示标题、列表、表格、代码和来源链接，同时保留工具调用记录、数据截至时间与免责声明。
 - Tauri 2 Rust Host 管理 `pi --mode rpc` JSONL 子进程。
 - 固定并校验 Pi 0.84.2，桌面构建自动下载对应 Windows/macOS Runtime 并随安装包分发。
-- Run-scoped 数据执行桥，只向 Pi 暴露 Search、Inspect、Call 三阶段能力。
-- 内置金融研究 Skill；行情页面默认直连 QVeris CAP 的 `qveris_finance` 能力（`MKT.L1.RT`、`REF.COMPANY_PROFILE`、`FUNDAMENTALS.DERIVED_RATIOS`、`MKT.BARS.EOD`），本地保存稳定的 tool schema，缓存失效时才回退 Search → Inspect → Call。QVeris 适配器可替换为兼容的自托管服务。
+- Run-scoped 数据执行桥，只向 Pi 暴露固定金融 CAP，以及明确授权的 Search、Inspect、Call 发现能力。
+- 内置金融研究 Skill；行情页面默认直连 QVeris CAP 的 `qveris_finance` 能力（`MKT.L1.RT`、`REF.COMPANY_PROFILE`、`FUNDAMENTALS.DERIVED_RATIOS`、`MKT.BARS.EOD`），本地保存稳定的 tool schema，只有明确的能力缺失才回退 Search → Inspect → Call；认证、限流、超时和服务端错误不会追加发现调用。QVeris 适配器可替换为兼容的自托管服务。
 - 设置页可将数据服务 API Key 保存到系统凭据库、同步动态模型目录并选择 Pi 默认模型。
 - 设置页可在保存 API Key 后直接测试已保存的数据连接；探针只调用真实 quote CAP，不要求模型，并显示来源、数据时间和耗时。
 - 设置页可检查 GitHub 最新公开版本并直达发布页；安装包仍提供 SHA-256 校验，自动更新待平台签名密钥接入后启用。
@@ -71,10 +71,12 @@ Rust Host
     └─ run-scoped data executor capability
               │
               ▼
-       Pi runtime + reviewed Skills
-              │ search → inspect → call
+    Pi runtime + reviewed Skills
+              │ fixed CAP first
               ▼
        Configured data tools
+              │ explicit capability miss only
+              └─ Search → Inspect → Call fallback
 ```
 
 此项目不使用 `qveris-qlab` 架构。技术基线参考 ZiCode Studio Desktop 的 Tauri/Host/Pi 分层，但前端统一使用 React，且只保留金融客户端需要的边界。
@@ -108,9 +110,9 @@ Web 端本机调试不需要安装或启动桌面端。推荐用一个命令同�
 npm run web:dev
 ```
 
-浏览器打开终端打印的 Web 地址（默认 `http://127.0.0.1:5173`；端口被占用时会自动递增并打印新的地址）后，设置页会显示“本地开发 Host”。Dev Host 与桌面端共享同一套 Host HTTP 协议，并直接代理模型、Search → Inspect → Call 和对话，因此修改前端或 Host 逻辑后刷新页面即可验证，不需要重新安装桌面包。API Key 保存在用户配置目录下权限为 `0600` 的文件中，浏览器只持有当前标签页的短期会话令牌。
+浏览器打开终端打印的 Web 地址（默认 `http://127.0.0.1:5173`；端口被占用时会自动递增并打印新的地址）后，设置页会显示“本地开发 Host”。Dev Host 与桌面端共享同一套 Host HTTP 协议，并优先直连固定 CAP，仅在明确能力缺失时代理 Search → Inspect → Call 和对话，因此修改前端或 Host 逻辑后刷新页面即可验证，不需要重新安装桌面包。API Key 保存在用户配置目录下权限为 `0600` 的文件中，浏览器只持有当前标签页的短期会话令牌。
 
-本地 Web Host 会把 `qveris_finance` CAP 的 tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到用户配置目录的 `tool-selection-cache.json`。设置页可选择 `QVeris CAP` 或兼容相同 tool schema 的 CAP 网关，并填写受校验的 Provider ID；Web Host 与桌面端持久化同一套渠道配置，不同渠道使用隔离缓存。行情、基本面和历史序列优先直连 CAP；能力不可用时再回退到一次 Search → Inspect → Call。direct CAP 真实结果缓存最多保留 256 项，按最近使用顺序淘汰，命中会续期；过期条目立即移除，空结果和失败不会缓存。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待。固化工具只有收到明确的工具失效/不存在响应才会清除，瞬时限流、服务端错误和网络抖动会保留缓存。运行时同一时间只接受一轮对话请求，重复提交返回可识别的忙碌状态，不会互相覆盖取消控制器。价格异动盯盘也复用 CAP 行情工具，避免每次检查重新调用模型编排；本地 Web 自选行情默认以 4 路、桌面端默认以 2 路受限并发请求，开发面板仍可在 1–4 路之间调整。行情轮询会感知浏览器可见性。localhost 页面和桌面端右下角的“开发者面板”均可查看运行时、API Key 前缀、模型/CAP 调用日志、耗时和能力目录；密钥与原始提示词不会记录。
+本地 Web Host 会把 `qveris_finance` CAP 的 tool schema（tool_id、参数、返回字段、能力 ID、provider）保存到用户配置目录的 `tool-selection-cache.json`。设置页可选择 `QVeris CAP` 或兼容相同 tool schema 的 CAP 网关，并填写受校验的 Provider ID；Web Host 与桌面端持久化同一套渠道配置，不同渠道使用隔离缓存。行情、基本面和历史序列优先直连 CAP；只有明确的工具缓存缺失、能力不存在或 HTTP 404 才回退到一次 Search → Inspect → Call。认证、限流、超时、网络和服务端错误直接进入可恢复错误态，不追加发现调用。direct CAP 真实结果缓存最多保留 256 项，按最近使用顺序淘汰，命中会续期；过期条目立即移除，空结果和失败不会缓存。QVeris 数据调用和模型网关遇到 408/425/429/5xx 或可恢复网络错误时使用有界指数退避，并尊重上游 `Retry-After`；已取消的请求不会重试，取消请求会立即打断等待。固化工具只有收到明确的工具失效/不存在响应才会清除，瞬时限流、服务端错误和网络抖动会保留缓存。运行时同一时间只接受一轮对话请求，重复提交返回可识别的忙碌状态，不会互相覆盖取消控制器。价格异动盯盘也复用 CAP 行情工具，避免每次检查重新调用模型编排；本地 Web 自选行情默认以 4 路、桌面端默认以 2 路受限并发请求，开发面板仍可在 1–4 路之间调整。行情轮询会感知浏览器可见性。localhost 页面和桌面端右下角的“开发者面板”均可查看运行时、API Key 前缀、模型/CAP 调用日志、耗时和能力目录；密钥与原始提示词不会记录。
 
 如需验证真实 Tauri 窗口，再使用 `npm run desktop:dev`；这不是 Web 调试的前置条件。
 
@@ -161,10 +163,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 会在 `main` 的版本提交后自动运行，也支持手工触发；版本从 `package.json`、Cargo 和 Tauri 配置一致性校验中读取（当前为 `0.1.203`）。若同一版本已经正式发布，后续同版本提交会在准备阶段安全跳过，不重复构建或覆盖资产。发布会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 会在 `main` 的版本提交后自动运行，也支持手工触发；版本从 `package.json`、Cargo 和 Tauri 配置一致性校验中读取（当前为 `0.1.204`）。若同一版本已经正式发布，后续同版本提交会在准备阶段安全跳过，不重复构建或覆盖资产。发布会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.203 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.204 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

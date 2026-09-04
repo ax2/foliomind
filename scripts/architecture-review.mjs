@@ -42,6 +42,7 @@ const refreshPolicy = await load("src/lib/refreshPolicy.js");
 const activityRail = await load("src/components/ActivityRail.jsx");
 const hostLockTest = await load("scripts/local-host.test.mjs");
 const storeTest = await load("src/store/useLabStore.test.js");
+const financeSkill = await load("skills/qveris-finance-research/SKILL.md");
 const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
@@ -186,6 +187,7 @@ check("盯盘条件策略语义", ["price_change", "volume_spike", "technical", 
 check("CAP 测试主动取消", developerPanel.includes("停止测试") && developerPanel.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && integrations.includes("marketcode = \"212001\", options = {}") && integrations.includes("{ ...options, method") && prd.includes("Stage 3EI CAP 调用测试主动取消"), "开发面板的长耗时能力测试必须可主动取消，取消后不得提交迟到结果或误报失败");
 
 check("CAP 目录加载主动取消", developerPanel.includes("停止加载") && developerPanel.includes("directoryController") && developerPanel.includes("directoryGeneration") && developerPanel.includes("signal: controller.signal") && prd.includes("Stage 3EJ 能力目录加载主动取消与重试"), "动态能力目录 Search 必须支持本地停止、重试和迟到响应隔离，不得阻塞本地调试或覆盖已有目录");
+check("内置 Skill 固定 CAP 优先", financeSkill.includes("优先使用 `foliomind_data`") && financeSkill.includes("TOOL_CACHE_MISS") && financeSkill.includes("CAPABILITY_NOT_FOUND") && financeSkill.includes("认证失败、限流、超时、网络错误和 5xx 不得触发额外 Search") && financeSkill.includes("独立开源客户端") && readme.includes("只有明确的能力缺失才回退") && prd.includes("Stage 3FA 内置金融 Skill 固定 CAP 优先"), "内置金融 Skill 必须优先调用固定 CAP，仅在明确能力缺失时发现，文档需与运行时和独立项目定位一致");
 check("自选快速筛选", watchlistSidebar.includes("搜索自选") && watchlistSidebar.includes("filterQuery") && watchlistSidebar.includes("清除自选搜索") && watchlistSidebar.includes("category") && watchlistSidebar.includes("market") && prd.includes("Stage 3EK 自选快速筛选"), "自选侧栏必须支持本地名称/代码/分类/市场/分组筛选，显示命中数量并提供可访问清除，不触发网络请求或误导性重排");
 check("导航未读提示可访问性", activityRail.includes("条未读") && activityRail.includes('aria-hidden="true"') && prd.includes("Stage 3EL 导航未读提示可访问性"), "消息导航必须提供稳定的未读语义名称，视觉徽标不得被读屏重复朗读");
 check("站内消息交互语义隔离", settingsView.includes("function NotificationCard") && settingsView.includes('className="notification-main"') && settingsView.includes('role="button"') && settingsView.includes("notification-item-actions") && appTest.includes("keeps notification actions outside the interactive message surface") && prd.includes("Stage 3EM 站内消息交互语义隔离"), "消息卡片容器不得承载 role=button 并嵌套子按钮，整卡阅读与查看标的/盯盘操作必须保持独立焦点和事件边界");

@@ -2527,3 +2527,16 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 - CAP 缓存键包含 endpoint、channel、provider、能力类型和参数，避免相同 endpoint 下不同渠道的结果串用；不改变凭据、费用审计、Search 回退和权限边界。
 
 **验收标准**：Web 与桌面设置页可读取、编辑并保存渠道/provider，重启后值保持；非法空格、控制字符、超长或路径字符被拒绝；切换渠道不会命中旧缓存并会自动重试真实数据；Node/Rust 单测、架构审查、构建、安全审计和发布前 Web QA 通过。
+
+### Stage 3FA 内置金融 Skill 固定 CAP 优先（本轮增量）
+
+**目标**：让 Agent、盯盘和页面数据链路遵循同一套固化 CAP 优先策略，避免每次请求无条件执行 Search → Inspect → Call，降低延迟、费用和因模型猜测工具参数造成的失败。
+
+**范围与边界**：
+
+- 内置 `qveris-finance-research` Skill 首先调用 `foliomind_data` 的已审核 kind（行情、详情、序列、事件、资金流、舆情、市场新闻、指数和商品），只使用稳定参数与返回字段，不向模型暴露凭据、端点或内部会话字段。
+- 仅当固定 CAP 返回明确的 `TOOL_CACHE_MISS`、`CAPABILITY_NOT_FOUND` 或 HTTP 404 能力缺失信号时，才允许进入 Search → Inspect → Call；认证失败、限流、超时、网络错误、5xx、空数组和缺失字段不触发额外发现调用。
+- Skill 文档必须明确 FolioMind 是独立开源客户端，不代表 QVeris 官方项目；所有结果继续要求来源、时间口径、缓存状态、费用和免责声明，缺失数据保持空态。
+- 本阶段只收敛 Skill 指令与架构门禁，不改变 CAP tool_id、参数 schema、用户状态、缓存、费用提取、取消协议或已审核工具白名单。
+
+**验收标准**：内置 Skill 在固定能力可用时直接调用 `foliomind_data`；明确能力缺失才触发发现流程；瞬时错误、空结果不会追加 Search 或重复计费；Skill、README、架构文档和静态审查保持一致；Node 单测、架构审查、构建、安全审计和发布前 Web QA 通过。
