@@ -927,8 +927,10 @@ mod tests {
         let base = "https://example.test/api/v1";
         let params = json!({"symbol": "600519"});
         let qveris = scoped_cache_key(base, "qveris-cap", "qveris_finance", "quote", &params);
-        let alternate_channel = scoped_cache_key(base, "cap-compatible", "qveris_finance", "quote", &params);
-        let alternate_provider = scoped_cache_key(base, "qveris-cap", "custom_finance", "quote", &params);
+        let alternate_channel =
+            scoped_cache_key(base, "cap-compatible", "qveris_finance", "quote", &params);
+        let alternate_provider =
+            scoped_cache_key(base, "qveris-cap", "custom_finance", "quote", &params);
         assert_ne!(qveris, alternate_channel);
         assert_ne!(qveris, alternate_provider);
     }
