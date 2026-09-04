@@ -167,6 +167,8 @@ check("跨端盘前摘要自动调度", briefingSchedule.includes("premarketSlot
 check("盯盘条件策略语义", ["price_change", "volume_spike", "technical", "core_event", "capital_flow", "sentiment"].every((id) => monitorConditions.includes(`id: "${id}"`)) && strategies.includes('id: "technical"') && strategies.includes('id: "core_event"') && strategies.includes('id: "capital_flow"') && strategies.includes('id: "sentiment"') && prd.includes("Stage 3EH 盯盘条件与运行策略语义对齐"), "六类盯盘条件必须在编辑器、真实数据字段和运行策略中保持同一语义，并兼容旧 news_risk 规则");
 check("CAP 测试主动取消", developerPanel.includes("停止测试") && developerPanel.includes("LOCAL_HOST_ABORTED") && localHostClient.includes("options.signal") && integrations.includes("marketcode = \"212001\", options = {}") && integrations.includes("{ ...options, method") && prd.includes("Stage 3EI CAP 调用测试主动取消"), "开发面板的长耗时能力测试必须可主动取消，取消后不得提交迟到结果或误报失败");
 
+check("CAP 目录加载主动取消", developerPanel.includes("停止加载") && developerPanel.includes("directoryController") && developerPanel.includes("directoryGeneration") && developerPanel.includes("signal: controller.signal") && prd.includes("Stage 3EJ 能力目录加载主动取消与重试"), "动态能力目录 Search 必须支持本地停止、重试和迟到响应隔离，不得阻塞本地调试或覆盖已有目录");
+
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
 if (failed.length) process.exitCode = 1;

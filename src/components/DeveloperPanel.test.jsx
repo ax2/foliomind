@@ -129,6 +129,28 @@ describe("DeveloperPanel", () => {
     expect(screen.queryByText(/测试成功：/)).not.toBeInTheDocument();
   });
 
+  it("allows a slow live directory load to be stopped and retried", async () => {
+    host.discoverCapabilities.mockClear();
+    host.discoverCapabilities.mockImplementationOnce((_input, options = {}) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener("abort", () => {
+        const error = new Error("目录加载已取消");
+        error.name = "AbortError";
+        error.code = "LOCAL_HOST_ABORTED";
+        reject(error);
+      }, { once: true });
+    }));
+    render(<DeveloperPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
+    fireEvent.click(screen.getByRole("button", { name: "加载完整目录" }));
+    expect(await screen.findByRole("button", { name: "停止加载" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "停止加载" }));
+    expect(await screen.findByText("已停止目录加载，可稍后重新尝试")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "加载完整目录" }));
+    expect(await screen.findByText("RSI")).toBeInTheDocument();
+    expect(host.discoverCapabilities).toHaveBeenCalledTimes(2);
+    expect(host.discoverCapabilities.mock.calls[0][1]).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal), timeoutMs: 30_000 }));
+  });
+
   it("filters the capability workbench by stable ids and shows a recoverable empty state", async () => {
     render(<DeveloperPanel />);
     fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
