@@ -69,6 +69,43 @@ export function normalizePremarketEvents(value, { symbol = "", name = "" } = {})
     .slice(0, MAX_EVENTS);
 }
 
+export function normalizePremarketMarketNews(value) {
+  const source = unwrap(value);
+  const rows = Array.isArray(source) ? source : arrayField(source, ["news", "articles", "items", "data"]);
+  return rows.map((item) => ({
+    title: text(item?.title || item?.headline || item?.name || item?.description, 256),
+    summary: text(item?.summary || item?.description || item?.content, 1_000),
+    publishedAt: text(item?.publishedAt || item?.published_at || item?.date || item?.timestamp, 128),
+    source: text(item?.source || item?.sourceName || item?.source_name || item?.publisher || "数据服务", 128),
+    url: safeExternalUrl(item?.url || item?.link),
+    symbol: text(item?.symbol || item?.code, 64).toUpperCase(),
+  })).filter((item) => item.title || item.summary).slice(0, MAX_NEWS);
+}
+
+export function normalizePremarketIndices(value) {
+  const source = unwrap(value);
+  const rows = Array.isArray(source) ? source : arrayField(source, ["indices", "data", "items"]);
+  return rows.map((item) => ({
+    title: text(item?.name || item?.index_name || item?.symbol || "海外指数", 128),
+    detail: [item?.price ?? item?.last ?? item?.close, item?.change_percent ?? item?.changePercent, item?.timestamp || item?.as_of || item?.time].filter((value) => value != null && value !== "").join(" · "),
+    date: text(item?.timestamp || item?.as_of || item?.time, 128),
+    source: text(item?.source || "数据服务", 128),
+    symbol: text(item?.symbol || item?.code, 64).toUpperCase(),
+  })).filter((item) => item.title || item.detail).slice(0, 20);
+}
+
+export function normalizePremarketCommodities(value) {
+  const source = unwrap(value);
+  const rows = Array.isArray(source) ? source : arrayField(source, ["commodities", "data", "items"]);
+  return rows.map((item) => ({
+    title: text(item?.commodity_name || item?.name || item?.symbol || "大宗商品", 128),
+    detail: [item?.price ?? item?.value ?? item?.close, item?.change ?? item?.change_percent, item?.unit || item?.currency].filter((value) => value != null && value !== "").join(" · "),
+    date: text(item?.date || item?.timestamp || item?.time, 128),
+    source: text(item?.source || "数据服务", 128),
+    symbol: text(item?.symbol, 64).toUpperCase(),
+  })).filter((item) => item.title || item.detail).slice(0, 20);
+}
+
 function unique(items, key) {
   return [...new Map(items.map((item) => [key(item), item])).values()];
 }
@@ -82,7 +119,7 @@ function section(id, title, items, emptyCopy) {
  * caller. This is deliberately a data aggregation contract, not an AI
  * prediction: unsupported sections remain explicit empty states.
  */
-export function buildPremarketBriefing({ positions = [], newsBySymbol = {}, events = [], createdAt = new Date().toISOString(), id = "" } = {}) {
+export function buildPremarketBriefing({ positions = [], newsBySymbol = {}, events = [], industryNews = [], macroNews = [], overseas = [], createdAt = new Date().toISOString(), id = "" } = {}) {
   const held = (Array.isArray(positions) ? positions : []).map((position) => ({
     symbol: text(position?.symbol, 64).toUpperCase(),
     symbolKey: quoteSymbolKey(position?.symbol),
@@ -113,11 +150,11 @@ export function buildPremarketBriefing({ positions = [], newsBySymbol = {}, even
     id: text(id || `premarket-${createdAt}`, 128), kind: "premarket", createdAt: text(createdAt, 64), asOf: latest,
     sections: {
       holdings: section("holdings", "持仓公告与事件", [...holdingNews, ...holdingEvents], "当前持仓暂无已返回的公告或排期事件。"),
-      industry: section("industry", "行业动态", [], "暂未接入独立行业动态能力，不显示推测内容。"),
-      macro: section("macro", "宏观事件", [], "暂未接入独立宏观事件能力，不显示推测内容。"),
-      overseas: section("overseas", "隔夜外盘", [], "暂未接入独立外盘能力，不显示推测内容。"),
+      industry: section("industry", "行业动态", industryNews, "当前没有返回可展示的行业新闻。"),
+      macro: section("macro", "宏观事件", macroNews, "当前没有返回可展示的宏观新闻。"),
+      overseas: section("overseas", "隔夜外盘", overseas, "当前没有返回可展示的外盘或大宗商品数据。"),
     },
-    sources: unique([...holdingNews, ...holdingEvents].map((item) => item.source).filter(Boolean), (item) => item).slice(0, 12),
+    sources: unique([...holdingNews, ...holdingEvents, ...industryNews, ...macroNews, ...overseas].map((item) => item.source).filter(Boolean), (item) => item).slice(0, 12),
     disclaimer: "本摘要仅整理已返回的真实数据，不构成投资建议或交易指令。",
   };
 }

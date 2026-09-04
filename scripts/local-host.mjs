@@ -12,7 +12,7 @@ const MAX_BODY = 512 * 1024;
 const DEFAULT_CAPABILITY = "https://qveris.ai/api/v1";
 const DEFAULT_GATEWAY = "https://aigateway.qveris.ai/v1";
 export const DEFAULT_DATA_PROVIDER = "qveris_finance";
-export const CAPABILITY_CATALOG_VERSION = 2;
+export const CAPABILITY_CATALOG_VERSION = 3;
 const BRIDGE_LIMIT = 20;
 const CAPABILITY_DIRECTORY_LIMIT = 100;
 export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
@@ -71,6 +71,9 @@ const DIRECT_DATA_CACHE_TTL_MS = Object.freeze({
   core_event: 300_000,
   capital_flow: 60_000,
   sentiment: 60_000,
+  market_news: 60_000,
+  index_levels: 30_000,
+  commodity: 60_000,
   trading_calendar: 12 * 60 * 60_000,
 });
 const directDataCache = new Map();
@@ -457,6 +460,9 @@ export const BUILTIN_CAPABILITY_CATALOG = Object.freeze({
   core_event: { toolId: "qveris_finance.event_calendar_corp", capability: "EVENT.CALENDAR.CORP", description: "上市公司分红、拆股、股东会等已排期事件", parameters: { symbol: "string", event_type: "string?", start_date: "string?", end_date: "string?" }, returns: ["date", "event_type", "description", "ratio", "symbol"], coverage: "已验证 corporate calendar；不等同于公告全文或限售解禁日历" },
   capital_flow: { toolId: "qveris_finance.flow_large_order", capability: "FLOW.LARGE_ORDER", description: "按订单规模拆分的个股资金流", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["symbol", "date", "super_large_net", "large_net", "medium_net", "small_net", "main_net", "net_flow"], coverage: "已验证个股大单资金流；空交易日保持缺失" },
   sentiment: { toolId: "qveris_finance.news_fin_tagged", capability: "NEWS.FIN.TAGGED", description: "带主题与情绪标签的财经新闻", parameters: { symbol: "string", start_date: "string?", end_date: "string?" }, returns: ["title", "url", "published_at", "source", "summary", "sentiment_label", "sentiment_score"], coverage: "已验证按标的新闻；市场范围过滤暂不透传，避免上游参数映射错误" },
+  market_news: { toolId: "qveris_finance.news_fin_realtime", capability: "NEWS.FIN.REALTIME", description: "实时财经新闻流，可按行业或宏观关键词查询", parameters: { query: "string", category: "string?", start_date: "string?", end_date: "string?", limit: "integer?" }, returns: ["title", "summary", "source", "published_at", "url", "symbol"], coverage: "仅展示上游实际返回的新闻；关键词未命中时保持空态" },
+  index_levels: { toolId: "qveris_finance.index_levels", capability: "INDEX.LEVELS", description: "海外主要股票指数实时或延迟点位", parameters: { query: "string?", symbol: "string?", market: "string?", interval: "string?" }, returns: ["symbol", "name", "price", "change", "change_percent", "timestamp"], coverage: "按 QVeris 实际覆盖返回；无点位时不显示示例数据" },
+  commodity: { toolId: "qveris_finance.macro_commodity_benchmark", capability: "MACRO.COMMODITY.BENCHMARK", description: "原油、黄金等大宗商品基准价格", parameters: { commodity_name: "string?", symbol: "string?", start_date: "string?", end_date: "string?", frequency: "string?" }, returns: ["commodity_name", "symbol", "price", "change", "unit", "date"], coverage: "仅展示上游实际返回的基准价格；数据缺失时保持空态" },
   trading_calendar: { toolId: "cn_financial_pro.trade_dates.v1", provider: "cn_financial_pro", capability: "REF.EXCHANGE_CALENDAR", description: "按交易所查询真实交易日期，用于休市日门禁", parameters: { marketcode: "string", startdate: "string", enddate: "string" }, returns: ["time"], coverage: "已验证 SSE/SZSE/HKEX/CFFEX；只判断是否交易，不解释休市原因" },
 });
 
@@ -523,6 +529,9 @@ function directCapabilityParameters(kind, input) {
     const date = String(input?.date || input?.startdate || input?.start_date || end.toISOString().slice(0, 10));
     return { marketcode: String(input?.marketcode || "212001"), startdate: date, enddate: String(input?.enddate || input?.end_date || date), mode: 1, date_type: 0, period: "D", date_format: 0 };
   }
+  if (kind === "market_news") return { query: String(input?.query || "").trim(), ...(input?.category ? { category: String(input.category) } : {}), ...dates, limit: Math.min(20, Math.max(1, Number(input?.limit) || 10)) };
+  if (kind === "index_levels") return { ...(input?.query ? { query: String(input.query) } : {}), ...(input?.symbol ? { symbol: String(input.symbol).trim().toUpperCase() } : {}), ...(input?.market ? { market: String(input.market) } : {}), interval: String(input?.interval || "tick") };
+  if (kind === "commodity") return { ...((input?.commodity_name || input?.commodityName) ? { commodity_name: String(input.commodity_name || input.commodityName) } : {}), ...(input?.symbol ? { symbol: String(input.symbol) } : {}), ...dates, frequency: String(input?.frequency || "daily") };
   if (["series", "core_event", "capital_flow", "sentiment"].includes(kind)) return { symbol, ...dates, ...(kind === "core_event" && input?.event_type ? { event_type: String(input.event_type) } : {}), ...(kind === "sentiment" && input?.query ? { query: String(input.query) } : {}) };
   return { symbol };
 }
@@ -608,6 +617,24 @@ export function normalizeCapabilityResult(kind, input, result) {
     const latest = [...news].sort((left, right) => String(right.publishedAt).localeCompare(String(left.publishedAt)))[0] || null;
     const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
     return { news, sentiment: available ? latest?.sentiment ?? null : null, sentimentScore: available ? latest?.sentimentScore ?? null : null, source, capability: "NEWS.FIN.TAGGED", asOf: latest?.publishedAt || null, dataStatus: available && news.length ? "success" : "empty" };
+  }
+  if (kind === "market_news") {
+    const items = Array.isArray(data) ? data : Array.isArray(data?.news) ? data.news : Array.isArray(data?.articles) ? data.articles : Array.isArray(data?.data) ? data.data : [];
+    const news = items.filter((item) => item && typeof item === "object").map((item) => ({ ...item, title: String(item.title || item.headline || item.name || ""), summary: String(item.summary || item.description || item.content || ""), publishedAt: String(item.published_at || item.publishedAt || item.date || item.timestamp || ""), sourceName: String(item.source || item.source_name || item.publisher || ""), url: String(item.url || item.link || "") })).filter((item) => item.title || item.summary);
+    const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
+    return { news, source, capability: "NEWS.FIN.REALTIME", asOf: news.map((item) => item.publishedAt).filter(Boolean).sort().at(-1) || null, dataStatus: available && news.length ? "success" : "empty" };
+  }
+  if (kind === "index_levels") {
+    const rows = Array.isArray(data) ? data : Array.isArray(data?.indices) ? data.indices : Array.isArray(data?.data) ? data.data : data && typeof data === "object" ? [data] : [];
+    const indices = rows.filter((row) => row && typeof row === "object").map((row) => ({ ...row, symbol: String(row.symbol || row.code || ""), name: String(row.name || row.index_name || row.symbol || "海外指数"), price: row.price ?? row.last ?? row.close ?? null, change: row.change ?? null, changePercent: row.change_percent ?? row.changePercent ?? null, timestamp: String(row.timestamp || row.as_of || row.time || "") })).filter((row) => row.symbol || Number.isFinite(Number(row.price)));
+    const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
+    return { indices, source, capability: "INDEX.LEVELS", asOf: indices.map((item) => item.timestamp).filter(Boolean).sort().at(-1) || null, dataStatus: available && indices.length ? "success" : "empty" };
+  }
+  if (kind === "commodity") {
+    const rows = Array.isArray(data) ? data : Array.isArray(data?.commodities) ? data.commodities : Array.isArray(data?.data) ? data.data : data && typeof data === "object" ? [data] : [];
+    const commodities = rows.filter((row) => row && typeof row === "object").map((row) => ({ ...row, name: String(row.commodity_name || row.name || row.symbol || "大宗商品"), symbol: String(row.symbol || ""), price: row.price ?? row.value ?? row.close ?? null, change: row.change ?? row.change_percent ?? null, unit: String(row.unit || row.currency || ""), date: String(row.date || row.timestamp || row.time || "") })).filter((row) => row.name || Number.isFinite(Number(row.price)));
+    const available = result?.success !== false && Number(result?.result?.status_code || 200) < 400;
+    return { commodities, source, capability: "MACRO.COMMODITY.BENCHMARK", asOf: commodities.map((item) => item.date).filter(Boolean).sort().at(-1) || null, dataStatus: available && commodities.length ? "success" : "empty" };
   }
   if (kind === "fundamentals") {
     if (!data || typeof data !== "object" || Array.isArray(data) || !Object.keys(data).length) throw new Error("CAP 未返回估值指标");
@@ -945,7 +972,7 @@ export function shouldFallbackToCachedTool(error) {
  * two entry points cannot drift into different fallback/cost behaviour.
  */
 export function shouldFallbackForDataKind(kind, error) {
-  return String(kind || "") !== "trading_calendar" && shouldFallbackToCachedTool(error);
+  return ["quote", "details", "series", "core_event", "capital_flow", "sentiment"].includes(String(kind || "")) && shouldFallbackToCachedTool(error);
 }
 export function isRetryableUpstreamStatus(status) {
   return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
@@ -1329,7 +1356,9 @@ async function route(req, body, requestSignal) {
       try { return await testDiscoveredCapability(input, settings, key, scope.signal); }
       finally { scope.close(); }
     }
-    if (!BUILTIN_CAPABILITY_CATALOG[String(input.kind || "")] || (String(input.kind || "") !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("能力测试需要有效的 kind 和查询参数");
+    const testKind = String(input.kind || "");
+    const symbolOptional = ["trading_calendar", "market_news", "index_levels", "commodity"].includes(testKind);
+    if (!BUILTIN_CAPABILITY_CATALOG[testKind] || (!symbolOptional && !String(input.symbol || "").trim()) || (testKind === "market_news" && !String(input.query || "").trim()) || (testKind === "index_levels" && !String(input.query || input.symbol || "").trim()) || (testKind === "commodity" && !String(input.commodity_name || input.commodityName || input.symbol || "").trim())) throw new Error("能力测试需要有效的 kind 和查询参数");
     const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
     try { return await queryDirectCapability(input, settings, key, scope.signal); }
     finally { scope.close(); }
@@ -1347,7 +1376,8 @@ async function route(req, body, requestSignal) {
     const key = await readKey(); if (!key) throw new Error("请先配置 QVeris API Key");
     const settings = await readSettings(); const input = body.input || {};
     const kind = String(input.kind || "");
-    if (!["quote", "details", "series", "core_event", "capital_flow", "sentiment", "trading_calendar"].includes(kind) || (kind !== "trading_calendar" && !String(input.symbol || "").trim())) throw new Error("数据查询参数无效");
+    const symbolOptional = ["trading_calendar", "market_news", "index_levels", "commodity"].includes(kind);
+    if (!["quote", "details", "series", "core_event", "capital_flow", "sentiment", "market_news", "index_levels", "commodity", "trading_calendar"].includes(kind) || (!symbolOptional && !String(input.symbol || "").trim()) || (kind === "market_news" && !String(input.query || "").trim()) || (kind === "index_levels" && !String(input.query || input.symbol || "").trim()) || (kind === "commodity" && !String(input.commodity_name || input.commodityName || input.symbol || "").trim())) throw new Error("数据查询参数无效");
     const scope = createAbortScope(requestSignal, devVariables.requestTimeoutMs);
     try {
       const result = await queryDirectCapability(input, settings, key, scope.signal);

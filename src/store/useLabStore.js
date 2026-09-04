@@ -18,7 +18,7 @@ import { collectEventReminders } from "../lib/eventReminders.js";
 import { isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
-import { buildPremarketBriefing, normalizePremarketEvents, normalizePremarketNews } from "../lib/premarketBriefing.js";
+import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -1324,6 +1324,9 @@ export const useLabStore = create((set, get) => ({
     set({ premarketBriefingLoading: true, premarketBriefingError: "" });
     const newsBySymbol = {};
     const eventRows = [];
+    const industryNews = [];
+    const macroNews = [];
+    const overseas = [];
     let received = 0;
     try {
       await mapWithConcurrency(state.portfolioPositions, resolveLiveQuoteConcurrency(), async (position) => {
@@ -1345,7 +1348,23 @@ export const useLabStore = create((set, get) => ({
         return true;
       });
       if (requestGeneration !== premarketRequestGeneration) return false;
-      const briefing = buildPremarketBriefing({ positions: get().portfolioPositions, newsBySymbol, events: [...get().events, ...eventRows], createdAt, id: createId("premarket") });
+      const categories = [...new Set(state.portfolioPositions.map((position) => String(position.category || "").trim()).filter(Boolean))].slice(0, 3);
+      const indexSymbols = ["DJI", "SPX", "IXIC"];
+      const contextRequests = [
+        ...categories.map((category) => queryCapabilityData({ kind: "market_news", query: category, category: "market", limit: 8 }, { timeoutMs: 45_000, signal: requestController.signal })),
+        queryCapabilityData({ kind: "market_news", query: "宏观经济 利率 通胀 政策", category: "market", limit: 10 }, { timeoutMs: 45_000, signal: requestController.signal }),
+        ...indexSymbols.map((symbol) => queryCapabilityData({ kind: "index_levels", symbol, market: "US", interval: "tick" }, { timeoutMs: 45_000, signal: requestController.signal })),
+        queryCapabilityData({ kind: "commodity", commodityName: "WTI", frequency: "daily" }, { timeoutMs: 45_000, signal: requestController.signal }),
+        queryCapabilityData({ kind: "commodity", commodityName: "Gold", frequency: "daily" }, { timeoutMs: 45_000, signal: requestController.signal }),
+      ];
+      const contextResults = await Promise.allSettled(contextRequests);
+      if (requestGeneration !== premarketRequestGeneration) return false;
+      categories.forEach((_, index) => { const result = contextResults[index]?.status === "fulfilled" ? contextResults[index].value : null; industryNews.push(...normalizePremarketMarketNews(result)); });
+      const macroResult = contextResults[categories.length]?.status === "fulfilled" ? contextResults[categories.length].value : null;
+      macroNews.push(...normalizePremarketMarketNews(macroResult));
+      for (const result of contextResults.slice(categories.length + 1, categories.length + 1 + indexSymbols.length)) if (result.status === "fulfilled") overseas.push(...normalizePremarketIndices(result.value));
+      for (const result of contextResults.slice(categories.length + 1 + indexSymbols.length)) if (result.status === "fulfilled") overseas.push(...normalizePremarketCommodities(result.value));
+      const briefing = buildPremarketBriefing({ positions: get().portfolioPositions, newsBySymbol, events: [...get().events, ...eventRows], industryNews, macroNews, overseas, createdAt, id: createId("premarket") });
       set({ premarketBriefing: briefing, premarketBriefingLoading: false, premarketBriefingError: received ? "" : "当前渠道暂未返回持仓公告或事件" });
       return true;
     } catch (error) {

@@ -13,6 +13,14 @@ pub struct CapabilityQueryInput {
     pub kind: String,
     pub symbol: Option<String>,
     pub range: Option<String>,
+    pub query: Option<String>,
+    pub category: Option<String>,
+    pub market: Option<String>,
+    pub interval: Option<String>,
+    #[serde(alias = "commodity_name")]
+    pub commodity_name: Option<String>,
+    pub frequency: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -43,6 +51,12 @@ fn spec(kind: &str) -> Option<CapabilitySpec> {
         "core_event" => ("qveris_finance.event_calendar_corp", "EVENT.CALENDAR.CORP"),
         "capital_flow" => ("qveris_finance.flow_large_order", "FLOW.LARGE_ORDER"),
         "sentiment" => ("qveris_finance.news_fin_tagged", "NEWS.FIN.TAGGED"),
+        "market_news" => ("qveris_finance.news_fin_realtime", "NEWS.FIN.REALTIME"),
+        "index_levels" => ("qveris_finance.index_levels", "INDEX.LEVELS"),
+        "commodity" => (
+            "qveris_finance.macro_commodity_benchmark",
+            "MACRO.COMMODITY.BENCHMARK",
+        ),
         _ => return None,
     };
     Some(CapabilitySpec {
@@ -58,10 +72,73 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
         .unwrap_or_default()
         .trim()
         .to_uppercase();
-    if symbol.is_empty() {
+    if symbol.is_empty() && !matches!(kind, "market_news" | "index_levels" | "commodity") {
         return Err("CAP 查询需要有效的证券代码".into());
     }
     let today = Utc::now().date_naive();
+    if kind == "market_news" {
+        let query = input.query.as_deref().unwrap_or_default().trim();
+        if query.is_empty() {
+            return Err("新闻查询需要关键词".into());
+        }
+        return Ok(
+            json!({"query": query, "category": input.category.as_deref().unwrap_or("market"), "start_date": (today - ChronoDuration::days(3)).format("%Y-%m-%d").to_string(), "end_date": today.format("%Y-%m-%d").to_string(), "limit": input.limit.unwrap_or(10).clamp(1, 20)}),
+        );
+    }
+    if kind == "index_levels" {
+        let query = input.query.as_deref().unwrap_or_default().trim();
+        let symbol = input.symbol.as_deref().unwrap_or_default().trim();
+        if query.is_empty() && symbol.is_empty() {
+            return Err("指数查询需要 query 或 symbol".into());
+        }
+        let mut value = Map::new();
+        if !query.is_empty() {
+            value.insert("query".into(), Value::String(query.into()));
+        }
+        if !symbol.is_empty() {
+            value.insert("symbol".into(), Value::String(symbol.to_uppercase()));
+        }
+        value.insert(
+            "market".into(),
+            Value::String(input.market.as_deref().unwrap_or("US").into()),
+        );
+        value.insert(
+            "interval".into(),
+            Value::String(input.interval.as_deref().unwrap_or("tick").into()),
+        );
+        return Ok(Value::Object(value));
+    }
+    if kind == "commodity" {
+        let commodity = input.commodity_name.as_deref().unwrap_or_default().trim();
+        let symbol = input.symbol.as_deref().unwrap_or_default().trim();
+        if commodity.is_empty() && symbol.is_empty() {
+            return Err("商品查询需要 commodity_name 或 symbol".into());
+        }
+        let mut value = Map::new();
+        if !commodity.is_empty() {
+            value.insert("commodity_name".into(), Value::String(commodity.into()));
+        }
+        if !symbol.is_empty() {
+            value.insert("symbol".into(), Value::String(symbol.into()));
+        }
+        value.insert(
+            "start_date".into(),
+            Value::String(
+                (today - ChronoDuration::days(3))
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+        );
+        value.insert(
+            "end_date".into(),
+            Value::String(today.format("%Y-%m-%d").to_string()),
+        );
+        value.insert(
+            "frequency".into(),
+            Value::String(input.frequency.as_deref().unwrap_or("daily").into()),
+        );
+        return Ok(Value::Object(value));
+    }
     let days = if kind == "series" {
         match input.range.as_deref() {
             Some("分时") => 1,
@@ -351,6 +428,13 @@ mod tests {
             kind: "series".into(),
             symbol: Some("600519".into()),
             range: None,
+            query: None,
+            category: None,
+            market: None,
+            interval: None,
+            commodity_name: None,
+            frequency: None,
+            limit: None,
         };
         let value = parameters(&input, "series").unwrap();
         assert_eq!(value["symbol"], "600519");
@@ -370,6 +454,13 @@ mod tests {
             kind: "quote".into(),
             symbol: None,
             range: None,
+            query: None,
+            category: None,
+            market: None,
+            interval: None,
+            commodity_name: None,
+            frequency: None,
+            limit: None,
         };
         assert!(parameters(&input, "quote").is_err());
     }

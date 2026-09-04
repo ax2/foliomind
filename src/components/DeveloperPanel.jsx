@@ -275,7 +275,7 @@ export function DeveloperPanel() {
   };
   const runCapabilityTest = async (capability) => {
     const symbol = testSymbol.trim().toUpperCase();
-    if (!symbol && capability.kind !== "trading_calendar" && !capability.kind?.startsWith("discovered:")) {
+    if (!symbol && !["trading_calendar", "market_news", "index_levels", "commodity"].includes(capability.kind) && !capability.kind?.startsWith("discovered:")) {
       setCapabilityTests((current) => ({ ...current, [capability.kind]: { state: "error", error: "请先输入测试标的" } }));
       return;
     }
@@ -300,7 +300,10 @@ export function DeveloperPanel() {
         ? await testCapability({ toolId: capability.toolId, searchId: capability.searchId, parameters: discoveredParameters })
         : capability.kind === "trading_calendar"
         ? desktop ? await queryTradingCalendar(calendarDate) : await testCapability({ kind: capability.kind, date: calendarDate, marketcode: "212001" })
-        : desktop ? await queryCapabilityData({ kind: capability.kind, symbol }) : local ? await testCapability({ kind: capability.kind, symbol }) : await askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
+        : await (async () => {
+          const input = capability.kind === "market_news" ? { kind: capability.kind, query: "宏观经济 利率 政策", category: "market", limit: 10 } : capability.kind === "index_levels" ? { kind: capability.kind, query: "S&P 500 Nasdaq Dow Jones", market: "US", interval: "tick" } : capability.kind === "commodity" ? { kind: capability.kind, commodityName: "WTI", frequency: "daily" } : { kind: capability.kind, symbol };
+          return desktop ? queryCapabilityData(input) : local ? testCapability(input) : askPi(`请仅调用内置工具 ${capability.toolId} 测试 ${symbol || "默认查询"}，使用该工具声明的必要参数；返回调用是否成功、数据来源和截至时间，不要推测或补造数据。`);
+        })();
       const outcome = capabilityTestOutcome(capability, result);
       if (outcome.state === "error") throw new Error(result?.result?.error_message || outcome.error);
       if (desktop && capability.kind !== "trading_calendar" && !result?.audits?.some((audit) => audit?.outcome === "success" && (audit?.toolId === capability.toolId || audit?.tool_id === capability.toolId))) {

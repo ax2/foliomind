@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPremarketBriefing, normalizePremarketEvents, normalizePremarketNews } from "./premarketBriefing.js";
+import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "./premarketBriefing.js";
 
 describe("premarket briefing", () => {
   it("normalizes nested real CAP news and rejects unsafe links", () => {
@@ -22,5 +22,18 @@ describe("premarket briefing", () => {
 
   it("does not create a briefing without positions", () => {
     expect(() => buildPremarketBriefing({ positions: [] })).toThrow("请先添加持仓");
+  });
+
+  it("normalizes verified market context without inventing values", () => {
+    expect(normalizePremarketMarketNews({ data: { news: [{ headline: "利率决议", source: "央行", published_at: "2026-09-04" }] } })).toEqual([expect.objectContaining({ title: "利率决议", source: "央行" })]);
+    expect(normalizePremarketIndices({ indices: [{ symbol: "SPX", price: 5000, timestamp: "2026-09-04" }] })).toEqual([expect.objectContaining({ title: "SPX", detail: expect.stringContaining("5000") })]);
+    expect(normalizePremarketCommodities({ data: [{ commodity_name: "WTI", price: 72, unit: "USD" }] })).toEqual([expect.objectContaining({ title: "WTI", detail: expect.stringContaining("72") })]);
+  });
+
+  it("fills context sections only from returned records", () => {
+    const briefing = buildPremarketBriefing({ positions: [{ symbol: "600519", name: "贵州茅台" }], industryNews: [{ title: "白酒行业动态", source: "数据服务" }], macroNews: [], overseas: [{ title: "SPX", detail: "5000", source: "数据服务" }] });
+    expect(briefing.sections.industry.status).toBe("available");
+    expect(briefing.sections.macro.status).toBe("empty");
+    expect(briefing.sections.overseas.status).toBe("available");
   });
 });

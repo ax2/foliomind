@@ -132,6 +132,9 @@ test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () 
   assert.equal(BUILTIN_CAPABILITY_CATALOG.core_event.toolId, "qveris_finance.event_calendar_corp");
   assert.equal(BUILTIN_CAPABILITY_CATALOG.capital_flow.capability, "FLOW.LARGE_ORDER");
   assert.equal(BUILTIN_CAPABILITY_CATALOG.sentiment.capability, "NEWS.FIN.TAGGED");
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.market_news.toolId, "qveris_finance.news_fin_realtime");
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.index_levels.toolId, "qveris_finance.index_levels");
+  assert.equal(BUILTIN_CAPABILITY_CATALOG.commodity.toolId, "qveris_finance.macro_commodity_benchmark");
   assert.equal(classifyRequest("贵州茅台未来一个月分红和股东会事件"), "core_event");
   assert.equal(classifyRequest("查询主力资金净流入和大单"), "capital_flow");
   assert.equal(classifyRequest("查询最近财经新闻舆情"), "sentiment");
@@ -146,6 +149,12 @@ test("normalizes verified event, capital-flow, and sentiment CAP envelopes", () 
   const unavailable = normalizeCapabilityResult("core_event", { symbol: "600519.SH" }, { success: false, result: { data: [], status_code: 200 } });
   assert.equal(unavailable.eventCount, null);
   assert.equal(unavailable.dataStatus, "empty");
+  const marketNews = normalizeCapabilityResult("market_news", { query: "利率" }, { result: { data: [{ headline: "利率决议", published_at: "2026-09-04", source: "央行" }] } });
+  assert.equal(marketNews.news[0].title, "利率决议");
+  const indices = normalizeCapabilityResult("index_levels", { symbol: "DJI" }, { result: { data: [{ symbol: "DJI", price: 53_000, timestamp: "2026-09-04" }] } });
+  assert.equal(indices.indices[0].price, 53_000);
+  const commodities = normalizeCapabilityResult("commodity", { commodityName: "WTI" }, { result: { data: [{ commodity_name: "WTI", price: 72, unit: "USD" }] } });
+  assert.equal(commodities.commodities[0].name, "WTI");
 });
 
 test("rejects explicit CAP failure envelopes instead of exposing partial fields", () => {
