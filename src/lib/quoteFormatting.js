@@ -1,5 +1,29 @@
 const numberValue = (value) => Number(value);
 export const QUOTE_STALE_AFTER_MS = 15 * 60 * 1000;
+const QUOTE_ENVELOPE_KEYS = ["quote", "quotes", "data", "payload", "result"];
+
+function quotePrice(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return NaN;
+  return Number(value.price ?? value.lastPrice ?? value.last_price ?? value.last ?? value.close);
+}
+
+/**
+ * Extract provider quote records without walking arbitrary response fields.
+ * The native desktop bridge can return the CAP payload before Host-side
+ * normalization, so Web and desktop need the same bounded envelope policy.
+ */
+export function quoteRecords(value, depth = 0) {
+  if (depth > 4 || value == null) return [];
+  if (Array.isArray(value)) return value.slice(0, 32).flatMap((item) => quoteRecords(item, depth + 1));
+  if (typeof value !== "object") return [];
+  const price = quotePrice(value);
+  if (Number.isFinite(price) && price > 0) return [value];
+  return QUOTE_ENVELOPE_KEYS.flatMap((key) => Object.hasOwn(value, key) ? quoteRecords(value[key], depth + 1) : []);
+}
+
+export function firstQuoteRecord(value) {
+  return quoteRecords(value)[0] || null;
+}
 
 const MARKET_TIME_ZONE_DEFINITIONS = [
   { region: "us", patterns: ["NASDAQ", "NYSE", "AMEX", "美股", "US"], timeZone: "America/New_York", label: "美东时间" },

@@ -3,7 +3,7 @@ import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarD
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels, testModelConnection as testModelGateway } from "../lib/integrations.js";
-import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness, quoteSymbolKey } from "../lib/quoteFormatting.js";
+import { changeToneClass, firstQuoteRecord, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { PORTFOLIO_PLAN_HORIZONS, PORTFOLIO_PLAN_STATUSES, PORTFOLIO_SORT_OPTIONS, parsePortfolioImport, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioReportCsv, portfolioRiskMetrics, sortPortfolioRows } from "../lib/portfolio.js";
 import { friendlyDataMessage, friendlyModelMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
@@ -1079,7 +1079,7 @@ export function SettingsView() {
     try {
       const result = await queryCapabilityData({ kind: "quote", symbol });
       const payload = result?.data ?? result;
-      const quote = Array.isArray(payload?.quotes) ? payload.quotes.find((item) => String(item?.symbol || item?.code || symbol).replace(/\.(?:SH|SS|SZ)$/i, "") === symbol.replace(/\.(?:SH|SS|SZ)$/i, "")) || payload.quotes[0] : payload?.quote || payload;
+      const quote = firstQuoteRecord(payload);
       const price = Number(quote?.price ?? quote?.lastPrice ?? quote?.last_price);
       if (!Number.isFinite(price) || price <= 0) throw new Error("数据渠道未返回可识别的真实行情");
       const elapsed = Math.max(0, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt));

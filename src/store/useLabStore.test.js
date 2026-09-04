@@ -221,6 +221,23 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, source: "真实 CAP" });
   });
 
+  it("normalizes desktop-style nested quote envelopes and missing provider symbols", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" } },
+      userStateLoaded: true,
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({
+      data: { payload: { quotes: [{ last_price: "1297.4", pct_change: 0.39, timestamp: "2026-09-05T07:30:00Z" }] } },
+      mode: "qveris-cap",
+      cacheHit: false,
+      audits: [],
+    });
+
+    await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
+    expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, asOf: "2026-09-05T07:30:00Z" });
+  });
+
   it("cancels a slow full quote sweep without leaving the store busy", async () => {
     let startedResolve;
     let requestSignal;

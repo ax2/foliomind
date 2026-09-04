@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeToneClass, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteForSymbol, quoteFreshness, quoteSymbolKey } from "./quoteFormatting.js";
+import { changeToneClass, firstQuoteRecord, formatAmount, formatCompactQuoteFreshness, formatPercent, formatPrice, formatQuoteDateTime, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, marketRegionFor, marketTimeZone, quoteForSymbol, quoteFreshness, quoteRecords, quoteSymbolKey } from "./quoteFormatting.js";
 
 describe("quote formatting", () => {
   it("uses market-friendly price and amount units", () => {
@@ -16,6 +16,14 @@ describe("quote formatting", () => {
     expect(isValidQuotePrice(-1)).toBe(false);
     expect(isValidQuotePrice(" ")).toBe(false);
     expect(isValidQuotePrice(null)).toBe(false);
+  });
+
+  it("extracts bounded nested quote envelopes for every runtime", () => {
+    const payload = { payload: { data: { quotes: [{ last_price: "1297.4", pct_change: 0.39 }, { price: 1298 }] } } };
+    expect(quoteRecords(payload)).toHaveLength(2);
+    expect(firstQuoteRecord(payload)).toMatchObject({ last_price: "1297.4" });
+    expect(firstQuoteRecord({ data: [{ quote: { close: 1300 } }] })).toMatchObject({ close: 1300 });
+    expect(firstQuoteRecord({ payload: { data: { price: 0 } } })).toBeNull();
   });
 
   it("normalizes signed percentages and ratio-style margins", () => {

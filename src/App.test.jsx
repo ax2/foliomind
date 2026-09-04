@@ -909,7 +909,7 @@ describe("FolioMind core flows", () => {
       environment: "local-host",
     });
     integrationMocks.queryCapabilityData.mockResolvedValue({
-      data: { quotes: [{ symbol: "600519", price: 1297.4, source: "真实 CAP", timestamp: "2026-08-31T08:00:00Z" }] },
+      data: { payload: { quotes: [{ last_price: "1297.4", source: "真实 CAP", timestamp: "2026-08-31T08:00:00Z" }] } },
       source: "qveris_finance",
       mode: "qveris-cap",
     });

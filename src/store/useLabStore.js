@@ -15,7 +15,7 @@ import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, premarketSlot, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
-import { isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteSymbolKey } from "../lib/quoteFormatting.js";
+import { firstQuoteRecord, isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteRecords, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
@@ -320,12 +320,13 @@ function numberOrNull(rawValue) {
 }
 
 function normalizeLiveQuote(value) {
-  if (!value || typeof value !== "object") return null;
-  const price = numberOrNull(value.price ?? value.lastPrice ?? value.last_price);
+  const record = firstQuoteRecord(value);
+  if (!record) return null;
+  const price = numberOrNull(record.price ?? record.lastPrice ?? record.last_price ?? record.last ?? record.close);
   if (price == null || price <= 0) return null;
-  const previousClose = numberOrNull(value.previousClose ?? value.previous_close ?? value.prevClose);
-  const rawChange = numberOrNull(value.changeAmount ?? value.change_amount ?? value.changeValue ?? value.change);
-  const explicitPercent = numberOrNull(value.changePercent ?? value.change_percent ?? value.pctChange ?? value.percentChange);
+  const previousClose = numberOrNull(record.previousClose ?? record.previous_close ?? record.prevClose ?? record.prev_close);
+  const rawChange = numberOrNull(record.changeAmount ?? record.change_amount ?? record.changeValue ?? record.change);
+  const explicitPercent = numberOrNull(record.changePercent ?? record.change_percent ?? record.pctChange ?? record.pct_change ?? record.percentChange);
   const change = explicitPercent != null
     ? explicitPercent
     : previousClose != null && previousClose !== 0 && rawChange != null
@@ -335,34 +336,34 @@ function normalizeLiveQuote(value) {
     price,
     change,
     changeAmount: rawChange ?? (previousClose != null ? price - previousClose : null),
-    asOf: String(value.asOf ?? value.as_of ?? value.timestamp ?? ""),
-    source: String(value.source ?? value.dataSource ?? "数据服务"),
-    open: value.open ?? null,
+    asOf: String(record.asOf ?? record.as_of ?? record.timestamp ?? ""),
+    source: String(record.source ?? record.dataSource ?? "数据服务"),
+    open: record.open ?? null,
     previousClose,
-    high: value.high ?? null,
-    low: value.low ?? null,
-    volume: value.volume ?? null,
-    turnover: value.turnover ?? null,
-    turnoverRate: value.turnoverRate ?? value.turnover_rate ?? null,
-    volumeRatio: value.volumeRatio ?? value.volume_ratio ?? null,
-    technicalSignal: value.technicalSignal ?? value.technical_signal ?? null,
-    eventCount: value.eventCount ?? value.event_count ?? null,
-    mainNetInflow: value.mainNetInflow ?? value.main_net_inflow ?? value.netInflow ?? null,
-    sentiment: value.sentiment ?? value.sentimentLabel ?? null,
-    pe: value.pe ?? value.peTtm ?? value.pe_ttm ?? null,
-    pb: value.pb ?? null,
-    marketCap: value.marketCap ?? value.market_cap ?? null,
-    floatMarketCap: value.floatMarketCap ?? value.float_market_cap ?? null,
-    series: Array.isArray(value.series) ? value.series : [],
-    fundamentals: value.fundamentals && typeof value.fundamentals === "object" ? value.fundamentals : {},
-    companyDescription: typeof value.companyDescription === "string" ? value.companyDescription : "",
+    high: record.high ?? null,
+    low: record.low ?? null,
+    volume: record.volume ?? null,
+    turnover: record.turnover ?? null,
+    turnoverRate: record.turnoverRate ?? record.turnover_rate ?? null,
+    volumeRatio: record.volumeRatio ?? record.volume_ratio ?? null,
+    technicalSignal: record.technicalSignal ?? record.technical_signal ?? null,
+    eventCount: record.eventCount ?? record.event_count ?? null,
+    mainNetInflow: record.mainNetInflow ?? record.main_net_inflow ?? record.netInflow ?? null,
+    sentiment: record.sentiment ?? record.sentimentLabel ?? null,
+    pe: record.pe ?? record.peTtm ?? record.pe_ttm ?? null,
+    pb: record.pb ?? null,
+    marketCap: record.marketCap ?? record.market_cap ?? null,
+    floatMarketCap: record.floatMarketCap ?? record.float_market_cap ?? null,
+    series: Array.isArray(record.series) ? record.series : [],
+    fundamentals: record.fundamentals && typeof record.fundamentals === "object" ? record.fundamentals : {},
+    companyDescription: typeof record.companyDescription === "string" ? record.companyDescription : "",
   };
 }
 
 function detailedQuoteFromReply(text) {
   const value = findJsonObject(text) || {};
   const source = value.data && typeof value.data === "object" ? value.data : value.result && typeof value.result === "object" ? value.result : value;
-  const quote = normalizeLiveQuote(source.quote) || normalizeLiveQuote(source.quotes?.[0]) || normalizeLiveQuote(source);
+  const quote = normalizeLiveQuote(value);
   const rawSeries = source.seriesByRange || source.series_by_range || {};
   const seriesByRange = Object.fromEntries(Object.entries(rawSeries).filter(([, points]) => Array.isArray(points)));
   if (Array.isArray(source.series) && !seriesByRange["分时"]) seriesByRange["分时"] = source.series;
@@ -397,11 +398,12 @@ function eventsFromReply(text) {
 
 function liveQuotesFromReply(text, symbols) {
   const value = findJsonObject(text);
-  const items = Array.isArray(value?.quotes) ? value.quotes : Array.isArray(value?.data?.quotes) ? value.data.quotes : Array.isArray(value?.result?.quotes) ? value.result.quotes : Array.isArray(value) ? value : [value?.quote, value?.data, value?.result, value].filter(Boolean);
+  const items = quoteRecords(value);
   const canonical = (symbol) => String(symbol ?? "").trim().toUpperCase().replace(/\.(?:SH|SS|SZ)$/i, "");
   const allowed = new Set(symbols.map(canonical));
+  const fallbackSymbol = symbols.length === 1 ? canonical(symbols[0]) : "";
   return items.reduce((result, item) => {
-    const symbol = canonical(item?.symbol ?? item?.code);
+    const symbol = canonical(item?.symbol ?? item?.code) || fallbackSymbol;
     if (!symbol || !allowed.has(symbol)) return result;
     const quote = normalizeLiveQuote(item);
     if (quote) result[symbol] = quote;
