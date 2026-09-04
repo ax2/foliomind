@@ -277,7 +277,7 @@ impl PiHost {
                 "--no-extensions",
                 "--no-context-files",
                 "--tools",
-                "bash,qveris_search,qveris_inspect,qveris_call",
+                "bash,qveris_search,qveris_inspect,qveris_call,foliomind_data",
             ]);
         if !settings.model_id.trim().is_empty() {
             command.args(["--provider", "qveris", "--model", settings.model_id.trim()]);

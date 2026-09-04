@@ -31,13 +31,16 @@ async function completeChain(tools) {
   return tools.get("qveris_call").execute("call-call", { search_id: "search-1", tool_id: "market.quote.v1", parameters: { symbol: "AAPL" } });
 }
 
-test("registers the three Pi tools", () => {
+test("registers the QVeris tools and the stable FolioMind data tool", () => {
   const tools = loadExtension();
-  assert.deepEqual([...tools.keys()], ["qveris_search", "qveris_inspect", "qveris_call"]);
+  assert.deepEqual([...tools.keys()], ["qveris_search", "qveris_inspect", "qveris_call", "foliomind_data"]);
   assert.equal("session_id" in tools.get("qveris_search").parameters.properties, false);
   assert.equal("session_id" in tools.get("qveris_inspect").parameters.properties, false);
   assert.equal("session_id" in tools.get("qveris_call").parameters.properties, false);
   assert.equal("max_response_size" in tools.get("qveris_call").parameters.properties, false);
+  assert.deepEqual(tools.get("foliomind_data").parameters.required, ["kind"]);
+  assert.deepEqual(tools.get("foliomind_data").parameters.properties.kind.enum, ["quote", "details", "series", "core_event", "capital_flow", "sentiment", "market_news", "index_levels", "commodity"]);
+  assert.equal("commodity_name" in tools.get("foliomind_data").parameters.properties, true);
 });
 
 test("accepts only loopback executor URLs", () => {
@@ -93,6 +96,25 @@ test("forwards run metadata and uses only the managed capability", async () => {
     assert.ok(body.tool_call_id);
     assert.equal(JSON.stringify(body).includes("long-lived-key-must-not-be-read"), false);
   }
+});
+
+test("calls stable FolioMind data without Search or Inspect", async () => {
+  let captured;
+  await withExecutor(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    captured = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ result: { data: { price: 123.45 }, tool_id: "qveris_finance.mkt_l1_rt", capability: "MKT.L1.RT" } }));
+  }, async () => {
+    const result = await loadExtension().get("foliomind_data").execute("data-call", { kind: "quote", symbol: "600519" });
+    const visible = JSON.parse(result.content[0].text);
+    assert.equal(visible.data.price, 123.45);
+    assert.equal(result.details.operation, "data");
+  });
+  assert.equal(captured.operation, "data");
+  assert.deepEqual(captured.input, { kind: "quote", symbol: "600519" });
+  assert.equal(captured.bridge_version, "foliomind-bridge.v1");
 });
 
 test("rejects skipped or mismatched Search/Inspect phases before network I/O", async () => {

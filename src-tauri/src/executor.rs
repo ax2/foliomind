@@ -1,4 +1,4 @@
-use crate::{config, credentials::CredentialStore};
+use crate::{capability_data, config, credentials::CredentialStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -30,6 +30,17 @@ const MAX_TOOL_IDS: usize = 5;
 const MAX_PARAMETERS_BYTES: usize = 256 * 1024;
 const MAX_CONCURRENT_CONNECTIONS: usize = 16;
 const EXECUTOR_STOP_TIMEOUT: Duration = Duration::from_secs(1);
+const BUILTIN_DATA_KINDS: &[&str] = &[
+    "quote",
+    "details",
+    "series",
+    "core_event",
+    "capital_flow",
+    "sentiment",
+    "market_news",
+    "index_levels",
+    "commodity",
+];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -403,7 +414,10 @@ fn validate_bridge_request(
     if request.tool_call_id.trim().is_empty() || request.tool_call_id.len() > 256 {
         return Err("invalid tool_call_id".into());
     }
-    if !matches!(request.operation.as_str(), "search" | "inspect" | "call") {
+    if !matches!(
+        request.operation.as_str(),
+        "search" | "inspect" | "call" | "data"
+    ) {
         return Err("unsupported operation".into());
     }
     if !request.input.is_object() {
@@ -420,6 +434,21 @@ fn validate_bridge_request(
         "search" => &["query", "limit"],
         "inspect" => &["search_id", "tool_ids"],
         "call" => &["search_id", "tool_id", "parameters"],
+        "data" => &[
+            "kind",
+            "symbol",
+            "range",
+            "start_date",
+            "end_date",
+            "event_type",
+            "query",
+            "category",
+            "market",
+            "interval",
+            "commodity_name",
+            "frequency",
+            "limit",
+        ],
         _ => unreachable!(),
     };
     if request.input.as_object().is_some_and(|input| {
@@ -452,9 +481,32 @@ fn validate_bridge_request(
         {
             return Err("call requires search_id, tool_id and parameters".into())
         }
+        "data" if !text("kind", MAX_IDENTIFIER_BYTES) || !valid_data_input(&request.input) => {
+            return Err("data requires a supported kind and bounded parameters".into())
+        }
         _ => {}
     }
     Ok(())
+}
+
+fn valid_data_input(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    let Some(kind) = object.get("kind").and_then(Value::as_str) else {
+        return false;
+    };
+    if !BUILTIN_DATA_KINDS.contains(&kind) {
+        return false;
+    }
+    object.iter().all(|(key, value)| match key.as_str() {
+        "kind" | "symbol" | "range" | "start_date" | "end_date" | "event_type" | "query"
+        | "category" | "market" | "interval" | "commodity_name" | "frequency" => value
+            .as_str()
+            .is_some_and(|item| !item.trim().is_empty() && item.len() <= MAX_IDENTIFIER_BYTES),
+        "limit" => value.as_u64().is_some_and(|item| (1..=20).contains(&item)),
+        _ => false,
+    })
 }
 
 fn valid_tool_ids(value: Option<&Value>) -> bool {
@@ -591,6 +643,20 @@ async fn execute_official_api(
         .read_qveris_key()?
         .filter(|key| !key.trim().is_empty())
         .ok_or("QVeris credential is not configured")?;
+    if request.operation == "data" {
+        let input: capability_data::CapabilityQueryInput =
+            serde_json::from_value(request.input.clone())
+                .map_err(|_| "FolioMind 数据能力参数无效".to_string())?;
+        let result = capability_data::query(&key, base_url, input)?;
+        return Ok(json!({
+            "data": result.data,
+            "mode": result.mode,
+            "cache_hit": result.cache_hit,
+            "tool_id": result.tool_id,
+            "capability": result.capability,
+            "audits": result.audits,
+        }));
+    }
     let mut endpoint =
         Url::parse(base_url.trim_end_matches('/')).map_err(|_| "invalid QVeris API base URL")?;
     let path = match request.operation.as_str() {
@@ -1233,12 +1299,21 @@ mod tests {
         call.input =
             json!({"search_id":"search", "tool_id":"tool-1", "parameters":{"symbol":"AAPL"}});
         assert!(validate_bridge_request(&call, &environment()).is_ok());
+
+        let mut data = request();
+        data.operation = "data".into();
+        data.input = json!({"kind":"market_news", "query":"宏观经济 利率"});
+        assert!(validate_bridge_request(&data, &environment()).is_ok());
     }
     #[test]
     fn rejects_operation_payload_missing_required_fields() {
         let mut item = request();
         item.operation = "call".into();
         item.input = json!({"tool_id":"tool"});
+        assert!(validate_bridge_request(&item, &environment()).is_err());
+
+        item.operation = "data".into();
+        item.input = json!({"kind":"not-a-capability", "symbol":"600519"});
         assert!(validate_bridge_request(&item, &environment()).is_err());
     }
     #[test]

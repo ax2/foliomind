@@ -13,6 +13,12 @@ pub struct CapabilityQueryInput {
     pub kind: String,
     pub symbol: Option<String>,
     pub range: Option<String>,
+    #[serde(alias = "start_date")]
+    pub start_date: Option<String>,
+    #[serde(alias = "end_date")]
+    pub end_date: Option<String>,
+    #[serde(alias = "event_type")]
+    pub event_type: Option<String>,
     pub query: Option<String>,
     pub category: Option<String>,
     pub market: Option<String>,
@@ -81,8 +87,24 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
         if query.is_empty() {
             return Err("新闻查询需要关键词".into());
         }
+        let start_date = input
+            .start_date
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                (today - ChronoDuration::days(3))
+                    .format("%Y-%m-%d")
+                    .to_string()
+            });
+        let end_date = input
+            .end_date
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| today.format("%Y-%m-%d").to_string());
         return Ok(
-            json!({"query": query, "category": input.category.as_deref().unwrap_or("market"), "start_date": (today - ChronoDuration::days(3)).format("%Y-%m-%d").to_string(), "end_date": today.format("%Y-%m-%d").to_string(), "limit": input.limit.unwrap_or(10).clamp(1, 20)}),
+            json!({"query": query, "category": input.category.as_deref().unwrap_or("market"), "start_date": start_date, "end_date": end_date, "limit": input.limit.unwrap_or(10).clamp(1, 20)}),
         );
     }
     if kind == "index_levels" {
@@ -121,18 +143,24 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
         if !symbol.is_empty() {
             value.insert("symbol".into(), Value::String(symbol.into()));
         }
-        value.insert(
-            "start_date".into(),
-            Value::String(
+        let start_date = input
+            .start_date
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
                 (today - ChronoDuration::days(3))
                     .format("%Y-%m-%d")
-                    .to_string(),
-            ),
-        );
-        value.insert(
-            "end_date".into(),
-            Value::String(today.format("%Y-%m-%d").to_string()),
-        );
+                    .to_string()
+            });
+        let end_date = input
+            .end_date
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| today.format("%Y-%m-%d").to_string());
+        value.insert("start_date".into(), Value::String(start_date));
+        value.insert("end_date".into(), Value::String(end_date));
         value.insert(
             "frequency".into(),
             Value::String(input.frequency.as_deref().unwrap_or("daily").into()),
@@ -154,12 +182,34 @@ fn parameters(input: &CapabilityQueryInput, kind: &str) -> Result<Value, String>
         30
     };
     let start = today - ChronoDuration::days(days);
+    let start_date = input
+        .start_date
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| start.format("%Y-%m-%d").to_string());
+    let end_date = input
+        .end_date
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| today.format("%Y-%m-%d").to_string());
     if matches!(kind, "series" | "core_event" | "capital_flow" | "sentiment") {
-        return Ok(json!({
+        let mut value = json!({
             "symbol": symbol,
-            "start_date": start.format("%Y-%m-%d").to_string(),
-            "end_date": today.format("%Y-%m-%d").to_string(),
-        }));
+            "start_date": start_date,
+            "end_date": end_date,
+        });
+        if kind == "core_event" {
+            if let Some(event_type) = input
+                .event_type
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                value["event_type"] = Value::String(event_type.trim().into());
+            }
+        }
+        return Ok(value);
     }
     Ok(json!({ "symbol": symbol }))
 }
@@ -428,6 +478,9 @@ mod tests {
             kind: "series".into(),
             symbol: Some("600519".into()),
             range: None,
+            start_date: None,
+            end_date: None,
+            event_type: None,
             query: None,
             category: None,
             market: None,
@@ -454,6 +507,9 @@ mod tests {
             kind: "quote".into(),
             symbol: None,
             range: None,
+            start_date: None,
+            end_date: None,
+            event_type: None,
             query: None,
             category: None,
             market: None,

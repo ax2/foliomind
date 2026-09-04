@@ -137,6 +137,11 @@ function recordPhase(operation, input, payload, runId) {
 function visibleExecutorResult(payload) {
   const visible = {
     result: payload?.result ?? null,
+    data: payload?.data,
+    mode: payload?.mode,
+    tool_id: payload?.tool_id,
+    capability: payload?.capability,
+    audits: payload?.audits,
     data_status: payload?.data_status,
     reason_code: payload?.reason_code,
     missing_required_fields: payload?.missing_required_fields,
@@ -151,6 +156,68 @@ function visibleExecutorResult(payload) {
   return encoded.length <= MAX_VISIBLE_CHARS
     ? encoded
     : JSON.stringify({ truncated: true, preview: encoded.slice(0, MAX_VISIBLE_CHARS), message: "结果过大；请缩小范围后重试。" });
+}
+
+const BUILTIN_DATA_KINDS = [
+  "quote",
+  "details",
+  "series",
+  "core_event",
+  "capital_flow",
+  "sentiment",
+  "market_news",
+  "index_levels",
+  "commodity",
+];
+
+function executeFolioMindData(input, toolCallId, callerSignal) {
+  const kind = String(input?.kind || "").trim();
+  if (!BUILTIN_DATA_KINDS.includes(kind)) {
+    fail("foliomind_data 的 kind 不受支持，请选择已验证的金融能力。");
+  }
+  const environment = executorEnvironment();
+  const controlled = requestSignal(callerSignal);
+  return (async () => {
+    let response;
+    try {
+      response = await fetch(environment.url, {
+        method: "POST",
+        signal: controlled.signal,
+        headers: { "content-type": "application/json", authorization: `Bearer ${environment.capability}` },
+        body: JSON.stringify({
+          bridge_version: BRIDGE_VERSION,
+          run_id: environment.runId,
+          product_run_id: environment.productRunId,
+          tool_call_id: toolCallId,
+          operation: "data",
+          input,
+        }),
+      });
+    } catch (error) {
+      const timedOut = controlled.signal.aborted && !callerSignal?.aborted;
+      fail(timedOut ? "FolioMind 数据请求超时。" : "FolioMind 数据请求失败。");
+    } finally {
+      controlled.dispose();
+    }
+    const body = await response.text();
+    if (!response.ok) fail(`FolioMind 数据请求失败（HTTP ${response.status}）：${redactedErrorText(body)}`);
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      fail("FolioMind 数据请求返回了无效 JSON。");
+    }
+    return {
+      content: [{ type: "text", text: visibleExecutorResult(payload?.result ?? payload) }],
+      details: {
+        operation: "data",
+        kind,
+        traceId: String(payload?.trace_id || ""),
+        cacheHit: payload?.cache_hit === true,
+        qverisCost: Number(payload?.qveris_cost || payload?.result?.cost?.amount || 0),
+      },
+    };
+  })();
 }
 
 async function executeQVeris(operation, input, toolCallId, callerSignal) {
@@ -226,5 +293,27 @@ export default function qverisExtension(pi) {
     parameters: objectSchema({ tool_id: textSchema("已经 Inspect 的 tool_id。"), parameters: { type: "object", additionalProperties: true }, search_id: textSchema("对应 Search 的 search_id。") }, ["tool_id", "parameters", "search_id"]),
     executionMode: "sequential",
     execute(toolCallId, params, signal) { return executeQVeris("call", params, toolCallId, signal); },
+  });
+  pi.registerTool({
+    name: "foliomind_data",
+    label: "FolioMind Data",
+    description: "直接调用 FolioMind 已验证的稳定金融数据 CAP；无需 Search/Inspect。返回真实数据、来源和时间，缺失时保持空态，不得推测。",
+    parameters: objectSchema({
+      kind: { type: "string", enum: BUILTIN_DATA_KINDS },
+      symbol: textSchema("个股或指数代码；市场新闻和商品查询可省略。"),
+      range: textSchema("历史序列时间范围，例如日K或周K。"),
+      start_date: textSchema("开始日期（YYYY-MM-DD）。"),
+      end_date: textSchema("结束日期（YYYY-MM-DD）。"),
+      event_type: textSchema("公司事件类型。"),
+      query: textSchema("市场新闻或指数查询关键词。"),
+      category: textSchema("新闻类别。"),
+      market: textSchema("市场代码，例如 US。"),
+      interval: textSchema("数据间隔，例如 tick。"),
+      commodity_name: textSchema("商品名称，例如 WTI 或 Gold。"),
+      frequency: textSchema("商品数据频率。"),
+      limit: { type: "integer", minimum: 1, maximum: 20 },
+    }, ["kind"]),
+    executionMode: "sequential",
+    execute(toolCallId, params, signal) { return executeFolioMindData(params, toolCallId, signal); },
   });
 }

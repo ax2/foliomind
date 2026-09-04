@@ -1020,7 +1020,7 @@ function requireSession(req) {
 }
 function toolDefinitions() {
   return [
-    { type: "function", function: { name: "foliomind_data", description: "FolioMind 内置金融数据工具。优先直接调用已验证的 QVeris Finance CAP；缓存不存在或失效时，再使用 qveris_search、qveris_inspect、qveris_call 建立固化工具。", parameters: { type: "object", properties: { kind: { type: "string", enum: ["quote", "details", "series", "core_event", "capital_flow", "sentiment"] }, symbol: { type: "string" }, range: { type: "string" }, start_date: { type: "string" }, end_date: { type: "string" }, event_type: { type: "string" }, query: { type: "string" } }, required: ["kind", "symbol"], additionalProperties: false } } },
+    { type: "function", function: { name: "foliomind_data", description: "FolioMind 内置金融数据工具。直接调用已验证的稳定 QVeris Finance CAP，不需要重复 Search；只有能力未固化时才使用 qveris_search、qveris_inspect、qveris_call 建立受控回退。缺少真实字段时必须返回空态，不得补造数据。", parameters: { type: "object", properties: { kind: { type: "string", enum: ["quote", "details", "series", "core_event", "capital_flow", "sentiment", "market_news", "index_levels", "commodity"] }, symbol: { type: "string", description: "个股或指数代码；市场新闻和商品查询可省略" }, range: { type: "string" }, start_date: { type: "string" }, end_date: { type: "string" }, event_type: { type: "string" }, query: { type: "string", description: "市场新闻或指数查询关键词" }, category: { type: "string" }, market: { type: "string" }, interval: { type: "string" }, commodity_name: { type: "string", description: "商品名称，例如 WTI 或 Gold" }, frequency: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 20 } }, required: ["kind"], additionalProperties: false } } },
     { type: "function", function: { name: "qveris_search", description: "搜索 QVeris 数据能力。外部、实时或专业数据先搜索，随后必须 Inspect。", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 20 } }, required: ["query"], additionalProperties: false } } },
     { type: "function", function: { name: "qveris_inspect", description: "检查 Search 返回的候选工具参数；Call 前必需。", parameters: { type: "object", properties: { tool_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 5 }, search_id: { type: "string" } }, required: ["tool_ids", "search_id"], additionalProperties: false } } },
     { type: "function", function: { name: "qveris_call", description: "调用已 Search 且 Inspect 的 QVeris 工具。", parameters: { type: "object", properties: { tool_id: { type: "string" }, parameters: { type: "object", additionalProperties: true }, search_id: { type: "string" } }, required: ["tool_id", "parameters", "search_id"], additionalProperties: false } } },
@@ -1195,7 +1195,7 @@ async function runPromptAgent(message, settings, key, signal) {
   const runId = `product_${randomUUID()}`;
   const phases = { searches: new Map(), inspected: new Set() };
   const audits = [];
-  const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。行情、公司资料、估值、历史序列、公司事件、资金流和标注新闻优先调用内置 foliomind_data（它直连 qveris_finance CAP，避免重复发现工具）；只有能力不可用时，才按 Search → Inspect → Call 顺序使用 QVeris 工具并让系统固化本次选择。回答要标明数据时间、来源和不确定性，绝不编造缺失数据。" }, { role: "user", content: message }];
+  const messages = [{ role: "system", content: "你是 FolioMind 金融研究 Agent。行情、公司资料、估值、历史序列、公司事件、资金流、标注新闻、行业/宏观新闻、海外指数和大宗商品优先调用内置 foliomind_data（它直连已验证的 qveris_finance CAP，避免重复发现工具）；只有能力明确不可用时，才按 Search → Inspect → Call 顺序使用 QVeris 工具并让系统固化本次选择。回答要标明数据时间、来源和不确定性，绝不编造缺失数据。" }, { role: "user", content: message }];
   for (let round = 0; round < 8; round += 1) {
     const modelStartedAt = Date.now();
     let response;
