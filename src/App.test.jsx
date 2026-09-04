@@ -614,6 +614,19 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState().notifications[0].read).toBe(true);
   });
 
+  it("keeps notification actions outside the interactive message surface", () => {
+    useLabStore.setState({
+      activeView: "notifications",
+      notifications: [{ id: "n-monitor", kind: "monitor", symbol: "300750", name: "宁德时代", title: "宁德时代 · 突破提醒", body: "真实数据触发条件", severity: "warning", createdAt: "2026-08-30T08:00:00Z", read: false, source: "data-service" }],
+    });
+    render(<NotificationsView />);
+    const messageSurface = screen.getByRole("button", { name: "未读消息：宁德时代 · 突破提醒" });
+    const card = messageSurface.closest("article");
+    expect(card).not.toHaveAttribute("role", "button");
+    expect(messageSurface.querySelector("button")).toBeNull();
+    expect(card?.querySelector(".notification-item-actions")).toBeInTheDocument();
+  });
+
   it("lets users reduce system notification noise without filtering the inbox", () => {
     setSystemNotificationsEnabled(true);
     setSystemNotificationMode(SYSTEM_NOTIFICATION_MODES.ALL);
