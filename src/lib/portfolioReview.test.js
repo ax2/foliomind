@@ -24,4 +24,19 @@ describe("portfolio close review", () => {
     expect(() => createPortfolioReviewSnapshot({ positions: [], liveQuotes: {} })).toThrow("请先添加持仓");
     expect(() => createPortfolioReviewSnapshot({ positions, liveQuotes: {} })).toThrow("当前没有真实持仓行情");
   });
+
+  it("matches provider exchange suffixes and Shanghai calendar dates", () => {
+    const review = createPortfolioReviewSnapshot({
+      positions: [{ id: "hk-1", symbol: "0700.HK", name: "Tencent", market: "HKEX", quantity: 1, averageCost: 300 }],
+      liveQuotes: { "HKEX:0700": { price: 320, asOf: "2026-08-30T08:00:00Z", source: "provider-hk" } },
+      events: [
+        { symbol: "0700", date: "2026-09-06T16:30:00Z", title: "香港市场事件" },
+        { symbol: "0700.HK", date: "2026-09-07", title: "日期边界事件" },
+        { symbol: "0700", date: "2026-09-08", title: "窗口外事件" },
+      ],
+      createdAt: "2026-08-30T16:30:00Z",
+    });
+    expect(review.tradingDate).toBe("2026-08-31");
+    expect(review.upcomingEvents.map((event) => event.title)).toEqual(["香港市场事件", "日期边界事件"]);
+  });
 });

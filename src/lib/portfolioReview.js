@@ -1,4 +1,6 @@
 import { portfolioMetrics, portfolioRiskMetrics } from "./portfolio.js";
+import { eventDateKey } from "./eventCalendar.js";
+import { quoteForSymbol, quoteSymbolKey } from "./quoteFormatting.js";
 
 const DISCLAIMER = "本复盘仅整理已返回的真实数据，不构成投资建议或交易指令。";
 
@@ -22,14 +24,21 @@ function latestTimestamp(values) {
 }
 
 function upcomingPortfolioEvents(events, symbols, createdAt) {
-  const start = new Date(createdAt).getTime();
-  const end = start + 7 * 86_400_000;
+  const startKey = eventDateKey(createdAt);
+  if (!startKey) return [];
+  const [year, month, day] = startKey.split("-").map(Number);
+  const endKey = new Date(Date.UTC(year, month - 1, day + 7)).toISOString().slice(0, 10);
   return (Array.isArray(events) ? events : []).flatMap((event) => {
-    const time = Date.parse(event?.date);
-    const symbol = String(event?.symbol || "").toUpperCase();
-    if (!symbols.has(symbol) || !Number.isFinite(time) || time < start || time > end) return [];
+    const eventKey = eventDateKey(event?.date);
+    const symbol = String(event?.symbol || "").trim().toUpperCase();
+    const symbolKey = quoteSymbolKey(symbol);
+    if (!symbols.has(symbolKey) || !eventKey || eventKey < startKey || eventKey > endKey) return [];
     return [{ symbol, name: String(event?.name || symbol), date: String(event.date), type: String(event?.type || "公司事件"), title: String(event?.title || "未命名事件"), source: String(event?.source || "数据服务"), url: String(event?.url || "") }];
-  }).sort((left, right) => Date.parse(left.date) - Date.parse(right.date)).slice(0, 12);
+  }).sort((left, right) => {
+    const leftKey = eventDateKey(left.date);
+    const rightKey = eventDateKey(right.date);
+    return leftKey.localeCompare(rightKey) || String(left.date).localeCompare(String(right.date));
+  }).slice(0, 12);
 }
 
 /** Build a reproducible close review from real quotes already held by the client. */
@@ -43,7 +52,7 @@ export function createPortfolioReviewSnapshot({ positions, liveQuotes, events = 
     weight: row.weight, asOf: String(row.quote?.asOf || ""), source: String(row.quote?.source || "数据服务"),
   }));
   const ranked = [...priced].sort((left, right) => (right.pnlPercent ?? -Infinity) - (left.pnlPercent ?? -Infinity));
-  const symbols = new Set(metrics.rows.map((row) => String(row.symbol).toUpperCase()));
+  const symbols = new Set(metrics.rows.map((row) => quoteSymbolKey(row.symbol)).filter(Boolean));
   const sources = [...new Set(priced.map((row) => row.source).filter(Boolean))].slice(0, 12);
   return {
     id: String(id || `review-${createdAt}`), kind: "close", tradingDate: isoDay(createdAt), createdAt,
