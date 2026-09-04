@@ -10,6 +10,11 @@ export const defaultIntegrationSettings = {
   dataProvider: "qveris_finance",
 };
 
+export const DATA_CHANNEL_OPTIONS = Object.freeze([
+  { id: "qveris-cap", label: "QVeris CAP（默认）", description: "使用内置金融能力目录与稳定 tool schema" },
+  { id: "cap-compatible", label: "兼容 CAP 网关", description: "使用相同 tool schema；将来可切换到其他数据渠道" },
+]);
+
 export function apiKeyPrefix(value) {
   const key = String(value || "").trim();
   if (!key) return "";

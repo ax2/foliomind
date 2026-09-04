@@ -87,6 +87,25 @@ fn cache_key(base_url: &str, kind: &str, params: &Value) -> String {
     )
 }
 
+fn scoped_cache_key(
+    base_url: &str,
+    channel: &str,
+    provider: &str,
+    kind: &str,
+    params: &Value,
+) -> String {
+    cache_key(
+        &format!(
+            "{}|{}|{}",
+            base_url.trim_end_matches('/'),
+            channel,
+            provider
+        ),
+        kind,
+        params,
+    )
+}
+
 fn today_in_shanghai(now: DateTime<Utc>) -> chrono::NaiveDate {
     now.with_timezone(&Shanghai).date_naive()
 }
@@ -653,17 +672,25 @@ fn execute(
 pub fn query(
     api_key: &str,
     capability_base_url: &str,
+    data_channel: &str,
+    data_provider: &str,
     input: CapabilityQueryInput,
 ) -> Result<CapabilityQueryResult, String> {
     let kind = input.kind.trim();
     let primary = spec(kind).ok_or("没有对应的金融能力")?;
     let primary_params = parameters(&input, kind)?;
     let ttl = cache_ttl(kind);
-    let key = cache_key(capability_base_url, kind, &primary_params);
+    let key = scoped_cache_key(
+        capability_base_url,
+        data_channel,
+        data_provider,
+        kind,
+        &primary_params,
+    );
     if let Some(data) = cached_data(&key, ttl) {
         return Ok(CapabilityQueryResult {
             data,
-            mode: "qveris-cap".into(),
+            mode: data_channel.to_owned(),
             cache_hit: true,
             audits: vec![cache_audit(&primary, &primary_params)],
             tool_id: primary.tool_id.into(),
@@ -716,7 +743,7 @@ pub fn query(
         }
         return Ok(CapabilityQueryResult {
             data,
-            mode: "qveris-cap".into(),
+            mode: data_channel.to_owned(),
             cache_hit: false,
             audits,
             tool_id: primary.tool_id.into(),
@@ -728,7 +755,7 @@ pub fn query(
     store_cached_data(key, &data);
     Ok(CapabilityQueryResult {
         data,
-        mode: "qveris-cap".into(),
+        mode: data_channel.to_owned(),
         cache_hit: false,
         audits: vec![primary_audit],
         tool_id: primary.tool_id.into(),
@@ -893,6 +920,17 @@ mod tests {
         assert_eq!(first, same);
         assert_ne!(first, other_kind);
         assert_ne!(first, other_params);
+    }
+
+    #[test]
+    fn scoped_cache_key_isolated_by_channel_and_provider() {
+        let base = "https://example.test/api/v1";
+        let params = json!({"symbol": "600519"});
+        let qveris = scoped_cache_key(base, "qveris-cap", "qveris_finance", "quote", &params);
+        let alternate_channel = scoped_cache_key(base, "cap-compatible", "qveris_finance", "quote", &params);
+        let alternate_provider = scoped_cache_key(base, "qveris-cap", "custom_finance", "quote", &params);
+        assert_ne!(qveris, alternate_channel);
+        assert_ne!(qveris, alternate_provider);
     }
 
     #[test]

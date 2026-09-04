@@ -1122,6 +1122,8 @@ struct SettingsInput {
     capability_base_url: String,
     model_gateway_base_url: String,
     model_id: String,
+    data_channel: String,
+    data_provider: String,
 }
 
 #[tauri::command]
@@ -1164,6 +1166,8 @@ fn settings_from_input(
     settings.capability_base_url = capability_base_url;
     settings.model_gateway_base_url = model_gateway_base_url;
     settings.model_id = input.model_id.trim().to_owned();
+    settings.data_channel = input.data_channel;
+    settings.data_provider = input.data_provider;
     config::validate(&settings)?;
     config::validate_model_selection(&settings)?;
     Ok(settings)
@@ -1251,6 +1255,8 @@ fn sync_model_catalog(
         .trim_end_matches('/')
         .to_owned();
     settings.model_id = input.model_id.trim().to_owned();
+    settings.data_channel = input.data_channel;
+    settings.data_provider = input.data_provider;
     config::validate(&settings)?;
     let base_url = settings.model_gateway_base_url.clone();
     let models = executor::fetch_model_catalog(&key, &base_url)?;
@@ -1334,7 +1340,13 @@ async fn qveris_data_query(
             .read_qveris_key()?
             .ok_or("请先配置 QVeris API Key")?;
         let settings = config::load(&app)?;
-        let result = match capability_data::query(&key, &settings.capability_base_url, input) {
+        let result = match capability_data::query(
+            &key,
+            &settings.capability_base_url,
+            &settings.data_channel,
+            &settings.data_provider,
+            input,
+        ) {
             Ok(result) => result,
             Err(error) => {
                 let record = capability_data::error_audit(&input_for_error, &error);
@@ -1653,6 +1665,8 @@ mod tests {
                 capability_base_url: " https://qveris.ai/api/v1/ ".into(),
                 model_gateway_base_url: " https://aigateway.qveris.ai/v1/ ".into(),
                 model_id: " model-a ".into(),
+                data_channel: "qveris-cap".into(),
+                data_provider: "qveris_finance".into(),
             },
         )
         .unwrap();
@@ -1666,6 +1680,8 @@ mod tests {
                 capability_base_url: "https://qveris.ai/api/v1".into(),
                 model_gateway_base_url: "https://other.example.com/v1".into(),
                 model_id: "model-a".into(),
+                data_channel: "qveris-cap".into(),
+                data_provider: "qveris_finance".into(),
             },
         )
         .is_err());
@@ -1686,6 +1702,8 @@ mod tests {
             capability_base_url: "https://qveris.ai/api/v1".into(),
             model_gateway_base_url: "https://models.example.com/v1".into(),
             model_id: "model-b".into(),
+            data_channel: "qveris-cap".into(),
+            data_provider: "qveris_finance".into(),
         };
 
         let prepared = settings_from_input(&current, Some(&staged), input()).unwrap();
@@ -1714,6 +1732,8 @@ mod tests {
                 capability_base_url: current.capability_base_url.clone(),
                 model_gateway_base_url: current.model_gateway_base_url.clone(),
                 model_id: "model-c".into(),
+                data_channel: "qveris-cap".into(),
+                data_provider: "qveris_finance".into(),
             },
         )
         .unwrap();

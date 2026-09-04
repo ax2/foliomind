@@ -19,8 +19,11 @@ use std::{
 
 pub const DEFAULT_CAPABILITY_URL: &str = "https://qveris.ai/api/v1";
 pub const DEFAULT_MODEL_GATEWAY_URL: &str = "https://aigateway.qveris.ai/v1";
+pub const DEFAULT_DATA_CHANNEL: &str = "qveris-cap";
+pub const DEFAULT_DATA_PROVIDER: &str = "qveris_finance";
 pub const MAX_MODEL_CATALOG_ITEMS: usize = 500;
 pub const MAX_MODEL_ID_BYTES: usize = 256;
+const MAX_DATA_SELECTOR_BYTES: usize = 128;
 const MAX_SETTINGS_BYTES: u64 = 2 * 1024 * 1024;
 static CONFIG_IO_LOCK: Mutex<()> = Mutex::new(());
 
@@ -31,6 +34,8 @@ pub struct IntegrationSettings {
     pub model_gateway_base_url: String,
     pub model_id: String,
     pub models: Vec<Value>,
+    pub data_channel: String,
+    pub data_provider: String,
 }
 
 impl Default for IntegrationSettings {
@@ -40,6 +45,8 @@ impl Default for IntegrationSettings {
             model_gateway_base_url: DEFAULT_MODEL_GATEWAY_URL.into(),
             model_id: String::new(),
             models: Vec::new(),
+            data_channel: DEFAULT_DATA_CHANNEL.into(),
+            data_provider: DEFAULT_DATA_PROVIDER.into(),
         }
     }
 }
@@ -162,6 +169,8 @@ pub fn validate(settings: &IntegrationSettings) -> Result<(), String> {
     if settings.models.len() > MAX_MODEL_CATALOG_ITEMS {
         return Err("model catalog is too large".into());
     }
+    validate_data_selector(&settings.data_channel, "data channel")?;
+    validate_data_selector(&settings.data_provider, "data provider")?;
     let mut model_ids = HashSet::with_capacity(settings.models.len());
     for model in &settings.models {
         let id = model
@@ -178,6 +187,20 @@ pub fn validate(settings: &IntegrationSettings) -> Result<(), String> {
         if !model_ids.insert(id) {
             return Err("model catalog contains duplicate model IDs".into());
         }
+    }
+    Ok(())
+}
+
+fn validate_data_selector(value: &str, label: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value != value.trim()
+        || value.len() > MAX_DATA_SELECTOR_BYTES
+        || value.chars().any(char::is_control)
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+        })
+    {
+        return Err(format!("{label} is invalid"));
     }
     Ok(())
 }
@@ -364,6 +387,20 @@ mod tests {
             value.model_gateway_base_url,
             "https://aigateway.qveris.ai/v1"
         );
+        assert_eq!(value.data_channel, DEFAULT_DATA_CHANNEL);
+        assert_eq!(value.data_provider, DEFAULT_DATA_PROVIDER);
+    }
+
+    #[test]
+    fn validates_data_channel_and_provider_selectors() {
+        let mut value = IntegrationSettings::default();
+        value.data_channel = "cap-compatible".into();
+        value.data_provider = "custom_finance.v1".into();
+        assert!(validate(&value).is_ok());
+        value.data_provider = "provider with spaces".into();
+        assert!(validate(&value).is_err());
+        value.data_provider = "provider/with/slash".into();
+        assert!(validate(&value).is_err());
     }
 
     #[test]

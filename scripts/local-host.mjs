@@ -13,6 +13,8 @@ const MAX_BODY = 512 * 1024;
 const DEFAULT_CAPABILITY = "https://qveris.ai/api/v1";
 const DEFAULT_GATEWAY = "https://aigateway.qveris.ai/v1";
 export const DEFAULT_DATA_PROVIDER = "qveris_finance";
+export const DEFAULT_DATA_CHANNEL = "qveris-cap";
+export const DATA_SELECTOR_MAX_LENGTH = 128;
 export const CAPABILITY_CATALOG_VERSION = 3;
 const BRIDGE_LIMIT = 20;
 const CAPABILITY_DIRECTORY_LIMIT = 100;
@@ -38,7 +40,7 @@ export const DEVELOPER_LOG_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 const MAX_PERSISTED_DEVELOPER_LOGS = 2_000;
 const MAX_PERSISTED_DEVELOPER_LOG_BYTES = 8 * 1024 * 1024;
 
-const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [], dataChannel: "qveris-cap", dataProvider: DEFAULT_DATA_PROVIDER };
+const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [], dataChannel: DEFAULT_DATA_CHANNEL, dataProvider: DEFAULT_DATA_PROVIDER };
 const defaultState = {
   watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }, { symbol: "300750", name: "宁德时代", market: "深市", category: "新能源" }],
   monitorRules: [],
@@ -412,7 +414,17 @@ export function validateIntegrationSettings(value = {}) {
   const settings = { ...defaultSettings, ...(value && typeof value === "object" ? value : {}) };
   validateEndpointUrl(settings.capabilityBaseUrl, "数据能力地址");
   validateEndpointUrl(settings.modelGatewayBaseUrl, "模型网关地址");
+  validateDataSelector(settings.dataChannel, "数据渠道");
+  validateDataSelector(settings.dataProvider, "数据 Provider");
   return settings;
+}
+
+export function validateDataSelector(value, label = "数据选择器") {
+  const selector = String(value ?? "");
+  if (!selector || selector !== selector.trim() || selector.length > DATA_SELECTOR_MAX_LENGTH || !/^[A-Za-z0-9._:-]+$/.test(selector)) {
+    throw new Error(`${label}无效`);
+  }
+  return selector;
 }
 
 function endpointInput(input, key, fallback, label) {

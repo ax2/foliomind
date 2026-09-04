@@ -6,7 +6,7 @@ const localHost = vi.hoisted(() => ({ isLocalWebRuntime: vi.fn(() => false), loc
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("./localHost.js", () => localHost);
 
-import { applyIntegrationSettings, loadIntegrationStatus, queryCapabilityData, queryTradingCalendar, syncQVerisModels, testModelConnection } from "./integrations.js";
+import { applyIntegrationSettings, DATA_CHANNEL_OPTIONS, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, queryTradingCalendar, syncQVerisModels, testModelConnection } from "./integrations.js";
 
 describe("integration client", () => {
   beforeEach(() => {
@@ -14,6 +14,11 @@ describe("integration client", () => {
     tauri.invoke.mockReset();
     localHost.isLocalWebRuntime.mockReset().mockReturnValue(false);
     localHost.localHostRequest.mockReset();
+  });
+
+  it("exposes a stable default CAP channel and a future-compatible option", () => {
+    expect(defaultIntegrationSettings.dataChannel).toBe("qveris-cap");
+    expect(DATA_CHANNEL_OPTIONS.map((item) => item.id)).toEqual(["qveris-cap", "cap-compatible"]);
   });
 
   afterEach(() => {

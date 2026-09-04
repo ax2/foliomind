@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, dateStringInTimeZone, debugPayload, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, directCapabilityParameters, MAX_DIRECT_DATA_CACHE_ENTRIES, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
+import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, dateStringInTimeZone, debugPayload, DEFAULT_DATA_CHANNEL, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, directCapabilityParameters, MAX_DIRECT_DATA_CACHE_ENTRIES, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDataSelector, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -58,6 +58,14 @@ test("keeps Local Host endpoint validation aligned with the desktop security bou
   }
   assert.doesNotThrow(() => validateIntegrationSettings({ capabilityBaseUrl: "https://api.example.com/v1", modelGatewayBaseUrl: "https://gateway.example.com/v1" }));
   assert.throws(() => validateIntegrationSettings({ capabilityBaseUrl: "http://api.example.com/v1" }));
+});
+
+test("validates configurable CAP channel and provider selectors", () => {
+  assert.equal(DEFAULT_DATA_CHANNEL, "qveris-cap");
+  assert.equal(validateDataSelector("cap-compatible"), "cap-compatible");
+  assert.throws(() => validateDataSelector("provider with spaces"));
+  assert.throws(() => validateDataSelector("provider/with/slash"));
+  assert.doesNotThrow(() => validateIntegrationSettings({ dataChannel: "cap-compatible", dataProvider: "custom_finance.v1" }));
 });
 
 test("extracts provider and model gateway costs without inventing missing charges", () => {
