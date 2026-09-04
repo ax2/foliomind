@@ -647,7 +647,13 @@ async fn execute_official_api(
         let input: capability_data::CapabilityQueryInput =
             serde_json::from_value(request.input.clone())
                 .map_err(|_| "FolioMind 数据能力参数无效".to_string())?;
-        let result = capability_data::query(&key, base_url, input)?;
+        let result = capability_data::query(
+            &key,
+            base_url,
+            config::DEFAULT_DATA_CHANNEL,
+            config::DEFAULT_DATA_PROVIDER,
+            input,
+        )?;
         return Ok(json!({
             "data": result.data,
             "mode": result.mode,
