@@ -31,7 +31,12 @@ export const LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS = 180_000;
 // Backward-compatible alias for integrations that imported the old constant.
 export const LIVE_QUOTE_REFRESH_INTERVAL_MS = LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS;
 export const BRIEFING_RECONCILE_INTERVAL_MS = 60_000;
-const DEFAULT_LIVE_QUOTE_CONCURRENCY = 2;
+// Local Web is the primary rapid-debug path. Four in-flight CAP calls keep a
+// six-to-eight symbol watchlist responsive without removing the upper bound
+// that protects provider rate limits. The native desktop scheduler stays more
+// conservative because it shares the process with Pi and background checks.
+const DEFAULT_LIVE_QUOTE_CONCURRENCY = 4;
+const DESKTOP_LIVE_QUOTE_CONCURRENCY = 2;
 const MAX_LIVE_QUOTE_CONCURRENCY = 4;
 const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) => normalizeWatchlistItem({ ...item, group: group.label }))).slice(0, 8);
@@ -500,7 +505,7 @@ function priceMonitorResult(rule, item, quote) {
 }
 
 function resolveLiveQuoteConcurrency() {
-  if (!isLocalWebRuntime()) return DEFAULT_LIVE_QUOTE_CONCURRENCY;
+  if (!isLocalWebRuntime()) return DESKTOP_LIVE_QUOTE_CONCURRENCY;
   const configured = Number(getDeveloperVariable("maxConcurrentDataRequests", DEFAULT_LIVE_QUOTE_CONCURRENCY));
   if (Number.isInteger(configured)) return Math.max(1, Math.min(MAX_LIVE_QUOTE_CONCURRENCY, configured));
   return DEFAULT_LIVE_QUOTE_CONCURRENCY;

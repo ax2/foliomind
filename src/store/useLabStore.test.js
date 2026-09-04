@@ -531,7 +531,7 @@ describe("lab store streaming lifecycle", () => {
     expect(runtime.queryTradingCalendar).toHaveBeenNthCalledWith(2, "2026-09-01", "212100");
   });
 
-  it("refreshes multiple watchlist quotes with the local concurrency limit", async () => {
+  it("refreshes multiple watchlist quotes with the local four-request concurrency limit", async () => {
     const watchlist = [
       { symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" },
       { symbol: "300750", name: "宁德时代", market: "沪深", category: "新能源" },
@@ -550,7 +550,7 @@ describe("lab store streaming lifecycle", () => {
     });
 
     await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
-    expect(maxActive).toBe(2);
+    expect(maxActive).toBe(4);
     expect(Object.keys(useLabStore.getState().liveQuotes)).toHaveLength(4);
   });
 
