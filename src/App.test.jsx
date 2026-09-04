@@ -8,6 +8,7 @@ import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { initialLabState, useLabStore } from "./store/useLabStore.js";
 import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFICATION_MODES } from "./lib/systemNotifications.js";
+import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
 const originalHydrateUserState = useLabStore.getState().hydrateUserState;
@@ -63,6 +64,7 @@ vi.mock("./lib/localHost.js", async (importOriginal) => ({
 afterEach(cleanup);
 
 beforeEach(() => {
+  window.localStorage.removeItem(REFRESH_POLICY_STORAGE_KEY);
   integrationMocks.applyIntegrationSettings.mockReset();
   integrationMocks.queryCapabilityData.mockReset();
   integrationMocks.testModelConnection.mockReset().mockResolvedValue({ text: "模型连接正常", model: "model-a" });
@@ -1163,6 +1165,32 @@ describe("FolioMind core flows", () => {
     } finally {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
     }
+  });
+
+  it("persists the selected automatic quote refresh strategy", async () => {
+    render(<SettingsView />);
+    const policy = await screen.findByRole("combobox", { name: "行情自动刷新策略" });
+    expect(policy).toHaveValue("realtime");
+    fireEvent.change(policy, { target: { value: "manual" } });
+    expect(policy).toHaveValue("manual");
+    expect(window.localStorage.getItem(REFRESH_POLICY_STORAGE_KEY)).toBe("manual");
+    expect(screen.getByText("行情自动刷新已切换为“手动”", { exact: true })).toBeInTheDocument();
+  });
+
+  it("does not start background quote polling in manual strategy", async () => {
+    window.localStorage.setItem(REFRESH_POLICY_STORAGE_KEY, "manual");
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    integrationMocks.loadIntegrationStatus.mockResolvedValue({
+      credentialConfigured: true,
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "local-host",
+    });
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData });
+    render(<App />);
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(refreshLiveData).not.toHaveBeenCalled();
   });
 
   it("requires a fresh model sync after changing the gateway", async () => {

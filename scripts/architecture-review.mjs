@@ -28,6 +28,7 @@ const labStore = await load("src/store/useLabStore.js");
 const qaPlaywright = await load("scripts/qa-playwright.py");
 const commandPalette = await load("src/components/CommandPalette.jsx");
 const systemNotifications = await load("src/lib/systemNotifications.js");
+const refreshPolicy = await load("src/lib/refreshPolicy.js");
 const hostLockTest = await load("scripts/local-host.test.mjs");
 const storeTest = await load("src/store/useLabStore.test.js");
 const version = packageJson.version;
@@ -158,6 +159,7 @@ check("桌面 CAP 缓存与失效", capabilityData.includes("cache_ttl") && capa
 check("Local Host CAP 缓存容量与回收", localHost.includes("MAX_DIRECT_DATA_CACHE_ENTRIES = 256") && localHost.includes("cache.delete(key)") && localHost.includes("while (cache.size > limit)") && localHost.includes("if (cached) directDataCache.delete(cacheKeyValue)") && hostLockTest.includes("keeps the direct CAP cache bounded") && prd.includes("Stage 3EA Local Host CAP 缓存容量与长驻回收"), "Local Host direct CAP 缓存必须有界、命中续期并清理过期条目，长驻调试不能无限增长或复用过期真实数据");
 check("Local Host 交易日历实时门禁", localHost.includes("trading_calendar: 0") && capabilityData.includes('cache_ttl("trading_calendar").is_zero()') && hostIntegrationTest.includes("never caches trading-calendar gates") && prd.includes("Stage 3EB 交易日历实时门禁"), "交易日历不得使用 Local Host 或桌面缓存，自动复盘必须基于当前真实交易日历判断");
 check("系统通知分级与站内留痕", systemNotifications.includes("SYSTEM_NOTIFICATION_MODES") && systemNotifications.includes("shouldSendSystemNotification") && systemNotifications.includes("systemNotificationMode()") && systemNotifications.includes('notification?.severity === "critical"') && settingsView.includes("系统通知级别") && prd.includes("Stage 3EC 系统通知分级策略"), "系统通知可按关键级别过滤，但站内消息、审计和费用不受影响");
+check("行情自动刷新策略", refreshPolicy.includes("REFRESH_POLICIES") && refreshPolicy.includes("saveRefreshPolicy") && refreshPolicy.includes("subscribeRefreshPolicy") && app.includes("refreshPolicyConfig(refreshPolicy)") && app.includes('policy.id === "manual"') && settingsView.includes("行情自动刷新策略") && settingsView.includes("频繁刷新会增加上游调用次数和费用") && prd.includes("Stage 3ED 行情自动刷新策略"), "行情轮询应支持实时、均衡和手动策略，手动模式停止后台请求且不改变显式刷新与真实数据门禁");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

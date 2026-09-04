@@ -2047,6 +2047,8 @@ textarea:focus-visible {
 .settings-card input:focus, .settings-card select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(22,119,255,.08); }
 .settings-card input:disabled, .settings-card select:disabled { background: #f7f8fa; color: #8b929c; cursor: not-allowed; }
 .settings-inline, .settings-actions { display: flex; align-items: center; gap: 9px; }
+.refresh-policy-select { min-width: 180px; }
+.refresh-policy-select select { width: 100%; }
 .settings-inline input { flex: 1; }
 .connection-test-row { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
 .connection-test-status { min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }

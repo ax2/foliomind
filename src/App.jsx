@@ -2,7 +2,7 @@ import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
 import { BRIEFING_RECONCILE_INTERVAL_MS, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
@@ -12,6 +12,7 @@ import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
 import { friendlyDataMessage } from "./lib/friendlyMessages.js";
+import { loadRefreshPolicy, refreshPolicyConfig, subscribeRefreshPolicy } from "./lib/refreshPolicy.js";
 
 // The secondary workspaces are intentionally kept out of the initial route.
 // They share one module so switching views still incurs a single, cacheable
@@ -35,6 +36,7 @@ export function App() {
   const hydrateUserState = useLabStore((state) => state.hydrateUserState);
   const hydrateIntegrationStatus = useLabStore((state) => state.hydrateIntegrationStatus);
   const refreshLiveData = useLabStore((state) => state.refreshLiveData);
+  const cancelLiveDataRefresh = useLabStore((state) => state.cancelLiveDataRefresh);
   const userStateLoaded = useLabStore((state) => state.userStateLoaded);
   const userStateLoading = useLabStore((state) => state.userStateLoading);
   const userStateError = useLabStore((state) => state.userStateError);
@@ -44,9 +46,11 @@ export function App() {
   const rules = useLabStore((state) => state.rules);
   const runDueMonitorChecks = useLabStore((state) => state.runDueMonitorChecks);
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
+  const [refreshPolicy, setRefreshPolicy] = useState(loadRefreshPolicy);
   const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
   const pollingChannelRef = useRef("");
+  useEffect(() => subscribeRefreshPolicy(setRefreshPolicy), []);
   useEffect(() => {
     void hydrateUserState();
     void hydrateIntegrationStatus();
@@ -95,6 +99,11 @@ export function App() {
   useEffect(() => {
     if (!userStateLoaded || !integrationStatus?.credentialConfigured) return undefined;
     if (typeof window === "undefined" || typeof document === "undefined") return undefined;
+    const policy = refreshPolicyConfig(refreshPolicy);
+    if (policy.id === "manual") {
+      cancelLiveDataRefresh();
+      return undefined;
+    }
     const isVisible = () => document.visibilityState !== "hidden";
     const prioritySymbols = [...new Set(priorityRefreshKey.split("|").filter(Boolean))];
     const refreshPriority = () => {
@@ -110,8 +119,8 @@ export function App() {
     pollingChannelRef.current = integrationRefreshKey;
     if (channelChanged) refreshFull();
     else refreshPriority();
-    const priorityTimer = window.setInterval(refreshPriority, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS);
-    const fullTimer = window.setInterval(refreshFull, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS);
+    const priorityTimer = window.setInterval(refreshPriority, policy.priorityIntervalMs || LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS);
+    const fullTimer = window.setInterval(refreshFull, policy.fullIntervalMs || LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS);
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") refreshPriority();
     };
@@ -124,7 +133,7 @@ export function App() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", onWindowFocus);
     };
-  }, [userStateLoaded, integrationRefreshKey, priorityRefreshKey, refreshLiveData]);
+  }, [userStateLoaded, integrationRefreshKey, priorityRefreshKey, refreshLiveData, refreshPolicy, cancelLiveDataRefresh]);
   const renderSecondaryView = (view, withLiveQuotes = false) => <Suspense fallback={secondaryViewLoading}>
     {withLiveQuotes ? <div className="secondary-view-shell"><LiveQuotesStrip /><SecondaryViewModule view={view} /></div> : <SecondaryViewModule view={view} />}
   </Suspense>;

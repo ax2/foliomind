@@ -34,6 +34,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 行情图表设置支持独立显示 MA5/MA20 趋势线；指标只基于已返回的真实序列计算，窗口不足时保持不绘制。
 - 行情图表支持十字光标悬浮明细：按标的交易所时区显示完整日期时间、K 线 OHLC/面积图价格和可用 MA5/MA20；未知市场明确使用 UTC，不会残留旧点位。
 - 行情响应会拒绝 null/空字符串和零或负数价格；缺失涨跌幅保持空值，不会被隐式转换为 0 参与方向、宽度或组合统计。
+- 设置页支持实时、均衡、手动三种行情自动刷新策略；策略只保存在当前 WebView，手动模式停止后台行情轮询但保留显式刷新，帮助在实时性与 QVeris 调用成本之间取舍。
 - 市场页提供自选市场宽度概览：仅用真实报价统计上涨、下跌、平盘、最大涨幅和最大跌幅；缺失行情不会参与计算。
 - 异动雷达支持按需发起真实证据解读：聚合新闻、公司事件和资金流 CAP，诱因必须关联来源；证据不足时保持空态，不猜测原因。
 - 研究筛选工作台：按名称、代码、市场、涨跌方向及行情覆盖筛选自选标的，估值字段缺失时保持为空。
@@ -160,10 +161,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.181`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 只允许从当前 `main` 提交运行，并接收与仓库配置一致的 SemVer（当前为 `0.1.182`）。它会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.181 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.182 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。
