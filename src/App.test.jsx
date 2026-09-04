@@ -1180,6 +1180,31 @@ describe("FolioMind core flows", () => {
     }
   });
 
+  it("refreshes the full quote set when the saved credential changes", async () => {
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    const integrationStatus = {
+      credentialConfigured: true,
+      keyPrefix: "cap_old…",
+      settings: {
+        capabilityBaseUrl: "https://qveris.ai/api/v1",
+        modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1",
+        modelId: "model-a",
+        models: [{ id: "model-a", name: "Model A" }],
+      },
+      demo: false,
+      environment: "local-host",
+    };
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(integrationStatus);
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData });
+
+    render(<App />);
+    await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+    refreshLiveData.mockClear();
+
+    act(() => useLabStore.setState({ integrationStatus: { ...integrationStatus, keyPrefix: "cap_new…" } }));
+    await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+  });
+
   it("persists the selected automatic quote refresh strategy", async () => {
     render(<SettingsView />);
     const policy = await screen.findByRole("combobox", { name: "行情自动刷新策略" });

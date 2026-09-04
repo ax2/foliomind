@@ -48,7 +48,11 @@ export function App() {
   const runDuePortfolioReview = useLabStore((state) => state.runDuePortfolioReview);
   const runDuePremarketBriefing = useLabStore((state) => state.runDuePremarketBriefing);
   const [refreshPolicy, setRefreshPolicy] = useState(loadRefreshPolicy);
-  const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
+  // A credential replacement must invalidate the current data session even
+  // when all endpoint/model settings stay the same. keyPrefix is non-secret
+  // and changes with the saved credential, so it is safe to use as a refresh
+  // generation marker here.
+  const integrationRefreshKey = [integrationStatus?.credentialConfigured, integrationStatus?.keyPrefix, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
   const pollingChannelRef = useRef("");
   useEffect(() => subscribeRefreshPolicy(setRefreshPolicy), []);
