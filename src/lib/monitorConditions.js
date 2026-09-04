@@ -51,7 +51,7 @@ export const CONDITION_TYPES = Object.freeze([
     ],
     defaultOperator: "eq",
     defaultValue: "golden_cross",
-    strategyId: "price_change",
+    strategyId: "technical",
   },
   {
     id: "core_event",
@@ -64,7 +64,7 @@ export const CONDITION_TYPES = Object.freeze([
     operators: ["gte", "lte", "eq"],
     defaultOperator: "gte",
     defaultValue: 1,
-    strategyId: "news_risk",
+    strategyId: "core_event",
   },
   {
     id: "capital_flow",
@@ -77,7 +77,7 @@ export const CONDITION_TYPES = Object.freeze([
     operators: ["gte", "lte", "eq"],
     defaultOperator: "gte",
     defaultValue: 100000000,
-    strategyId: "volume_spike",
+    strategyId: "capital_flow",
   },
   {
     id: "sentiment",
@@ -95,7 +95,7 @@ export const CONDITION_TYPES = Object.freeze([
     ],
     defaultOperator: "eq",
     defaultValue: "negative",
-    strategyId: "news_risk",
+    strategyId: "sentiment",
   },
 ]);
 

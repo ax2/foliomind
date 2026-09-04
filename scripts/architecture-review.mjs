@@ -11,6 +11,7 @@ const [packageJson, cargoToml, tauriConfig, app, errorBoundary, stockWorkspace, 
 const quoteFormatting = await load("src/lib/quoteFormatting.js");
 const desktopLifecycleClient = await load("src/lib/desktopLifecycle.js");
 const monitorLifecycle = await load("src/lib/monitorLifecycle.js");
+const monitorConditions = await load("src/lib/monitorConditions.js");
 const strategies = await load("src/data/monitorStrategies.js");
 const research = await load("src/lib/research.js");
 const viteConfig = await load("vite.config.mjs");
@@ -163,6 +164,7 @@ check("系统通知分级与站内留痕", systemNotifications.includes("SYSTEM_
 check("行情自动刷新策略", refreshPolicy.includes("REFRESH_POLICIES") && refreshPolicy.includes("saveRefreshPolicy") && refreshPolicy.includes("subscribeRefreshPolicy") && app.includes("refreshPolicyConfig(refreshPolicy)") && app.includes('policy.id === "manual"') && settingsView.includes("行情自动刷新策略") && settingsView.includes("频繁刷新会增加上游调用次数和费用") && prd.includes("Stage 3ED 行情自动刷新策略"), "行情轮询应支持实时、均衡和手动策略，手动模式停止后台请求且不改变显式刷新与真实数据门禁");
 check("桌面 CAP 瞬时故障重试", capabilityData.includes("MAX_RETRY_ATTEMPTS") && capabilityData.includes("retryable_status") && capabilityData.includes("retry_delay") && capabilityData.includes("RETRY_AFTER") && capabilityData.includes("error.is_timeout()") && prd.includes("Stage 3EF 桌面 CAP 瞬时故障重试"), "桌面 CAP 通道需对连接/超时和限流/网关瞬时故障进行一次有界重试，尊重 Retry-After 且不把永久错误重复发送");
 check("跨端盘前摘要自动调度", briefingSchedule.includes("premarketSlot") && briefingSchedule.includes("premarketEnabled") && briefingSchedule.includes("premarketLastSuccessKey") && labStore.includes("runDuePremarketBriefing") && labStore.includes("premarketBriefingScheduleBusy") && userState.includes("premarketBriefing") && userState.includes("sanitizePremarketBriefing") && backgroundScheduler.includes("PREMARKET_EVENT") && backgroundScheduler.includes("premarket_due_state") && desktopLifecycleClient.includes("listenForBackgroundPremarket") && app.includes("listenForBackgroundPremarket") && marketViews.includes("自动生成盘前摘要") && prd.includes("Stage 3EG 跨端盘前摘要自动调度"), "盘前摘要必须在 Web/桌面共享北京时间、交易日历、真实 CAP、持久化、通知和幂等重试边界");
+check("盯盘条件策略语义", ["price_change", "volume_spike", "technical", "core_event", "capital_flow", "sentiment"].every((id) => monitorConditions.includes(`id: "${id}"`)) && strategies.includes('id: "technical"') && strategies.includes('id: "core_event"') && strategies.includes('id: "capital_flow"') && strategies.includes('id: "sentiment"') && prd.includes("Stage 3EH 盯盘条件与运行策略语义对齐"), "六类盯盘条件必须在编辑器、真实数据字段和运行策略中保持同一语义，并兼容旧 news_risk 规则");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { conditionOperatorsFor, conditionPrompt, conditionSummary, conditionsForRule, evaluateCondition, evaluateRuleConditions, normalizeConditions } from "./monitorConditions.js";
+import { strategyFor } from "../data/monitorStrategies.js";
 
 describe("monitor conditions", () => {
   it("supports all six condition types with safe defaults", () => {
@@ -46,5 +47,11 @@ describe("monitor conditions", () => {
 
   it("keeps legacy strategy-only rules compatible", () => {
     expect(conditionsForRule({ strategyId: "news_risk", threshold: 1 })[0]).toMatchObject({ type: "core_event", value: 1 });
+  });
+
+  it("keeps condition labels and runtime strategy prompts aligned", () => {
+    expect(strategyFor("technical")).toMatchObject({ name: "技术形态" });
+    expect(strategyFor("capital_flow")).toMatchObject({ name: "主力资金" });
+    expect(strategyFor("sentiment")).toMatchObject({ name: "产业舆情" });
   });
 });

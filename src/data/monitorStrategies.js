@@ -23,6 +23,38 @@ export const monitorStrategies = [
     unit: "条",
     prompt: "检查最近是否有可能影响标的的公告、监管信息或重大新闻，并给出发布时间、来源和影响判断。",
   },
+  {
+    id: "technical",
+    name: "技术形态",
+    description: "基于真实历史序列识别均线交叉与新高/新低",
+    defaultThreshold: 0,
+    unit: "",
+    prompt: "仅基于真实历史序列检查均线金叉、死叉、新高或新低，不足数据时返回未知并说明覆盖范围。",
+  },
+  {
+    id: "core_event",
+    name: "核心事件",
+    description: "发现财报、公告和公司事件",
+    defaultThreshold: 1,
+    unit: "条",
+    prompt: "检查最近是否有真实公司公告、财报或股东事件，并给出发布时间、来源和影响判断。",
+  },
+  {
+    id: "capital_flow",
+    name: "主力资金",
+    description: "监控真实资金流向变化",
+    defaultThreshold: 100000000,
+    unit: "元",
+    prompt: "检查真实资金流字段是否达到阈值，并给出统计口径、数据截至时间和来源。",
+  },
+  {
+    id: "sentiment",
+    name: "产业舆情",
+    description: "监控行业政策与产业链舆情",
+    defaultThreshold: 0,
+    unit: "",
+    prompt: "检查真实标注新闻与产业舆情方向，不得从缺失新闻推断情绪。",
+  },
 ];
 
 // New installations must not create billable background checks before the
