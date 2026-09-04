@@ -16,6 +16,7 @@ export const CAPABILITY_CATALOG_VERSION = 3;
 const BRIDGE_LIMIT = 20;
 const CAPABILITY_DIRECTORY_LIMIT = 100;
 export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
+export const MAX_DIRECT_DATA_CACHE_ENTRIES = 256;
 const token = `fh_${randomUUID()}`;
 const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
   process.env.XDG_CONFIG_HOME || (platform() === "win32" ? process.env.APPDATA || join(homedir(), "AppData", "Roaming") : join(homedir(), ".config")),
@@ -180,8 +181,20 @@ export function abortInFlightRequests(requests, reason = "aborted") {
   requests.clear();
 }
 
-export function cacheSharedResult(cache, key, normalized, { ttl = 0, cacheGeneration = 0, currentGeneration = 0, createdAt = Date.now() } = {}) {
-  if (ttl > 0 && cacheGeneration === currentGeneration) cache.set(key, { createdAt, normalized: structuredClone(normalized) });
+export function cacheSharedResult(cache, key, normalized, { ttl = 0, cacheGeneration = 0, currentGeneration = 0, createdAt = Date.now(), maxEntries = MAX_DIRECT_DATA_CACHE_ENTRIES } = {}) {
+  if (ttl > 0 && cacheGeneration === currentGeneration) {
+    // Refreshing an existing key moves it to the newest insertion position.
+    // This keeps the bounded cache useful for long-lived Hosts that see many
+    // symbols or parameter combinations over time.
+    cache.delete(key);
+    cache.set(key, { createdAt, normalized: structuredClone(normalized) });
+    const limit = Math.max(1, Number(maxEntries) || MAX_DIRECT_DATA_CACHE_ENTRIES);
+    while (cache.size > limit) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey === undefined) break;
+      cache.delete(oldestKey);
+    }
+  }
   return normalized;
 }
 
@@ -662,9 +675,14 @@ async function queryDirectCapability(input, settings, key, signal) {
     const cacheGeneration = directDataCacheGeneration;
     const cached = directDataCache.get(cacheKeyValue);
     if (cached && ttl > 0 && Date.now() - cached.createdAt < ttl) {
+      // A hit also refreshes insertion order so active symbols stay warm when
+      // the bounded cache reaches its capacity.
+      directDataCache.delete(cacheKeyValue);
+      directDataCache.set(cacheKeyValue, cached);
       logInvocation({ type: "cap", operation: "cap-cache-hit", kind: callKind, toolId: selected.toolId, provider: catalog.provider, capability: selected.capability, status: 200, cacheHit: true, durationMs: 0, params: parameters, response: cached.normalized });
       return { selected, normalized: structuredClone(cached.normalized), memoryCacheHit: true };
     }
+    if (cached) directDataCache.delete(cacheKeyValue);
     const inFlight = directDataInFlight.get(cacheKeyValue);
     if (inFlight) {
       try {

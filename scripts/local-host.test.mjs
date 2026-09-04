@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, debugPayload, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
+import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, debugPayload, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, MAX_DIRECT_DATA_CACHE_ENTRIES, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
 test("uses two concurrent data requests by default for local web refreshes", () => {
   assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
@@ -321,6 +321,19 @@ test("commits a shared CAP result even when the first waiter cancels", async () 
   resolveRequest(value);
   await assert.deepEqual(await second, value);
   assert.deepEqual(cache.get("quote-key"), { createdAt: 123, normalized: value });
+});
+
+test("keeps the direct CAP cache bounded and evicts the least recently used entry", () => {
+  assert.equal(MAX_DIRECT_DATA_CACHE_ENTRIES, 256);
+  const cache = new Map();
+  cacheSharedResult(cache, "old", { value: "old" }, { ttl: 15_000, cacheGeneration: 1, currentGeneration: 1, createdAt: 1, maxEntries: 2 });
+  cacheSharedResult(cache, "active", { value: "active" }, { ttl: 15_000, cacheGeneration: 1, currentGeneration: 1, createdAt: 2, maxEntries: 2 });
+  // Re-inserting a hot key moves it to the newest position before capacity is
+  // applied, matching the behavior of a long-running Host cache hit.
+  cacheSharedResult(cache, "old", { value: "old-refresh" }, { ttl: 15_000, cacheGeneration: 1, currentGeneration: 1, createdAt: 3, maxEntries: 2 });
+  cacheSharedResult(cache, "new", { value: "new" }, { ttl: 15_000, cacheGeneration: 1, currentGeneration: 1, createdAt: 4, maxEntries: 2 });
+  assert.equal(cache.has("active"), false);
+  assert.deepEqual([...cache.keys()], ["old", "new"]);
 });
 
 test("aborts and removes in-flight requests when the cache is reset", () => {
