@@ -5,7 +5,7 @@ import { ABORTED_CODE, abortPi, askPi, isDesktopRuntime } from "../lib/piRuntime
 import { getDeveloperVariable, isLocalWebRuntime } from "../lib/localHost.js";
 import { loadIntegrationStatus, queryCapabilityData, queryTradingCalendar } from "../lib/integrations.js";
 import { loadUserState, mergeUserStateChanges, normalizeUserState, saveUserState } from "../lib/userState.js";
-import { friendlyDataMessage } from "../lib/friendlyMessages.js";
+import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 import { hasModelAccess, hasRealDataAccess } from "../lib/dataStatus.js";
 import { normalizePortfolioPosition, portfolioAlertChecks } from "../lib/portfolio.js";
 import { sendSystemNotification } from "../lib/systemNotifications.js";
@@ -698,7 +698,7 @@ export const useLabStore = create((set, get) => ({
       return true;
     } catch (error) {
       if (get().credentialGeneration !== generation) return false;
-      set({ integrationStatusError: error instanceof Error ? error.message : String(error) });
+      set({ integrationStatusError: friendlySettingsMessage(error) });
       return false;
     }
   },
@@ -709,7 +709,7 @@ export const useLabStore = create((set, get) => ({
       const status = await loadIntegrationStatus();
       if (get().credentialGeneration === generation) get().setIntegrationStatus(status);
     } catch (error) {
-      if (get().credentialGeneration === generation) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) });
+      if (get().credentialGeneration === generation) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: friendlySettingsMessage(error) });
     }
   },
   setIntegrationStatus: (integrationStatus, { credentialChanged = false } = {}) => set((state) => {
