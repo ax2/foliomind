@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtime = vi.hoisted(() => ({ abortPi: vi.fn(), askPi: vi.fn(), queryCachedData: vi.fn(), queryTradingCalendar: vi.fn() }));
 const persistence = vi.hoisted(() => ({ loadUserState: vi.fn().mockResolvedValue(null), saveUserState: vi.fn().mockResolvedValue(true) }));
+const integration = vi.hoisted(() => ({ loadStatus: vi.fn() }));
 
 vi.mock("../lib/piRuntime.js", () => ({ ABORTED_CODE: "PI_ABORTED", abortPi: runtime.abortPi, askPi: runtime.askPi, isDesktopRuntime: () => false }));
 vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) => fallback === undefined ? 2 : fallback, isLocalWebRuntime: () => true, queryCachedData: runtime.queryCachedData }));
 vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: persistence.loadUserState, saveUserState: persistence.saveUserState }));
-vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
+vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: integration.loadStatus, queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
 
 import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
 
@@ -14,6 +15,7 @@ const freshAsOf = () => new Date(Date.now() - 60_000).toISOString();
 
 describe("lab store streaming lifecycle", () => {
   beforeEach(async () => {
+    integration.loadStatus.mockReset();
     runtime.askPi.mockReset();
     runtime.abortPi.mockReset();
     runtime.queryCachedData.mockReset();
@@ -78,6 +80,38 @@ describe("lab store streaming lifecycle", () => {
   it("starts with an explicit integration hydration state", () => {
     useLabStore.setState({ ...initialLabState });
     expect(useLabStore.getState()).toMatchObject({ integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "" });
+  });
+
+  it("clears peer-session data immediately and ignores a late peer status after a local save", async () => {
+    let resolve;
+    integration.loadStatus.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true }, liveQuotes: { AAPL: { price: 100 } } });
+    const pending = useLabStore.getState().reconcileIntegrationChange();
+    expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, integrationStatus: null, integrationStatusLoading: true });
+    const latest = { credentialConfigured: true, keyPrefix: "latest…" };
+    useLabStore.getState().setIntegrationStatus(latest, { credentialChanged: true });
+    resolve({ credentialConfigured: false });
+    await expect(pending).resolves.toBe(false);
+    expect(useLabStore.getState().integrationStatus).toEqual(latest);
+  });
+
+  it("recovers a failed peer configuration read without restoring old data", async () => {
+    integration.loadStatus.mockRejectedValueOnce(new Error("private host error")).mockResolvedValueOnce({ credentialConfigured: true, keyPrefix: "latest…" });
+    await expect(useLabStore.getState().reconcileIntegrationChange()).resolves.toBe(false);
+    expect(useLabStore.getState()).toMatchObject({ integrationStatus: null, integrationStatusLoading: false, liveQuotes: {} });
+    expect(useLabStore.getState().integrationStatusError).not.toContain("private host error");
+    await useLabStore.getState().hydrateIntegrationStatus();
+    expect(useLabStore.getState().integrationStatus.keyPrefix).toBe("latest…");
+  });
+
+  it("ignores startup hydration that predates a peer configuration change", async () => {
+    let resolve;
+    integration.loadStatus.mockImplementationOnce(() => new Promise((done) => { resolve = done; })).mockResolvedValueOnce({ credentialConfigured: false });
+    const startup = useLabStore.getState().hydrateIntegrationStatus();
+    await useLabStore.getState().reconcileIntegrationChange();
+    resolve({ credentialConfigured: true, keyPrefix: "outdated…" });
+    await startup;
+    expect(useLabStore.getState().integrationStatus).toEqual({ credentialConfigured: false });
   });
 
   it("preserves edits made while a slow Host snapshot is loading", async () => {

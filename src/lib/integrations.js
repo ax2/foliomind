@@ -1,5 +1,6 @@
 import { isDesktopRuntime } from "./piRuntime.js";
 import { isLocalWebRuntime, localHostRequest } from "./localHost.js";
+import { publishIntegrationChange } from "./integrationChanges.js";
 
 export const defaultIntegrationSettings = {
   capabilityBaseUrl: "https://qveris.ai/api/v1",
@@ -41,18 +42,24 @@ export async function saveQVerisCredential(apiKey) {
   if (!isDesktopRuntime()) {
     if (!isLocalWebRuntime()) throw new Error("请在 localhost 本地调试页面配置 QVeris API Key");
     await localHostRequest("/api/integration/credential", { method: "POST", body: JSON.stringify({ apiKey }) });
+    publishIntegrationChange();
     return true;
   }
-  return desktopInvoke("qveris_credential_save", { apiKey });
+  const result = await desktopInvoke("qveris_credential_save", { apiKey });
+  publishIntegrationChange();
+  return result;
 }
 
 export async function clearQVerisCredential() {
   if (!isDesktopRuntime()) {
     if (!isLocalWebRuntime()) throw new Error("浏览器预览不保存凭证");
     await localHostRequest("/api/integration/credential", { method: "DELETE" });
+    publishIntegrationChange();
     return true;
   }
-  return desktopInvoke("qveris_credential_clear");
+  const result = await desktopInvoke("qveris_credential_clear");
+  publishIntegrationChange();
+  return result;
 }
 
 export async function syncQVerisModels(input) {

@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
+const changes = vi.hoisted(() => ({ publishIntegrationChange: vi.fn() }));
+vi.mock("./integrationChanges.js", () => changes);
 const localHost = vi.hoisted(() => ({ isLocalWebRuntime: vi.fn(() => false), localHostRequest: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("./localHost.js", () => localHost);
 
-import { applyIntegrationSettings, DATA_CHANNEL_OPTIONS, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, queryTradingCalendar, syncQVerisModels, testModelConnection } from "./integrations.js";
+import { applyIntegrationSettings, DATA_CHANNEL_OPTIONS, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, queryTradingCalendar, syncQVerisModels, testModelConnection, saveQVerisCredential, clearQVerisCredential } from "./integrations.js";
 
 describe("integration client", () => {
   beforeEach(() => {
+    changes.publishIntegrationChange.mockReset();
     window.__TAURI_INTERNALS__ = {};
     tauri.invoke.mockReset();
     localHost.isLocalWebRuntime.mockReset().mockReturnValue(false);
@@ -19,6 +22,19 @@ describe("integration client", () => {
   it("exposes a stable default CAP channel and a future-compatible option", () => {
     expect(defaultIntegrationSettings.dataChannel).toBe("qveris-cap");
     expect(DATA_CHANNEL_OPTIONS.map((item) => item.id)).toEqual(["qveris-cap", "cap-compatible"]);
+  });
+
+  it.each([false, true])("notifies peers only after credential writes succeed (desktop: %s)", async (desktop) => {
+    if (!desktop) delete window.__TAURI_INTERNALS__;
+    localHost.isLocalWebRuntime.mockReturnValue(!desktop);
+    const request = desktop ? tauri.invoke : localHost.localHostRequest;
+    request.mockRejectedValueOnce(new Error("save failed")).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    await expect(saveQVerisCredential("abcdefgh-test-key")).rejects.toThrow("save failed");
+    expect(changes.publishIntegrationChange).not.toHaveBeenCalled();
+    await saveQVerisCredential("abcdefgh-test-key");
+    expect(changes.publishIntegrationChange).toHaveBeenCalledTimes(1);
+    await clearQVerisCredential();
+    expect(changes.publishIntegrationChange).toHaveBeenCalledTimes(2);
   });
 
   afterEach(() => {

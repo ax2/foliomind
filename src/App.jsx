@@ -13,6 +13,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
 import { friendlyDataMessage } from "./lib/friendlyMessages.js";
 import { loadRefreshPolicy, refreshPolicyConfig, subscribeRefreshPolicy } from "./lib/refreshPolicy.js";
+import { subscribeIntegrationChanges } from "./lib/integrationChanges.js";
 
 // The secondary workspaces are intentionally kept out of the initial route.
 // They share one module so switching views still incurs a single, cacheable
@@ -27,6 +28,8 @@ const SecondaryViewModule = lazy(() => import("./components/SecondaryViews.jsx")
 const secondaryViewLoading = <div className="secondary-view-loading" role="status" aria-live="polite">正在打开工作台…</div>;
 
 export function App() {
+  const reconcileIntegrationChange = useLabStore((state) => state.reconcileIntegrationChange);
+  useEffect(() => subscribeIntegrationChanges(() => { void reconcileIntegrationChange(); }), [reconcileIntegrationChange]);
   const credentialGeneration = useLabStore((state) => state.credentialGeneration);
   const activeView = useLabStore((state) => state.activeView);
   const settingsNotice = useLabStore((state) => state.settingsNotice);

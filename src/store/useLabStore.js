@@ -663,10 +663,32 @@ const quoteRefreshReset = {
 
 export const useLabStore = create((set, get) => ({
   ...initialLabState,
+  reconcileIntegrationChange: async () => {
+    // Stop consuming the old session immediately, including while the Host
+    // status request is slow. Each later local save or peer signal wins.
+    get().setIntegrationStatus(null, { credentialChanged: true });
+    const generation = get().credentialGeneration;
+    set({ integrationStatusLoading: true });
+    try {
+      const status = await loadIntegrationStatus();
+      if (get().credentialGeneration !== generation) return false;
+      get().setIntegrationStatus(status);
+      return true;
+    } catch {
+      if (get().credentialGeneration !== generation) return false;
+      set({ integrationStatusLoading: false, integrationStatusError: "配置已在其他窗口变更，暂时无法读取最新配置，请重试" });
+      return false;
+    }
+  },
   hydrateIntegrationStatus: async () => {
+    const generation = get().credentialGeneration;
     set({ integrationStatusLoading: true, integrationStatusError: "" });
-    try { get().setIntegrationStatus(await loadIntegrationStatus()); }
-    catch (error) { set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) }); }
+    try {
+      const status = await loadIntegrationStatus();
+      if (get().credentialGeneration === generation) get().setIntegrationStatus(status);
+    } catch (error) {
+      if (get().credentialGeneration === generation) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) });
+    }
   },
   setIntegrationStatus: (integrationStatus, { credentialChanged = false } = {}) => set((state) => {
     const changed = credentialChanged || dataChannelChanged(state.integrationStatus, integrationStatus);
