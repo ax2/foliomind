@@ -1135,7 +1135,7 @@ fn integration_status(
     let key = host.credentials.read_qveris_key()?;
     Ok(IntegrationStatus {
         credential_configured: key.is_some(),
-        key_prefix: api_key_prefix(key),
+        key_prefix: api_key_prefix(key.clone()),
         credential_revision: credential_revision(key.as_deref()),
         settings: config::load(&app)?,
     })
