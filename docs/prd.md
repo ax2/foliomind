@@ -2103,6 +2103,7 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 - 提供 `npm run clean`，只清理 `dist/`、`.qa/`、`.cache/`、`src-tauri/target/` 和可能由 Linux 构建生成的 `src-tauri/target-linux/`。
 - 清理目录采用代码内固定白名单和工作区路径校验，支持 `--dry-run` 预览；不得递归扫描或根据用户输入删除路径。
 - `src-tauri/resources/pi/`、`src-tauri/resources/portable-git/`、`.openai/`、用户状态和源代码不属于清理范围。
+- CI 的 Web QA、桌面构建和 Release 构建必须在上传证据/安装包之后执行同一清理命令；清理失败不得覆盖此前已上传的验收证据或发布资产。
 
 **验收**：
 
