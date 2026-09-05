@@ -300,3 +300,15 @@ jobs:
           set -euo pipefail
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets \
             | node scripts/verify-release-assets.mjs "$VERSION"
+          verify_dir="$(mktemp -d)"
+          cleanup_verify_dir() {
+            rm -f "$verify_dir"/*
+            rmdir "$verify_dir"
+          }
+          trap cleanup_verify_dir EXIT
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "FolioMind_${VERSION}_aarch64.dmg" \
+            --pattern "FolioMind_${VERSION}_x64-setup.exe" \
+            --pattern "FolioMind_${VERSION}_x64_en-US.msi" \
+            --pattern "SHA256SUMS.txt" --dir "$verify_dir"
+          (cd "$verify_dir" && sha256sum --strict --check SHA256SUMS.txt)
