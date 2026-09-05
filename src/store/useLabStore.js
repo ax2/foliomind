@@ -648,6 +648,10 @@ function dataChannelChanged(previous, next) {
     || previous.settings?.capabilityBaseUrl !== next?.settings?.capabilityBaseUrl
     || previous.settings?.dataChannel !== next?.settings?.dataChannel
     || previous.settings?.dataProvider !== next?.settings?.dataProvider
+    // A configured credential can be replaced by another configured credential.
+    // The redacted prefix is the only client-visible generation marker needed
+    // to invalidate local data and reject responses started under the old key.
+    || previous.keyPrefix !== next?.keyPrefix
   );
 }
 
