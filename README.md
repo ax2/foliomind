@@ -149,7 +149,7 @@ npm run fetch:bash
 npm run smoke:pi
 npm run build
 npm run test:sites
-gh release view v0.1.228 --repo ax2/foliomind --json isDraft,assets | npm run verify:release-assets -- 0.1.228
+VERSION=$(node -p 'require("./package.json").version'); gh release view "v$VERSION" --repo ax2/foliomind --json isDraft,assets | npm run verify:release-assets -- "$VERSION"
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path src-tauri/Cargo.toml
