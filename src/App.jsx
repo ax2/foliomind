@@ -31,7 +31,16 @@ const secondaryViewLoading = <div className="secondary-view-loading" role="statu
 export function App() {
   const reconcileIntegrationChange = useLabStore((state) => state.reconcileIntegrationChange);
   const refreshIntegrationStatus = useLabStore((state) => state.refreshIntegrationStatus);
+  const [networkOffline, setNetworkOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
   useEffect(() => subscribeIntegrationChanges(() => { void reconcileIntegrationChange(); }), [reconcileIntegrationChange]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onOffline = () => setNetworkOffline(true);
+    const onOnline = () => setNetworkOffline(false);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => { window.removeEventListener("offline", onOffline); window.removeEventListener("online", onOnline); };
+  }, []);
   useEffect(() => {
     if (!isLocalWebRuntime() || typeof window === "undefined" || typeof document === "undefined") return undefined;
     const reconcile = () => {
@@ -193,6 +202,7 @@ export function App() {
   const showGlobalNotice = settingsNotice && activeView !== "settings";
   return <AppErrorBoundary><div className={`app-shell view-${activeView}`} data-user-state-loaded={userStateLoaded ? "true" : "false"}>
     <ActivityRail />
+    {networkOffline && <div className="global-notice error network-notice" role="alert" aria-live="assertive"><span>当前设备处于离线状态，真实行情和模型请求可能无法完成；网络恢复后可重试。</span></div>}
     {userStateError && <div className="global-notice error" role="alert" aria-live="assertive"><span>{userStateLoading ? "正在重新读取本地数据…" : userStateError}</span><button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取本地数据"}</button></div>}
     {showGlobalNotice && <div className={`global-notice ${settingsNotice.type === "error" ? "error" : "success"}`} role={settingsNotice.type === "error" ? "alert" : "status"} aria-live={settingsNotice.type === "error" ? "assertive" : "polite"}><span>{settingsNotice.text}</span>{settingsNotice.action === "retry" && <button disabled={persistenceRetrying} onClick={() => { void retryPersistedUserState(); }}>{persistenceRetrying ? "保存中…" : "重试保存"}</button>}{settingsNotice.action === "reload" && <button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取"}</button>}<button onClick={clearSettingsNotice} aria-label="关闭通知">关闭</button></div>}
     {renderView()}

@@ -11,6 +11,7 @@ import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFI
 import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
+const originalNavigatorOnline = navigator.onLine;
 const originalHydrateUserState = useLabStore.getState().hydrateUserState;
 const originalImportPortfolioItems = useLabStore.getState().importPortfolioItems;
 const originalPersistUserState = useLabStore.getState().persistUserState;
@@ -97,6 +98,7 @@ beforeEach(() => {
     importPortfolioItems: originalImportPortfolioItems,
     persistUserState: originalPersistUserState,
   });
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: originalNavigatorOnline });
 });
 
 describe("FolioMind core flows", () => {
@@ -1494,6 +1496,15 @@ describe("FolioMind core flows", () => {
     render(<App />);
     expect(screen.getByText("正在分析").closest(".assistant-message")).toHaveAttribute("aria-busy", "true");
     expect(screen.getByText("正在生成第一段")).toBeInTheDocument();
+  });
+
+  it("shows a recoverable offline notice and clears it when connectivity returns", () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    render(<App />);
+    expect(screen.getByRole("alert")).toHaveTextContent("离线状态");
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    fireEvent(window, new Event("online"));
+    expect(screen.queryByText(/当前设备处于离线状态/)).not.toBeInTheDocument();
   });
 
   it("offers an accessible stop control while an analysis is running", () => {
