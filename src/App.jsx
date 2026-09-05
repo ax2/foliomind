@@ -1,7 +1,7 @@
 import { ActivityRail } from "./components/ActivityRail.jsx";
 import { CopilotPanel } from "./components/CopilotPanel.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { BRIEFING_RECONCILE_INTERVAL_MS, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
+import { BRIEFING_RECONCILE_INTERVAL_MS, INTEGRATION_STATUS_RECONCILE_INTERVAL_MS, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, MONITOR_INTERVAL_MS } from "./store/useLabStore.js";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
@@ -9,6 +9,7 @@ import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
 import { listenForBackgroundPremarket, listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "./lib/piRuntime.js";
+import { isLocalWebRuntime } from "./lib/localHost.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { CommandPalette } from "./components/CommandPalette.jsx";
 import { friendlyDataMessage } from "./lib/friendlyMessages.js";
@@ -29,7 +30,22 @@ const secondaryViewLoading = <div className="secondary-view-loading" role="statu
 
 export function App() {
   const reconcileIntegrationChange = useLabStore((state) => state.reconcileIntegrationChange);
+  const refreshIntegrationStatus = useLabStore((state) => state.refreshIntegrationStatus);
   useEffect(() => subscribeIntegrationChanges(() => { void reconcileIntegrationChange(); }), [reconcileIntegrationChange]);
+  useEffect(() => {
+    if (!isLocalWebRuntime() || typeof window === "undefined" || typeof document === "undefined") return undefined;
+    const reconcile = () => {
+      if (document.visibilityState === "visible") void refreshIntegrationStatus();
+    };
+    const timer = window.setInterval(reconcile, INTEGRATION_STATUS_RECONCILE_INTERVAL_MS);
+    window.addEventListener("focus", reconcile);
+    document.addEventListener("visibilitychange", reconcile);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", reconcile);
+      document.removeEventListener("visibilitychange", reconcile);
+    };
+  }, [refreshIntegrationStatus]);
   const credentialGeneration = useLabStore((state) => state.credentialGeneration);
   const activeView = useLabStore((state) => state.activeView);
   const settingsNotice = useLabStore((state) => state.settingsNotice);

@@ -31,6 +31,10 @@ export const LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS = 180_000;
 // Backward-compatible alias for integrations that imported the old constant.
 export const LIVE_QUOTE_REFRESH_INTERVAL_MS = LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS;
 export const BRIEFING_RECONCILE_INTERVAL_MS = 60_000;
+// A separate localhost Host process can change credentials without being able
+// to emit BroadcastChannel events. Reconcile on a modest cadence while the
+// page is visible; this is deliberately slower than quote polling.
+export const INTEGRATION_STATUS_RECONCILE_INTERVAL_MS = 30_000;
 // Local Web is the primary rapid-debug path. Four in-flight CAP calls keep a
 // six-to-eight symbol watchlist responsive without removing the upper bound
 // that protects provider rate limits. The native desktop scheduler stays more
@@ -678,6 +682,23 @@ export const useLabStore = create((set, get) => ({
     } catch {
       if (get().credentialGeneration !== generation) return false;
       set({ integrationStatusLoading: false, integrationStatusError: "配置已在其他窗口变更，暂时无法读取最新配置，请重试" });
+      return false;
+    }
+  },
+  refreshIntegrationStatus: async () => {
+    // Unlike a peer-change signal, a periodic reconciliation must not clear
+    // live data before we know that the Host state actually changed. The
+    // normal setIntegrationStatus boundary compares credential revision,
+    // provider, endpoints and model settings and invalidates only on change.
+    const generation = get().credentialGeneration;
+    try {
+      const status = await loadIntegrationStatus();
+      if (get().credentialGeneration !== generation) return false;
+      get().setIntegrationStatus(status);
+      return true;
+    } catch (error) {
+      if (get().credentialGeneration !== generation) return false;
+      set({ integrationStatusError: error instanceof Error ? error.message : String(error) });
       return false;
     }
   },

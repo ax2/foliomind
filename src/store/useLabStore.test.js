@@ -114,6 +114,24 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().integrationStatus).toEqual({ credentialConfigured: false });
   });
 
+  it("reconciles an unchanged Host snapshot without clearing live data", async () => {
+    const status = { credentialConfigured: true, keyPrefix: "same…", credentialRevision: "rev-1", settings: { modelId: "model-a" } };
+    useLabStore.setState({ integrationStatus: status, liveQuotes: { AAPL: { price: 100 } } });
+    integration.loadStatus.mockResolvedValueOnce({ ...status });
+
+    await expect(useLabStore.getState().refreshIntegrationStatus()).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ integrationStatus: status, liveQuotes: { AAPL: { price: 100 } }, credentialGeneration: 0 });
+  });
+
+  it("invalidates live data when an independent Host changes the credential revision", async () => {
+    const status = { credentialConfigured: true, keyPrefix: "same…", credentialRevision: "rev-1", settings: { modelId: "model-a" } };
+    useLabStore.setState({ integrationStatus: status, liveQuotes: { AAPL: { price: 100 } } });
+    integration.loadStatus.mockResolvedValueOnce({ ...status, credentialRevision: "rev-2" });
+
+    await expect(useLabStore.getState().refreshIntegrationStatus()).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ integrationStatus: { credentialRevision: "rev-2" }, liveQuotes: {} });
+  });
+
   it("preserves edits made while a slow Host snapshot is loading", async () => {
     let release;
     persistence.loadUserState.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
