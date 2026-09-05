@@ -3,9 +3,10 @@ import { conditionOperatorsFor, conditionPrompt, conditionSummary, conditionsFor
 import { strategyFor } from "../data/monitorStrategies.js";
 
 describe("monitor conditions", () => {
-  it("supports all six condition types with safe defaults", () => {
+  it("supports all price and data condition types with safe defaults", () => {
     const conditions = normalizeConditions([
       { type: "price_change", value: 4 },
+      { type: "price_level", value: 100 },
       { type: "volume_spike" },
       { type: "technical" },
       { type: "core_event" },
@@ -14,12 +15,16 @@ describe("monitor conditions", () => {
       { type: "unknown" },
     ]);
     expect(conditions).toHaveLength(6);
-    expect(new Set(conditions.map((condition) => condition.type))).toEqual(new Set(["price_change", "volume_spike", "technical", "core_event", "capital_flow", "sentiment"]));
+    expect(new Set(conditions.map((condition) => condition.type))).toEqual(new Set(["price_change", "price_level", "volume_spike", "technical", "core_event", "capital_flow"]));
     expect(conditionSummary(conditions[0])).toContain("4%");
   });
 
   it("evaluates numeric conditions and preserves unknown fields", () => {
     expect(evaluateCondition({ type: "price_change", operator: "gte", value: 3 }, { changePercent: 3.2 })).toBe(true);
+    expect(evaluateCondition({ type: "price_level", operator: "gte", value: 100 }, { price: 100.01 })).toBe(true);
+    expect(evaluateCondition({ type: "price_level", operator: "lte", value: 100 }, { price: 100.01 })).toBe(false);
+    expect(evaluateCondition({ type: "price_level", operator: "gte", value: 100 }, { price: 0 })).toBeNull();
+    expect(normalizeConditions([{ type: "price_level", value: -10 }])[0].value).toBe(100);
     expect(evaluateCondition({ type: "volume_spike", operator: "gte", value: 2 }, {})).toBeNull();
   });
 
@@ -51,6 +56,7 @@ describe("monitor conditions", () => {
 
   it("keeps condition labels and runtime strategy prompts aligned", () => {
     expect(strategyFor("technical")).toMatchObject({ name: "技术形态" });
+    expect(strategyFor("price_level")).toMatchObject({ name: "价格水平" });
     expect(strategyFor("capital_flow")).toMatchObject({ name: "主力资金" });
     expect(strategyFor("sentiment")).toMatchObject({ name: "产业舆情" });
   });

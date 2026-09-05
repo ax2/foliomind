@@ -13,6 +13,7 @@ import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
 const originalCancelMessage = useLabStore.getState().cancelMessage;
 const originalHydrateUserState = useLabStore.getState().hydrateUserState;
 const originalImportPortfolioItems = useLabStore.getState().importPortfolioItems;
+const originalPersistUserState = useLabStore.getState().persistUserState;
 const integrationMocks = vi.hoisted(() => ({
   applyIntegrationSettings: vi.fn(),
   loadIntegrationStatus: vi.fn(),
@@ -92,6 +93,7 @@ beforeEach(() => {
     cancelMessage: originalCancelMessage,
     hydrateUserState: originalHydrateUserState,
     importPortfolioItems: originalImportPortfolioItems,
+    persistUserState: originalPersistUserState,
   });
 });
 
@@ -688,6 +690,19 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText("触发条件")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "条件1类型" })).toHaveValue("price_change");
     expect(screen.getByRole("combobox", { name: "条件组合逻辑" })).toHaveValue("AND");
+  });
+
+  it("creates a price-level monitor rule with a directional threshold", async () => {
+    useLabStore.setState({ userStateLoaded: true, persistUserState: vi.fn().mockResolvedValue(true) });
+    render(<MonitorView />);
+    fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "条件1类型" }), { target: { value: "price_level" } });
+    expect(screen.getByRole("combobox", { name: "条件1关系" })).toHaveValue("gte");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "条件1数值" }), { target: { value: "1800" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "条件1关系" }), { target: { value: "lte" } });
+    fireEvent.submit(screen.getByRole("dialog"));
+    await waitFor(() => expect(useLabStore.getState().rules.at(-1)).toMatchObject({ strategyId: "price_level", conditions: [{ type: "price_level", operator: "lte", value: 1800 }] }));
+    expect(screen.getAllByText(/最新价/).length).toBeGreaterThan(0);
   });
 
   it("creates a dynamic watchlist monitor rule", async () => {

@@ -22,6 +22,19 @@ export const CONDITION_TYPES = Object.freeze([
     strategyId: "price_change",
   },
   {
+    id: "price_level",
+    name: "价格水平",
+    description: "价格达到指定价位后提醒",
+    field: "price",
+    fieldLabel: "最新价",
+    unit: "",
+    valueType: "number",
+    operators: ["gte", "lte"],
+    defaultOperator: "gte",
+    defaultValue: 100,
+    strategyId: "price_level",
+  },
+  {
     id: "volume_spike",
     name: "量能异动",
     description: "量比超过近期基准",
@@ -130,7 +143,7 @@ export function defaultConditionFor(typeId = "price_change") {
 function normalizeValue(type, value) {
   if (type.valueType === "number") {
     const number = Number(value);
-    return Number.isFinite(number) ? number : type.defaultValue;
+    return Number.isFinite(number) && (type.field !== "price" || number > 0) ? number : type.defaultValue;
   }
   const string = String(value ?? "");
   return type.options?.some((option) => option.value === string) ? string : type.defaultValue;
@@ -215,7 +228,8 @@ export function evaluateCondition(condition, quote = {}) {
   if (type.valueType === "number") {
     const left = Number(value);
     const right = Number(normalized.value);
-    return Number.isFinite(left) && Number.isFinite(right) ? comparison(left, normalized.operator, right) : null;
+    if (!Number.isFinite(left) || !Number.isFinite(right) || (type.field === "price" && left <= 0)) return null;
+    return comparison(left, normalized.operator, right);
   }
   return normalized.operator === "eq" ? String(value) === String(normalized.value) : null;
 }

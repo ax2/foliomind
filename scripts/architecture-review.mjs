@@ -17,6 +17,7 @@ const capabilityEnvelopeTest = await load("src/lib/capabilityEnvelope.test.js");
 const desktopLifecycleClient = await load("src/lib/desktopLifecycle.js");
 const monitorLifecycle = await load("src/lib/monitorLifecycle.js");
 const monitorConditions = await load("src/lib/monitorConditions.js");
+const monitorConditionsTest = await load("src/lib/monitorConditions.test.js");
 const strategies = await load("src/data/monitorStrategies.js");
 const research = await load("src/lib/research.js");
 const viteConfig = await load("vite.config.mjs");
@@ -208,6 +209,7 @@ check("过期行情提醒防护", portfolio.includes("quoteFreshness(quote?.asOf
 check("用户可见错误统一脱敏", stockWorkspace.includes("friendlyDataMessage(error") && watchlistSidebar.includes("friendlyDataMessage(cause") && settingsView.includes("friendlyDataMessage(error, \"备份文件格式不正确") && prd.includes("Stage 3FJ 用户可见错误信息统一脱敏") && architectureReview.includes("Stage 3FJ"), "普通页面不得直接渲染未知 Error.message；操作失败应使用统一友好文案，详细诊断只保留在脱敏开发面板");
 check("消息历史管理与审计导出", labStore.includes("clearReadNotifications") && settingsView.includes("导出当前筛选 CSV") && settingsView.includes("清理已读") && settingsView.includes("notificationCsv(filteredNotifications)") && storeTest.includes("clears only read notifications") && appTest.includes("notification history management") && prd.includes("Stage 3FK 消息历史管理与审计导出") && architectureReview.includes("Stage 3FK"), "消息中心必须支持仅清理已读和当前筛选 CSV 导出，清理失败可恢复且不得删除未读或泄露敏感运行数据");
 check("盯盘规则集中启停", labStore.includes("setAllRulesEnabled") && settingsView.includes("全部暂停") && settingsView.includes("全部启用") && storeTest.includes("pauses and resumes all monitor rules") && storeTest.includes("failed bulk pause") && appTest.includes("pauses and resumes all monitor rules") && prd.includes("Stage 3FL 盯盘规则集中启停") && architectureReview.includes("Stage 3FL"), "盯盘中心必须支持全部暂停/全部启用，操作只修改 enabled、无变化不写入，失败精确回滚且保留并发编辑");
+check("价格水平告警", monitorConditions.includes('id: "price_level"') && monitorConditions.includes('field: "price"') && monitorConditions.includes('operators: ["gte", "lte"]') && monitorConditions.includes('type.field === "price" && left <= 0') && strategies.includes('id: "price_level"') && monitorConditionsTest.includes("price: 0") && appTest.includes("price-level monitor rule") && prd.includes("Stage 3FM 价格水平告警") && architectureReview.includes("Stage 3FM"), "盯盘条件必须支持基于真实正价格的 gte/lte 水平告警，缺失价格保持未知并复用既有边沿、通知和审计边界");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));

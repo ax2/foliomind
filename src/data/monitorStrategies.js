@@ -8,6 +8,14 @@ export const monitorStrategies = [
     prompt: "检查最新涨跌幅是否达到阈值，并给出最新价格、涨跌幅、数据截至时间和来源。",
   },
   {
+    id: "price_level",
+    name: "价格水平",
+    description: "当最新价达到或突破指定价位时提醒",
+    defaultThreshold: 100,
+    unit: "",
+    prompt: "检查最新价是否达到或突破指定价位；说明比较方向、最新价、目标价、数据截至时间和来源。",
+  },
+  {
     id: "volume_spike",
     name: "成交量异常监控",
     description: "当成交量超过近期均值时提醒",
