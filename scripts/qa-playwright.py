@@ -73,6 +73,23 @@ async def main() -> None:
         checks.append({"flow": "真实数据筛选状态", "passed": True})
         await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")
         await expect(page.get_by_role("button", name="添加持仓", exact=True)).to_be_visible()
+        # Seed one isolated QA position so the responsive portfolio action
+        # controls are exercised instead of passing vacuously on an empty
+        # state. The CI/local QA data directory is disposable.
+        portfolio_rows = page.locator(".portfolio-row")
+        if await portfolio_rows.count() == 0:
+            await page.get_by_role("button", name="添加持仓", exact=True).first.click()
+            await page.get_by_label("持仓标的").select_option("600519")
+            await page.get_by_label("持仓数量").fill("100")
+            await page.get_by_label("平均成本").fill("1000")
+            await page.get_by_role("button", name="保存持仓", exact=True).click()
+            await expect(portfolio_rows).to_have_count(1, timeout=8_000)
+        await expect(portfolio_rows.first.locator(".portfolio-actions")).to_be_visible()
+        # Existing developer data may contain another symbol, so assert the
+        # stable action contract rather than a fixture-specific label.
+        await expect(portfolio_rows.first.get_by_role("button", name=re.compile(r"^编辑.+持仓$"))).to_be_visible()
+        await expect(portfolio_rows.first.get_by_role("button", name=re.compile(r"^删除.+持仓$"))).to_be_visible()
+        checks.append({"flow": "组合持仓操作闭环", "passed": True})
         checks.append({"flow": "组合工作区可用", "passed": True})
         await click_and_capture("盯盘", "implementation-monitor.png", "个股盯盘")
         new_monitor = page.get_by_role("button", name="新建盯盘")
@@ -169,6 +186,8 @@ async def main() -> None:
         checks.append({"flow": "视口无溢出", "passed": layout["scrollWidth"] == layout["clientWidth"] and layout["scrollHeight"] == layout["clientHeight"], "detail": layout})
         await page.set_viewport_size({"width": 390, "height": 844})
         await page.reload(wait_until="networkidle")
+        await page.get_by_role("button", name="组合", exact=True).click()
+        await page.locator(".portfolio-row").first.wait_for(timeout=8_000)
         mobile_layout = await page.evaluate("""() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
