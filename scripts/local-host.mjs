@@ -31,6 +31,7 @@ const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
 );
 const settingsFile = join(dataDir, "integration-settings.json");
 const credentialFile = join(dataDir, "qveris-api-key");
+const credentialRevisionFile = join(dataDir, "qveris-credential-revision");
 const stateFile = join(dataDir, "user-state.json");
 const stateBackupFile = join(dataDir, "user-state.json.backup");
 const MAX_USER_STATE_BYTES = 4 * 1024 * 1024;
@@ -946,12 +947,27 @@ async function readKey() {
   try { const value = (await readFile(credentialFile, "utf8")).trim(); if (value) return value; } catch { /* first run */ }
   return String(process.env.QVERIS_API_KEY || "").trim() || null;
 }
+async function readCredentialRevision() {
+  try {
+    const value = (await readFile(credentialRevisionFile, "utf8")).trim();
+    if (value) return value;
+  } catch { /* legacy installs receive a revision on the next write */ }
+  return "legacy";
+}
+async function writeCredentialRevision() {
+  await mkdir(dataDir, { recursive: true });
+  const value = `${randomUUID()}\n`;
+  await writeFile(credentialRevisionFile, value, { encoding: "utf8", mode: 0o600 });
+  try { await chmod(credentialRevisionFile, 0o600); } catch { /* Windows has no POSIX mode. */ }
+  return value.trim();
+}
 async function saveKey(value) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(credentialFile, `${value.trim()}\n`, { encoding: "utf8", mode: 0o600 });
   try { await chmod(credentialFile, 0o600); } catch { /* Windows has no POSIX mode. */ }
+  await writeCredentialRevision();
 }
-async function deleteKey() { try { await unlink(credentialFile); } catch { /* idempotent */ } }
+async function deleteKey() { try { await unlink(credentialFile); } catch { /* idempotent */ } await writeCredentialRevision(); }
 function apiKeyPrefix(value) { const key = String(value || "").trim(); return key ? `${key.slice(0, 8)}${key.length > 8 ? "…" : ""}` : ""; }
 function saveUserStateIfRevision(input) {
   const task = userStateMutationQueue.catch(() => {}).then(async () => {
@@ -1376,9 +1392,9 @@ async function route(req, body, requestSignal) {
   if (method === "GET" && path === "/api/health") return { ok: true, service: "foliomind-dev-host", mode: "standalone" };
   if (method === "GET" && path === "/api/session") return { token, service: "foliomind-dev-host", mode: "standalone" };
   requireSession(req);
-  if (method === "GET" && path === "/api/integration/status") { const key = await readKey(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), settings: await readSettings() }; }
-  if (method === "POST" && path === "/api/integration/credential") { if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) throw new Error("API Key 无效"); await saveKey(body.apiKey); await clearToolCache(); return { configured: true, keyPrefix: apiKeyPrefix(body.apiKey) }; }
-  if (method === "DELETE" && path === "/api/integration/credential") { await deleteKey(); await clearToolCache(); return { configured: false, keyPrefix: "" }; }
+  if (method === "GET" && path === "/api/integration/status") { const key = await readKey(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), credentialRevision: await readCredentialRevision(), settings: await readSettings() }; }
+  if (method === "POST" && path === "/api/integration/credential") { if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) throw new Error("API Key 无效"); await saveKey(body.apiKey); await clearToolCache(); return { configured: true, keyPrefix: apiKeyPrefix(body.apiKey), credentialRevision: await readCredentialRevision() }; }
+  if (method === "DELETE" && path === "/api/integration/credential") { await deleteKey(); await clearToolCache(); return { configured: false, keyPrefix: "", credentialRevision: await readCredentialRevision() }; }
   if (method === "POST" && path === "/api/integration/models/sync") {
     const input = body.input || {}; const key = await readKey(); if (!key) throw new Error("QVeris credential is not configured");
     const previous = await readSettings();

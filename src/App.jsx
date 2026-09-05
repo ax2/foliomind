@@ -55,7 +55,7 @@ export function App() {
   // A credential replacement must invalidate the current data session even
   // when settings and the displayed prefix stay the same. Successful writes
   // explicitly advance the local generation without retaining the key.
-  const integrationRefreshKey = [credentialGeneration, integrationStatus?.credentialConfigured, integrationStatus?.keyPrefix, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
+  const integrationRefreshKey = [credentialGeneration, integrationStatus?.credentialConfigured, integrationStatus?.keyPrefix, integrationStatus?.credentialRevision, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
   const pollingChannelRef = useRef("");
   useEffect(() => subscribeRefreshPolicy(setRefreshPolicy), []);

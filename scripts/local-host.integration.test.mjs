@@ -76,6 +76,7 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(credential.response.status, 200);
   assert.equal(credential.payload.configured, true);
   assert.equal(credential.payload.keyPrefix, "sk_contr…");
+  assert.equal(typeof credential.payload.credentialRevision, "string");
 
   const insecureSettings = await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { modelGatewayBaseUrl: "http://gateway.example.com/v1" } } });
   assert.equal(insecureSettings.response.status, 400);
@@ -106,6 +107,7 @@ test("Local Host enforces session auth and persists credential status and user s
   const status = await hostRequest(host, "/api/integration/status");
   assert.equal(status.payload.credentialConfigured, true);
   assert.equal(status.payload.keyPrefix, "sk_contr…");
+  assert.equal(status.payload.credentialRevision, credential.payload.credentialRevision);
   assert.equal(Object.hasOwn(status.payload, "apiKey"), false);
   const restored = await hostRequest(host, "/api/user-state");
   assert.equal(restored.payload.watchlist[0].symbol, "600519");

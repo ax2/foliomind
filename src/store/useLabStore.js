@@ -652,6 +652,7 @@ function dataChannelChanged(previous, next) {
     // Prefix changes are useful when loading status, but equal prefixes do not
     // imply equal credentials. Successful saves explicitly invalidate below.
     || previous.keyPrefix !== next?.keyPrefix
+    || previous.credentialRevision !== next?.credentialRevision
   );
 }
 

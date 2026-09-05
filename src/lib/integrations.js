@@ -41,9 +41,9 @@ export async function loadIntegrationStatus() {
 export async function saveQVerisCredential(apiKey) {
   if (!isDesktopRuntime()) {
     if (!isLocalWebRuntime()) throw new Error("请在 localhost 本地调试页面配置 QVeris API Key");
-    await localHostRequest("/api/integration/credential", { method: "POST", body: JSON.stringify({ apiKey }) });
+    const result = await localHostRequest("/api/integration/credential", { method: "POST", body: JSON.stringify({ apiKey }) });
     publishIntegrationChange();
-    return true;
+    return result || true;
   }
   const result = await desktopInvoke("qveris_credential_save", { apiKey });
   publishIntegrationChange();
@@ -53,9 +53,9 @@ export async function saveQVerisCredential(apiKey) {
 export async function clearQVerisCredential() {
   if (!isDesktopRuntime()) {
     if (!isLocalWebRuntime()) throw new Error("浏览器预览不保存凭证");
-    await localHostRequest("/api/integration/credential", { method: "DELETE" });
+    const result = await localHostRequest("/api/integration/credential", { method: "DELETE" });
     publishIntegrationChange();
-    return true;
+    return result || true;
   }
   const result = await desktopInvoke("qveris_credential_clear");
   publishIntegrationChange();

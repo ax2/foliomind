@@ -1061,8 +1061,8 @@ export function SettingsView() {
     }
     finally { setBusy(false); }
   };
-  const saveKey = () => run(async () => { await saveQVerisCredential(apiKey); const next = { ...status, credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next, { credentialChanged: true }); setConnectionTestState("idle"); setConnectionTestMessage(""); setModelTestState("idle"); setModelTestMessage(""); }, "数据服务密钥已保存");
-  const clearKey = () => run(async () => { await clearQVerisCredential(); const next = { ...status, credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next, { credentialChanged: true }); setConnectionTestState("idle"); setConnectionTestMessage(""); setModelTestState("idle"); setModelTestMessage(""); }, "数据服务密钥已清除");
+  const saveKey = () => run(async () => { const result = await saveQVerisCredential(apiKey); const next = { ...status, ...(result && typeof result === "object" ? result : {}), credentialConfigured: true, keyPrefix: apiKeyPrefix(apiKey) }; setApiKey(""); setStatus(next); setIntegrationStatus(next, { credentialChanged: true }); setConnectionTestState("idle"); setConnectionTestMessage(""); setModelTestState("idle"); setModelTestMessage(""); }, "数据服务密钥已保存");
+  const clearKey = () => run(async () => { const result = await clearQVerisCredential(); const next = { ...status, ...(result && typeof result === "object" ? result : {}), credentialConfigured: false, keyPrefix: "" }; setStatus(next); setIntegrationStatus(next, { credentialChanged: true }); setConnectionTestState("idle"); setConnectionTestMessage(""); setModelTestState("idle"); setModelTestMessage(""); }, "数据服务密钥已清除");
   const syncModels = () => run(async () => { const value = await syncQVerisModels(form); const next = { ...status, settings: value }; setStatus(next); setIntegrationStatus(next); setModelTestState("idle"); setModelTestMessage(""); return value; }, "模型目录已同步");
   const saveAll = async () => {
     if (!beginRuntimeConfiguration()) {
