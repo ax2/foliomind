@@ -635,6 +635,7 @@ async function executeMonitorForItem(rule, item) {
 }
 
 export const initialLabState = {
+  credentialGeneration: 0,
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
   rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, liveDataStartedAt: null, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 0, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
@@ -648,9 +649,8 @@ function dataChannelChanged(previous, next) {
     || previous.settings?.capabilityBaseUrl !== next?.settings?.capabilityBaseUrl
     || previous.settings?.dataChannel !== next?.settings?.dataChannel
     || previous.settings?.dataProvider !== next?.settings?.dataProvider
-    // A configured credential can be replaced by another configured credential.
-    // The redacted prefix is the only client-visible generation marker needed
-    // to invalidate local data and reject responses started under the old key.
+    // Prefix changes are useful when loading status, but equal prefixes do not
+    // imply equal credentials. Successful saves explicitly invalidate below.
     || previous.keyPrefix !== next?.keyPrefix
   );
 }
@@ -668,8 +668,8 @@ export const useLabStore = create((set, get) => ({
     try { get().setIntegrationStatus(await loadIntegrationStatus()); }
     catch (error) { set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: error instanceof Error ? error.message : String(error) }); }
   },
-  setIntegrationStatus: (integrationStatus) => set((state) => {
-    const changed = dataChannelChanged(state.integrationStatus, integrationStatus);
+  setIntegrationStatus: (integrationStatus, { credentialChanged = false } = {}) => set((state) => {
+    const changed = credentialChanged || dataChannelChanged(state.integrationStatus, integrationStatus);
     if (changed) {
       abortPendingDataRequests();
       liveRequestGeneration += 1;
@@ -680,7 +680,8 @@ export const useLabStore = create((set, get) => ({
       premarketRequestGeneration += 1;
       anomalyAttributionGenerations.clear();
     }
-    return { integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "", premarketLastAttemptAt: "", premarketLastSuccessKey: "", premarketLastResult: "idle", premarketLastError: "" }, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
+    if (credentialChanged) state = { ...state, credentialGeneration: state.credentialGeneration + 1 };
+    return { credentialGeneration: state.credentialGeneration, integrationStatus, integrationStatusLoading: false, integrationStatusError: "", ...(changed ? quoteRefreshReset : {}), ...(changed ? { anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, portfolioPositions: state.portfolioPositions.map((position) => ({ ...position, takeProfitTriggered: false, stopLossTriggered: false })), briefingSchedule: { ...state.briefingSchedule, calendarDate: "", calendarStatus: "unknown", calendarCheckedAt: "", calendarSource: "", calendarToolId: "", premarketLastAttemptAt: "", premarketLastSuccessKey: "", premarketLastResult: "idle", premarketLastError: "" }, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", events: [], eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, eventDataLoading: false } : {}) };
   }),
   cancelLiveDataRefresh: () => {
     if (!get().liveDataLoading) return false;

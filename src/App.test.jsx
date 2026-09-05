@@ -15,6 +15,7 @@ const originalHydrateUserState = useLabStore.getState().hydrateUserState;
 const originalImportPortfolioItems = useLabStore.getState().importPortfolioItems;
 const originalPersistUserState = useLabStore.getState().persistUserState;
 const integrationMocks = vi.hoisted(() => ({
+  saveQVerisCredential: vi.fn(),
   applyIntegrationSettings: vi.fn(),
   loadIntegrationStatus: vi.fn(),
   queryCapabilityData: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("lightweight-charts", () => ({
 
 vi.mock("./lib/integrations.js", async (importOriginal) => ({
   ...await importOriginal(),
+  saveQVerisCredential: integrationMocks.saveQVerisCredential,
   applyIntegrationSettings: integrationMocks.applyIntegrationSettings,
   loadIntegrationStatus: integrationMocks.loadIntegrationStatus,
   queryCapabilityData: integrationMocks.queryCapabilityData,
@@ -1246,7 +1248,7 @@ describe("FolioMind core flows", () => {
     }
   });
 
-  it("refreshes the full quote set when the saved credential changes", async () => {
+  it.each([false, true])("refreshes the full quote set when the saved credential changes (same prefix: %s)", async (samePrefix) => {
     const refreshLiveData = vi.fn().mockResolvedValue(true);
     const integrationStatus = {
       credentialConfigured: true,
@@ -1267,8 +1269,25 @@ describe("FolioMind core flows", () => {
     await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
     refreshLiveData.mockClear();
 
-    act(() => useLabStore.setState({ integrationStatus: { ...integrationStatus, keyPrefix: "cap_new…" } }));
+    act(() => useLabStore.getState().setIntegrationStatus({ ...integrationStatus, keyPrefix: samePrefix ? integrationStatus.keyPrefix : "cap_new…" }, { credentialChanged: samePrefix }));
     await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+  });
+
+  it("invalidates same-prefix data only after the credential save succeeds", async () => {
+    const status = { credentialConfigured: true, keyPrefix: "abcdefgh…", settings: { modelId: "model-a", models: [], capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", dataChannel: "qveris-cap", dataProvider: "qveris_finance" }, demo: false };
+    useLabStore.setState({ integrationStatus: status, integrationStatusLoading: false, liveQuotes: { AAPL: { price: 100 } } });
+    integrationMocks.saveQVerisCredential.mockRejectedValueOnce(new Error("disk unavailable")).mockResolvedValueOnce(true);
+    render(<SettingsView />);
+    fireEvent.change(await screen.findByLabelText("数据服务 API Key"), { target: { value: "abcdefgh-replacement" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存密钥" })).toBeEnabled());
+    expect(useLabStore.getState().liveQuotes.AAPL.price).toBe(100);
+    expect(useLabStore.getState().credentialGeneration).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+    await screen.findByText("数据服务密钥已保存");
+    expect(useLabStore.getState().liveQuotes).toEqual({});
+    expect(useLabStore.getState().credentialGeneration).toBe(1);
+    expect(useLabStore.getState().integrationStatus.keyPrefix).toBe("abcdefgh…");
   });
 
   it("persists the selected automatic quote refresh strategy", async () => {

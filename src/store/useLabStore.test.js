@@ -909,7 +909,7 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLastRefreshAt: null, quoteDetailsLoaded: {}, quoteSeriesLoaded: {} });
   });
 
-  it("clears stale data when a configured credential is replaced", () => {
+  it.each([false, true])("clears stale data when a configured credential is replaced (same prefix: %s)", (samePrefix) => {
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, keyPrefix: "old-key…", settings: { modelId: "model-a", modelGatewayBaseUrl: "https://gateway.example", capabilityBaseUrl: "https://data.example" } },
       liveQuotes: { AAPL: { price: 100 } },
@@ -923,9 +923,9 @@ describe("lab store streaming lifecycle", () => {
 
     useLabStore.getState().setIntegrationStatus({
       credentialConfigured: true,
-      keyPrefix: "new-key…",
+      keyPrefix: samePrefix ? "old-key…" : "new-key…",
       settings: { modelId: "model-a", modelGatewayBaseUrl: "https://gateway.example", capabilityBaseUrl: "https://data.example" },
-    });
+    }, { credentialChanged: samePrefix });
 
     expect(useLabStore.getState()).toMatchObject({
       liveQuotes: {},
@@ -955,7 +955,7 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ liveQuotes: {}, liveDataLoading: false });
   });
 
-  it("ignores an in-flight quote response from a replaced credential", async () => {
+  it.each([false, true])("ignores an in-flight quote response from a replaced credential (same prefix: %s)", async (samePrefix) => {
     let resolveQuote;
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, keyPrefix: "old-key…", settings: { modelId: "model-a", modelGatewayBaseUrl: "https://gateway.example" } },
@@ -967,9 +967,9 @@ describe("lab store streaming lifecycle", () => {
     await Promise.resolve();
     useLabStore.getState().setIntegrationStatus({
       credentialConfigured: true,
-      keyPrefix: "new-key…",
+      keyPrefix: samePrefix ? "old-key…" : "new-key…",
       settings: { modelId: "model-a", modelGatewayBaseUrl: "https://gateway.example" },
-    });
+    }, { credentialChanged: samePrefix });
     resolveQuote({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1297.4 }] }), mode: "pi-local-host", audits: [] });
 
     await expect(pending).resolves.toBe(false);
