@@ -40,10 +40,14 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            args: --bundles nsis,msi
-            artifact: FolioMind-Windows
+            args: --bundles nsis
+            artifact: FolioMind-Windows-NSIS
             paths: |
               src-tauri/target/release/bundle/nsis/*
+          - os: windows-latest
+            args: --bundles msi
+            artifact: FolioMind-Windows-MSI
+            paths: |
               src-tauri/target/release/bundle/msi/*
           - os: macos-14
             args: --bundles app,dmg
