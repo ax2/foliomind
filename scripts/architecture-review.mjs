@@ -52,7 +52,7 @@ const version = packageJson.version;
 check("版本号一致", cargoToml.includes(`version = "${version}"`) && tauriConfig.version === version, `当前 ${version}`);
 check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.includes("realDataMode"), "页面必须显式区分未配置、加载、失败和空数据");
 check("状态脱敏", userState.includes("normalizeUserState") && userState.includes("revision:") && userState.includes("watchlist:") && userState.includes("briefingSchedule:") && !userState.includes("integration-settings.json") && !userState.includes("apiKey"), "用户状态 schema 只处理脱敏用户事实");
-check("发布资产", workflow.includes("SHA256SUMS") && workflow.includes("gh release upload"), "Release workflow 需校验并上传安装包");
+check("发布资产", workflow.includes("SHA256SUMS") && workflow.includes("gh release upload") && workflow.includes("verify-release-assets.mjs") && packageJson.scripts.test.includes("verify-release-assets.test.mjs"), "Release workflow 需校验、上传并远端复核安装包");
 check("主干版本自动发布", workflow.includes("push:") && workflow.includes("REQUESTED_VERSION") && workflow.includes("should_release=false") && workflow.includes("should_release=$should_release") && prd.includes("Stage 3EX 主干版本自动发布") && readme.includes("版本提交后自动运行"), "版本提交到 main 后应自动发布；同版本已发布时安全跳过，手工触发仍保持可用");
 check("发布前 Web QA 门禁", workflow.includes("web-qa:") && workflow.includes("scripts/qa-playwright.py") && workflow.includes("needs: [prepare, web-qa]"), "桌面安装包构建前必须通过隔离 Web/Local Host Playwright 回归，并保留失败证据");
 check("安装升级路径", tauriConfig.bundle?.windows?.allowDowngrades === false && tauriConfig.bundle?.windows?.nsis?.installMode === "currentUser" && Boolean(tauriConfig.bundle?.windows?.wix?.upgradeCode) && readme.includes("不要求用户先手动卸载"), "Windows 同一产品必须覆盖升级、阻止降级并保留用户配置");

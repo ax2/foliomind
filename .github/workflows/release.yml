@@ -287,3 +287,12 @@ jobs:
           publish_args=(--draft=false)
           if [ "$PRERELEASE" != "true" ]; then publish_args+=(--latest); fi
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${publish_args[@]}"
+      - name: Verify published Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets \
+            | node scripts/verify-release-assets.mjs "$VERSION"

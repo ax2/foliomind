@@ -2502,7 +2502,7 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 - 已正式发布的同版本 tag 在准备阶段安全跳过；不存在或仍为 draft 的版本才进入隔离 Web/Local Host QA、跨平台构建、安装包数量校验、SHA-256 校验和正式发布。并发版本使用独立锁，draft 恢复保持幂等。
 - 自动发布不改变 PR 合并权限、安装升级路径、用户配置、API Key、数据/CAP 费用和运行时行为；版本提交仍需通过现有构建、安全审计、架构审查和 Web QA 门禁。
 
-**验收标准**：版本变更推送到 `main` 能自动创建对应 `v<version>` Release 并上传 DMG/NSIS/MSI/SHA256SUMS；同版本后续提交不重复发版；手工触发和 prerelease 行为保持可用；workflow 配置审查、构建、安全审计和发布前 Web QA 通过。
+**验收标准**：版本变更推送到 `main` 能自动创建对应 `v<version>` Release 并上传 DMG/NSIS/MSI/SHA256SUMS；发布后还要通过远端资产数量、命名、大小和正式状态复核；同版本后续提交不重复发版；手工触发和 prerelease 行为保持可用；workflow 配置审查、构建、安全审计和发布前 Web QA 通过。
 
 ### Stage 3EY 本地行情并发加速（本轮增量）
 
