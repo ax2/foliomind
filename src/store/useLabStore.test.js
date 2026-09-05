@@ -10,6 +10,8 @@ vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: vi.fn(), query
 
 import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
 
+const freshAsOf = () => new Date(Date.now() - 60_000).toISOString();
+
 describe("lab store streaming lifecycle", () => {
   beforeEach(async () => {
     runtime.askPi.mockReset();
@@ -419,7 +421,7 @@ describe("lab store streaming lifecycle", () => {
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
       portfolioPositions: [{ id: "p1", symbol: "600519", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000, takeProfitPrice: 1200, stopLossPrice: 800, takeProfitTriggered: false, stopLossTriggered: false }],
     });
-    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: freshAsOf(), source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
 
     await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
     expect(useLabStore.getState().portfolioPositions[0].takeProfitTriggered).toBe(true);
@@ -438,7 +440,7 @@ describe("lab store streaming lifecycle", () => {
       watchlist: [{ symbol: "600519.SS", name: "贵州茅台", market: "沪深", category: "白酒" }],
       portfolioPositions: [{ id: "p1", symbol: "600519.SS", name: "贵州茅台", market: "沪深", quantity: 1, averageCost: 1000, takeProfitPrice: 1200, stopLossPrice: 800, takeProfitTriggered: false, stopLossTriggered: false }],
     });
-    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: "2026-08-30 10:00:00", source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
+    runtime.askPi.mockResolvedValue({ text: JSON.stringify({ quotes: [{ symbol: "600519", price: 1200, asOf: freshAsOf(), source: "真实 CAP" }] }), mode: "pi-local-host", audits: [] });
 
     await expect(useLabStore.getState().refreshLiveData()).resolves.toBe(true);
     expect(useLabStore.getState().portfolioPositions[0].takeProfitTriggered).toBe(true);
@@ -912,7 +914,7 @@ describe("lab store streaming lifecycle", () => {
       rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
-    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
 
     await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
     expect(runtime.askPi).not.toHaveBeenCalled();
@@ -921,19 +923,35 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications[0].body).toContain("+4.20%");
   });
 
+  it("does not trigger a monitor alert from stale CAP data", async () => {
+    useLabStore.setState({
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
+      userStateLoaded: true,
+      rules: [{ id: "stale-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
+    });
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: "2026-08-29T10:00:00Z", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+
+    await expect(useLabStore.getState().runMonitorCheck("stale-rule")).resolves.toBe(true);
+    expect(runtime.askPi).not.toHaveBeenCalled();
+    expect(useLabStore.getState().notifications).toHaveLength(0);
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "unknown", triggered: null });
+  });
+
   it("evaluates a cached corporate event directly without a model round trip", async () => {
+    const eventAsOf = freshAsOf();
     useLabStore.setState({
       integrationStatus: { credentialConfigured: true, settings: { modelId: "model-a" } },
       userStateLoaded: true,
       rules: [{ id: "rule-event", symbol: "600519", strategyId: "news_risk", conditions: [{ type: "core_event", operator: "gte", value: 1 }], intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
-    runtime.queryCachedData.mockResolvedValue({ data: { events: [{ date: "2026-09-01", title: "股东会" }], eventCount: 1, asOf: "2026-08-29", source: "真实事件源" }, mode: "qveris-cap", audits: [{ operation: "cap-call", capability: "EVENT.CALENDAR.CORP" }] });
+    runtime.queryCachedData.mockResolvedValue({ data: { events: [{ date: "2026-09-01", title: "股东会" }], eventCount: 1, asOf: eventAsOf, source: "真实事件源" }, mode: "qveris-cap", audits: [{ operation: "cap-call", capability: "EVENT.CALENDAR.CORP" }] });
 
     await expect(useLabStore.getState().runMonitorCheck("rule-event")).resolves.toBe(true);
     expect(runtime.queryCachedData).toHaveBeenCalledWith({ kind: "core_event", symbol: "600519.SH" }, { timeoutMs: 60_000 });
     expect(runtime.askPi).not.toHaveBeenCalled();
-    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "triggered", triggered: true, conditionResults: [true], asOf: "2026-08-29" });
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ outcome: "triggered", triggered: true, conditionResults: [true], asOf: eventAsOf });
   });
 
   it("does not fall back to model Search after a monitor CAP authentication failure", async () => {
@@ -1063,8 +1081,8 @@ describe("lab store streaming lifecycle", () => {
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
     runtime.queryCachedData.mockImplementation(async ({ kind }) => kind === "capital_flow"
-      ? { data: { capitalFlow: [{ date: "2026-08-29", mainNetInflow: 120 }], mainNetInflow: 120, asOf: "2026-08-29", source: "真实资金流" }, mode: "qveris-cap", audits: [] }
-      : { data: { news: [{ title: "风险提示" }], sentiment: "negative", asOf: "2026-08-29", source: "真实舆情" }, mode: "qveris-cap", audits: [] });
+      ? { data: { capitalFlow: [{ date: "2026-08-29", mainNetInflow: 120 }], mainNetInflow: 120, asOf: freshAsOf(), source: "真实资金流" }, mode: "qveris-cap", audits: [] }
+      : { data: { news: [{ title: "风险提示" }], sentiment: "negative", asOf: freshAsOf(), source: "真实舆情" }, mode: "qveris-cap", audits: [] });
 
     await expect(useLabStore.getState().runMonitorCheck("rule-flow-sentiment")).resolves.toBe(true);
     expect(runtime.askPi).not.toHaveBeenCalled();
@@ -1079,7 +1097,7 @@ describe("lab store streaming lifecycle", () => {
       rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
-    const quote = (changePercent) => ({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+    const quote = (changePercent) => ({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
     runtime.queryCachedData.mockResolvedValueOnce(quote(4.2)).mockResolvedValueOnce(quote(4.2)).mockResolvedValueOnce(quote(1.2)).mockResolvedValueOnce(quote(4.5));
 
     await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
@@ -1102,7 +1120,7 @@ describe("lab store streaming lifecycle", () => {
       rules: [{ id: "once-rule", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, triggerMode: "once", enabled: true, lastCheckedAt: null }],
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
-    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
 
     await expect(useLabStore.getState().runMonitorCheck("once-rule")).resolves.toBe(true);
     expect(useLabStore.getState().rules[0]).toMatchObject({ triggerMode: "once", enabled: false, lastSignalTriggered: true });
@@ -1152,8 +1170,8 @@ describe("lab store streaming lifecycle", () => {
       ],
     });
     runtime.queryCachedData
-      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] })
-      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "AAPL", price: 200, changePercent: 1.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] })
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "AAPL", price: 200, changePercent: 1.2, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
 
     await expect(useLabStore.getState().runMonitorCheck("watchlist-rule")).resolves.toBe(true);
     expect(runtime.queryCachedData).toHaveBeenCalledTimes(2);
@@ -1163,8 +1181,8 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().monitorHistory.map((entry) => entry.symbol)).toEqual(["600519", "AAPL"]);
 
     runtime.queryCachedData
-      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: "2026-08-29 10:01:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] })
-      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "AAPL", price: 200, changePercent: 1.2, asOf: "2026-08-29 10:01:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "600519", price: 1300, changePercent: 4.2, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] })
+      .mockResolvedValueOnce({ data: { quotes: [{ symbol: "AAPL", price: 200, changePercent: 1.2, asOf: freshAsOf(), source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [] });
     await expect(useLabStore.getState().runMonitorCheck("watchlist-rule")).resolves.toBe(true);
     expect(useLabStore.getState().notifications).toHaveLength(1);
   });
@@ -1176,10 +1194,11 @@ describe("lab store streaming lifecycle", () => {
       rules: [{ id: "rule-1", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true, lastCheckedAt: null }],
       watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
     });
-    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: "2026-08-29 10:00:00", source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "qveris_finance.mkt_l1_rt" }] });
+    const historyAsOf = freshAsOf();
+    runtime.queryCachedData.mockResolvedValue({ data: { quotes: [{ symbol: "600519", price: 1310, changePercent: 4.2, asOf: historyAsOf, source: "真实行情源" }] }, cacheHit: true, mode: "standalone-dev-host", audits: [{ operation: "cached-call", outcome: "success", toolId: "qveris_finance.mkt_l1_rt" }] });
 
     await expect(useLabStore.getState().runMonitorCheck("rule-1")).resolves.toBe(true);
-    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ ruleId: "rule-1", symbol: "600519", outcome: "triggered", triggered: true, source: "data-service", asOf: "2026-08-29 10:00:00", conditionResults: [true] });
+    expect(useLabStore.getState().monitorHistory[0]).toMatchObject({ ruleId: "rule-1", symbol: "600519", outcome: "triggered", triggered: true, source: "data-service", asOf: historyAsOf, conditionResults: [true] });
     expect(useLabStore.getState().monitorHistory[0].audits[0]).toMatchObject({ operation: "cached-call", toolId: "qveris_finance.mkt_l1_rt" });
   });
 

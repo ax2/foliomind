@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { normalizePortfolioPosition, parsePortfolioImport, portfolioAlertChecks, portfolioAllocationRows, portfolioMetrics, portfolioPerformanceSeries, portfolioPlanProgress, portfolioReportCsv, portfolioReportRows, portfolioRiskMetrics, portfolioRiskReturns, sortPortfolioRows } from "./portfolio.js";
 
+const freshAsOf = () => new Date(Date.now() - 60_000).toISOString();
+
 describe("portfolio metrics", () => {
   it("normalizes valid positions and rejects invalid values", () => {
     expect(normalizePortfolioPosition({ id: "p1", symbol: " aapl ", name: "Apple", quantity: "2", averageCost: "100", takeProfitPrice: "125", stopLossPrice: "80" })).toMatchObject({ symbol: "AAPL", quantity: 2, averageCost: 100, takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: false, stopLossTriggered: false });
@@ -9,13 +11,18 @@ describe("portfolio metrics", () => {
 
   it("fires edge-triggered take-profit and stop-loss alerts only for real prices", () => {
     const position = { symbol: "AAPL", takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: false, stopLossTriggered: false };
-    const takeProfit = portfolioAlertChecks(position, { price: 125, asOf: "2026-08-30T10:00:00Z", source: "CAP" });
+    const takeProfit = portfolioAlertChecks(position, { price: 125, asOf: freshAsOf(), source: "CAP" });
     expect(takeProfit.alerts).toMatchObject([{ type: "take-profit", target: 125, currentPrice: 125 }]);
     expect(takeProfit.updates).toMatchObject({ takeProfitTriggered: true, stopLossTriggered: false });
     expect(portfolioAlertChecks({ ...position, takeProfitTriggered: true }, { price: 126 }).alerts).toHaveLength(0);
     expect(portfolioAlertChecks({ ...position, takeProfitTriggered: true }, { price: 120 }).updates.takeProfitTriggered).toBe(false);
     expect(portfolioAlertChecks(position, { price: 79, source: "CAP" }).alerts).toMatchObject([{ type: "stop-loss", severity: "critical" }]);
     expect(portfolioAlertChecks(position, {}).alerts).toHaveLength(0);
+  });
+
+  it("does not trigger a portfolio alert from a stale quote", () => {
+    const position = { symbol: "AAPL", takeProfitPrice: 125, stopLossPrice: 80, takeProfitTriggered: false, stopLossTriggered: false };
+    expect(portfolioAlertChecks(position, { price: 125, asOf: "2026-08-29T10:00:00Z" }, { now: Date.parse("2026-09-02T10:00:00Z") })).toEqual({ updates: {}, alerts: [] });
   });
 
   it("normalizes and calculates a transparent trade plan", () => {

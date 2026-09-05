@@ -15,7 +15,7 @@ import { createPortfolioReviewSnapshot } from "../lib/portfolioReview.js";
 import { briefingSlot, DEFAULT_BRIEFING_SCHEDULE, hasFreshPortfolioQuote, marketCodesForPositions, normalizeBriefingSchedule, premarketSlot, SSE_MARKET_CODE } from "../lib/briefingSchedule.js";
 import { buildAttributionPrompt, normalizeAttribution, normalizeAttributionEvidence, portfolioAttributionContext } from "../lib/anomalyAttribution.js";
 import { collectEventReminders } from "../lib/eventReminders.js";
-import { firstQuoteRecord, isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteRecords, quoteSymbolKey } from "../lib/quoteFormatting.js";
+import { firstQuoteRecord, isValidQuotePrice, marketRegionFor, quoteForSymbol, quoteFreshness, quoteRecords, quoteSymbolKey } from "../lib/quoteFormatting.js";
 import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTriggerMode } from "../lib/monitorLifecycle.js";
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
@@ -449,7 +449,7 @@ async function queryMonitorData(kind, symbol, market = "") {
   try {
     const cached = await queryCapabilityData({ kind, symbol: qverisSymbol(symbol, market) }, { timeoutMs: 60_000 });
     const text = JSON.stringify(cached?.data ?? cached ?? {});
-    return { fields: monitorFieldsFromReply(text, symbol), mode: cached?.mode || "pi-local-host", audits: cached?.audits || [{ operation: "cap-call", outcome: "success", kind }] };
+    return { kind, fields: monitorFieldsFromReply(text, symbol), mode: cached?.mode || "pi-local-host", audits: cached?.audits || [{ operation: "cap-call", outcome: "success", kind }] };
   } catch (error) {
     // Do not hide authentication, throttling, timeout, or Host cancellation
     // failures.  Swallowing them here would make executeMonitorForItem fall
@@ -603,7 +603,18 @@ async function executeMonitorForItem(rule, item) {
     const monitorData = directResults.reduce((merged, current) => ({ ...merged, ...current.fields, asOf: current.fields.asOf || merged.asOf, source: current.fields.source || merged.source }), {});
     reply = { text: JSON.stringify(monitorData), mode: directResults[0]?.mode || "pi-local-host", audits: directResults.flatMap((current) => current.audits || []) };
     const evaluation = evaluateRuleConditions(rule, monitorData);
-    if (directResults.length && evaluation.known) {
+    const staleDirectData = directResults.find((current) => ["quote", "series"].includes(current.kind) && quoteFreshness(current.fields?.asOf).state === "stale");
+    if (staleDirectData) {
+      result = {
+        triggered: null,
+        title: `${item?.name || rule.symbol} · ${strategy.name}`,
+        summary: "条件所需的真实数据已超过新鲜度阈值，本次不触发提醒；刷新数据后再试。",
+        severity: "info",
+        asOf: String(staleDirectData.fields?.asOf || "数据时间未知"),
+        source: String(staleDirectData.fields?.source || "数据服务"),
+      };
+      parsed = result;
+    } else if (directResults.length && evaluation.known) {
       result = conditionsForRule(rule).every((condition) => condition.type === "price_change") && monitorData.price !== undefined
         ? priceMonitorResult(rule, item, monitorData)
         : conditionMonitorResult(rule, item, monitorData);

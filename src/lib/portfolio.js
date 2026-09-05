@@ -1,4 +1,4 @@
-import { quoteForSymbol } from "./quoteFormatting.js";
+import { quoteForSymbol, quoteFreshness } from "./quoteFormatting.js";
 
 export const PORTFOLIO_PLAN_HORIZONS = Object.freeze([
   { id: "short", label: "短线（1–5 个交易日）" },
@@ -174,8 +174,12 @@ function finitePositive(value) {
  * Evaluate optional take-profit/stop-loss plans against one real quote.
  * Missing quotes never produce an alert and never clear a previous edge state.
  */
-export function portfolioAlertChecks(position, quote) {
+export function portfolioAlertChecks(position, quote, options = {}) {
   const currentPrice = finitePositiveValue(quote?.price);
+  // A delayed quote can remain visible for context, but it must never create
+  // a new edge-triggered portfolio notification. Unknown timestamps remain
+  // usable because some providers do not return an as-of field.
+  if (quoteFreshness(quote?.asOf, options.now, options.staleAfterMs).state === "stale") return { updates: {}, alerts: [] };
   const checks = [
     { type: "take-profit", label: "止盈", field: "takeProfitPrice", stateField: "takeProfitTriggered", reached: (price, target) => price >= target, severity: "warning" },
     { type: "stop-loss", label: "止损", field: "stopLossPrice", stateField: "stopLossTriggered", reached: (price, target) => price <= target, severity: "critical" },
