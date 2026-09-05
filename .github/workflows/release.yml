@@ -205,7 +205,8 @@ jobs:
               sleep 15
             fi
           done
-          echo "::warning::npm audit service was temporarily unavailable after three attempts; local tests and build gates remain mandatory"
+          echo "::error::npm audit service was temporarily unavailable after three attempts; refusing to publish without a completed security audit" >&2
+          exit 1
       - run: npm test
       - run: npm run review:architecture
       - run: npm run build
