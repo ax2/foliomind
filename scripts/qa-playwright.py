@@ -193,6 +193,17 @@ async def main() -> None:
           return { controls, allVisibleWithinViewport: controls.filter((item) => item.visible).every((item) => item.left >= 0 && item.right <= viewport) };
         }""")
         checks.append({"flow": "移动端标的操作完整可见", "passed": mobile_controls["allVisibleWithinViewport"], "detail": mobile_controls})
+        mobile_portfolio_controls = await page.evaluate("""() => {
+          const controls = [...document.querySelectorAll('.portfolio-actions .icon-button')].map((element) => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const visible = style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+            return { label: element.getAttribute('aria-label') || element.textContent.trim(), visible, left: Math.round(rect.left), right: Math.round(rect.right) };
+          });
+          const viewport = document.documentElement.clientWidth;
+          return { controls, allVisibleWithinViewport: controls.filter((item) => item.visible).every((item) => item.left >= 0 && item.right <= viewport) };
+        }""")
+        checks.append({"flow": "移动端组合操作完整可见", "passed": mobile_portfolio_controls["allVisibleWithinViewport"], "detail": mobile_portfolio_controls})
         await page.screenshot(path=OUTPUT / "implementation-mobile-final.png")
         await browser.close()
 
