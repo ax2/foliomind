@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 const root = new URL("..", import.meta.url);
-const load = (file) => readFile(new URL(file, root), "utf8");
+// Git may materialize text files with CRLF on Windows. Normalize at the
+// review boundary so newline-sensitive checks are deterministic across CI
+// runners without changing the checked-in source files.
+const load = (file) => readFile(new URL(file, root), "utf8").then((text) => text.replace(/\r\n/g, "\n"));
 const checks = [];
 const check = (name, pass, detail) => checks.push({ name, pass, detail });
 
