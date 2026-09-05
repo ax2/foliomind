@@ -1691,6 +1691,25 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
   },
+  clearReadNotifications: async () => {
+    const previous = get().notifications;
+    const removed = previous.filter((item) => item.read === true);
+    if (!removed.length) return 0;
+    const removedIds = new Set(removed.map((item) => item.id));
+    set((state) => ({ notifications: state.notifications.filter((item) => !removedIds.has(item.id)) }));
+    try {
+      await get().persistUserState();
+      return removed.length;
+    } catch (error) {
+      set((state) => {
+        const existing = new Set(state.notifications.map((item) => item.id));
+        const restored = previous.filter((item) => removedIds.has(item.id) && !existing.has(item.id));
+        if (!restored.length) return {};
+        return { notifications: [...state.notifications, ...restored].sort((left, right) => (Date.parse(right.createdAt) || 0) - (Date.parse(left.createdAt) || 0)).slice(0, 500) };
+      });
+      throw error;
+    }
+  },
   runMonitorCheck: async (ruleId) => {
     // Keep the real-data boundary defensive at the Store API as well as in
     // the UI. Older views or direct integrations must not turn browser

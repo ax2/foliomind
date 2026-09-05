@@ -768,6 +768,33 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications[0].read).toBe(false);
   });
 
+  it("clears only read notifications and persists the remaining inbox", async () => {
+    useLabStore.setState({ notifications: [
+      { id: "read-1", title: "已读", body: "旧消息", read: true, createdAt: "2026-09-05T01:00:00Z" },
+      { id: "unread-1", title: "未读", body: "重要提醒", read: false, createdAt: "2026-09-05T02:00:00Z" },
+      { id: "read-2", title: "已读 2", body: "旧消息 2", read: true, createdAt: "2026-09-05T00:00:00Z" },
+    ] });
+    persistence.saveUserState.mockClear();
+
+    await expect(useLabStore.getState().clearReadNotifications()).resolves.toBe(2);
+    expect(useLabStore.getState().notifications.map((item) => item.id)).toEqual(["unread-1"]);
+    const savedState = persistence.saveUserState.mock.calls.at(-1)?.[0];
+    expect(savedState.notifications).toEqual([expect.objectContaining({ id: "unread-1", read: false })]);
+  });
+
+  it("restores read notifications when cleanup persistence fails", async () => {
+    const error = new Error("disk full");
+    useLabStore.setState({ notifications: [
+      { id: "read-1", title: "已读", body: "旧消息", read: true, createdAt: "2026-09-05T01:00:00Z" },
+      { id: "unread-1", title: "未读", body: "重要提醒", read: false, createdAt: "2026-09-05T02:00:00Z" },
+    ] });
+    persistence.saveUserState.mockClear();
+    persistence.saveUserState.mockRejectedValueOnce(error);
+
+    await expect(useLabStore.getState().clearReadNotifications()).rejects.toBe(error);
+    expect(useLabStore.getState().notifications.map((item) => item.id)).toEqual(["unread-1", "read-1"]);
+  });
+
   it("does not send or retain event reminders that failed to persist", async () => {
     persistence.saveUserState.mockRejectedValueOnce(new Error("Host unavailable"));
     await expect(useLabStore.getState().notifyDueEventReminders([

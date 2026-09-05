@@ -614,6 +614,22 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState().notifications[0].read).toBe(true);
   });
 
+  it("exposes notification history management without removing unread items", async () => {
+    useLabStore.setState({
+      activeView: "notifications",
+      notifications: [
+        { id: "n-read", kind: "monitor", symbol: "600519", name: "贵州茅台", title: "已读提醒", body: "历史消息", severity: "info", createdAt: "2026-08-30T07:00:00Z", read: true, source: "data-service" },
+        { id: "n-unread", kind: "monitor", symbol: "300750", name: "宁德时代", title: "未读提醒", body: "当前消息", severity: "warning", createdAt: "2026-08-30T08:00:00Z", read: false, source: "data-service" },
+      ],
+    });
+    render(<NotificationsView />);
+    expect(screen.getByRole("button", { name: "清理已读" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "导出当前筛选 CSV" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "清理已读" }));
+    await waitFor(() => expect(screen.queryByText("已读提醒")).not.toBeInTheDocument());
+    expect(screen.getByText("未读提醒")).toBeInTheDocument();
+  });
+
   it("keeps notification actions outside the interactive message surface", () => {
     useLabStore.setState({
       activeView: "notifications",
