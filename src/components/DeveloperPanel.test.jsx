@@ -69,6 +69,14 @@ describe("DeveloperPanel", () => {
     expect(await screen.findByText(/测试成功/)).toBeInTheDocument();
   });
 
+  it("redacts unknown developer errors", async () => {
+    host.loadDeveloperOverview.mockRejectedValueOnce(new Error("private upstream response"));
+    render(<DeveloperPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /开发者面板/ }));
+    expect(await screen.findByText("本地 Host 未连接", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("private upstream response")).not.toBeInTheDocument();
+  });
+
   it("copies the selected CAP as a Skill-compatible tool schema", async () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
     render(<DeveloperPanel />);

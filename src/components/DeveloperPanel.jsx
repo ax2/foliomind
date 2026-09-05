@@ -6,6 +6,7 @@ import { BUILTIN_CAPABILITIES } from "../lib/builtinCapabilities.js";
 import { queryCapabilityData, queryTradingCalendar } from "../lib/integrations.js";
 import { capabilityArray, capabilityData, capabilityExplicitFailure, capabilityStatusCode } from "../lib/capabilityEnvelope.js";
 import { firstQuoteRecord } from "../lib/quoteFormatting.js";
+import { friendlyDataMessage, friendlySettingsMessage } from "../lib/friendlyMessages.js";
 
 function formatTime(value) {
   try { return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch { return "--:--:--"; }
@@ -219,7 +220,7 @@ export function DeveloperPanel() {
         }));
       }
       setError("");
-    } catch (cause) { setError(cause?.message || (local ? "本地 Host 未连接" : "桌面运行时未连接")); }
+    } catch (cause) { setError(friendlyDataMessage(cause, local ? "本地 Host 未连接" : "桌面运行时未连接")); }
   };
   useEffect(() => {
     if (!enabled || !open) return undefined;
@@ -273,7 +274,7 @@ export function DeveloperPanel() {
       if (!local) return;
       const result = await updateDeveloperVariables({ [name]: value }); setOverview((current) => current ? { ...current, variables: result.variables } : current); setError("");
     }
-    catch (cause) { setError(cause?.message || "变量更新失败"); }
+    catch (cause) { setError(friendlySettingsMessage(cause)); }
   };
   const onPointerDown = (event) => { dragStart.current = event.clientY; event.currentTarget.setPointerCapture?.(event.pointerId); };
   const onPointerMove = (event) => { if (dragStart.current != null) setDragOffset(Math.max(0, Math.min(160, event.clientY - dragStart.current))); };
@@ -312,7 +313,7 @@ export function DeveloperPanel() {
       if (directoryGeneration.current !== generation) return;
       const cancelled = cause?.code === LOCAL_HOST_ABORTED || cause?.name === "AbortError" || controller.signal.aborted;
       setDirectoryState(cancelled ? "cancelled" : "error");
-      setDirectoryError(cancelled ? "已停止目录加载，可稍后重新尝试" : cause?.message || "能力目录暂时无法加载");
+      setDirectoryError(cancelled ? "已停止目录加载，可稍后重新尝试" : friendlyDataMessage(cause, "能力目录暂时无法加载，请稍后重试"));
     } finally {
       if (directoryController.current === controller) directoryController.current = null;
     }
@@ -370,7 +371,7 @@ export function DeveloperPanel() {
       if (isCurrent()) setCapabilityTests((current) => ({ ...current, [key]: { ...outcome, result } }));
     } catch (cause) {
       const cancelled = cause?.code === LOCAL_HOST_ABORTED || cause?.name === "AbortError" || controller.signal.aborted;
-      if (isCurrent()) setCapabilityTests((current) => ({ ...current, [key]: cancelled ? { state: "cancelled" } : { state: "error", error: cause?.message || "测试失败" } }));
+      if (isCurrent()) setCapabilityTests((current) => ({ ...current, [key]: cancelled ? { state: "cancelled" } : { state: "error", error: friendlyDataMessage(cause, "能力测试失败，请展开调用日志查看原因") } }));
     } finally {
       if (capabilityControllers.current.get(key) === controller) capabilityControllers.current.delete(key);
     }
@@ -382,7 +383,7 @@ export function DeveloperPanel() {
       setCopiedCapability(capability.kind);
       window.setTimeout(() => setCopiedCapability((current) => current === capability.kind ? "" : current), 2_000);
       setError("");
-    } catch (cause) { setError(cause?.message || "复制 Tool Schema 失败"); }
+    } catch (cause) { setError(friendlySettingsMessage(cause)); }
   };
   const exportLogs = () => {
     try {
@@ -396,14 +397,14 @@ export function DeveloperPanel() {
       anchor.remove();
       URL.revokeObjectURL(url);
       setError("");
-    } catch (cause) { setError(cause?.message || "导出日志失败"); }
+    } catch (cause) { setError(friendlySettingsMessage(cause)); }
   };
   return <section className={`developer-panel ${open ? "open" : ""}`} style={{ "--dev-drag-offset": `${dragOffset}px` }} aria-label="本地开发者面板">
     <button className="developer-handle" type="button" onClick={() => setOpen((value) => !value)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} aria-expanded={open} aria-controls="developer-panel-content">
       <span><Code size={16} />开发者面板</span><CaretUp size={15} className={open ? "rotated" : ""} />
     </button>
     {open && <div className="developer-panel-content" id="developer-panel-content">
-      <header><div><strong>{desktop ? "桌面调试" : "本地调试"}</strong><small>仅本机可见 · 脱敏日志可跨 Host 重启保留</small></div><div className="developer-actions"><button type="button" onClick={() => void refresh()} aria-label="刷新日志"><ArrowClockwise size={15} /></button><button type="button" onClick={exportLogs} aria-label="导出日志"><DownloadSimple size={15} /></button><button type="button" onClick={async () => { try { if (local) await clearDeveloperLogs(); setDesktopLogs([]); setOverview((current) => current ? { ...current, logs: [] } : current); await refresh(); } catch (cause) { setError(cause?.message || "清空失败"); } }} aria-label="清空日志"><Trash size={15} /></button><button type="button" onClick={() => setOpen(false)} aria-label="关闭开发者面板"><X size={16} /></button></div></header>
+      <header><div><strong>{desktop ? "桌面调试" : "本地调试"}</strong><small>仅本机可见 · 脱敏日志可跨 Host 重启保留</small></div><div className="developer-actions"><button type="button" onClick={() => void refresh()} aria-label="刷新日志"><ArrowClockwise size={15} /></button><button type="button" onClick={exportLogs} aria-label="导出日志"><DownloadSimple size={15} /></button><button type="button" onClick={async () => { try { if (local) await clearDeveloperLogs(); setDesktopLogs([]); setOverview((current) => current ? { ...current, logs: [] } : current); await refresh(); } catch (cause) { setError(friendlySettingsMessage(cause)); } }} aria-label="清空日志"><Trash size={15} /></button><button type="button" onClick={() => setOpen(false)} aria-label="关闭开发者面板"><X size={16} /></button></div></header>
       {error && <div className="developer-error" role="status">{error}</div>}
       <div className="developer-grid">
         <div className="developer-card"><h4>运行状态</h4><dl><div><dt>运行时</dt><dd>{overview?.state?.runtimeState || (overview?.state?.activeRequest ? "执行中" : "空闲")}</dd></div><div><dt>模型</dt><dd>{overview?.state?.settings?.modelId || "未配置"}</dd></div><div><dt>API Key</dt><dd>{overview?.state?.keyPrefix || "未配置"}</dd></div><div><dt>能力目录</dt><dd>{overview?.state?.capabilityCatalog?.provider || "qveris_finance"} · {overview?.state?.capabilityCatalog?.tools?.length || 0} 项（共 {overview?.state?.capabilityCatalog?.providerSummary?.capabilityCount || 141} 个能力）</dd></div><div><dt>固化工具</dt><dd>{overview?.state?.toolCache?.length || 0} 类</dd></div></dl></div>

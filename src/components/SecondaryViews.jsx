@@ -273,14 +273,14 @@ export function PortfolioView() {
       await savePortfolioPosition({ ...form, id: editing?.id || "" });
       setDialogOpen(false);
     } catch (submitError) {
-      setError(submitError?.message || "暂时无法保存这笔持仓，请检查输入后重试。");
+      setError(errorMessage(submitError, "暂时无法保存这笔持仓，请检查输入后重试。"));
     } finally {
       setBusy(false);
     }
   };
   const deletePosition = async (position) => {
     try { await removePortfolioPosition(position.id); }
-    catch (actionError) { setError(actionError?.message || "暂时无法删除这笔持仓，请稍后重试。"); }
+    catch (actionError) { setError(errorMessage(actionError, "暂时无法删除这笔持仓，请稍后重试。")); }
   };
   const updateSchedule = (input) => {
     setReviewNotice("");
@@ -292,7 +292,7 @@ export function PortfolioView() {
   };
   const markPlan = async (position, status) => {
     try { await updatePortfolioPlanStatus(position.id, status, status === "executed" ? "用户确认已执行计划" : "重新开启计划跟踪"); }
-    catch (actionError) { setError(actionError?.message || "暂时无法更新交易计划，请稍后重试。"); }
+    catch (actionError) { setError(errorMessage(actionError, "暂时无法更新交易计划，请稍后重试。")); }
   };
   const exportReport = () => {
     const blob = new Blob([portfolioReportCsv(positions, liveQuotes)], { type: "text/csv;charset=utf-8" });
@@ -314,7 +314,7 @@ export function PortfolioView() {
       if (!parsed.items.length) throw new Error(parsed.errors.length ? `没有可导入的有效持仓（${parsed.errors[0].reason}）` : "文件中没有持仓记录");
       setImportPreview({ fileName: file.name || "持仓文件", ...parsed });
     } catch (importError) {
-      setImportNotice(importError?.message || "暂时无法导入持仓，请检查文件后重试。");
+      setImportNotice(errorMessage(importError, "暂时无法导入持仓，请检查文件后重试。"));
     } finally {
       setImportBusy(false);
     }
@@ -329,7 +329,7 @@ export function PortfolioView() {
       setImportNotice(`已导入 ${imported.length} 个持仓${detail ? ` · ${detail}` : ""}。现价仍需重新获取真实行情。`);
       setImportPreview(null);
     } catch (importError) {
-      setImportNotice(importError?.message || "暂时无法导入持仓，请稍后重试。导入预览仍然保留。");
+      setImportNotice(errorMessage(importError, "暂时无法导入持仓，请稍后重试。导入预览仍然保留。"));
     } finally {
       setImportBusy(false);
     }

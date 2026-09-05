@@ -832,7 +832,8 @@ describe("FolioMind core flows", () => {
     fireEvent.change(screen.getByLabelText("导入持仓文件"), { target: { files: [file] } });
     expect(await screen.findByRole("dialog", { name: "确认导入持仓" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("保存失败"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("暂时无法导入持仓，请稍后重试。导入预览仍然保留。"));
+    expect(screen.queryByText("保存失败")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "确认导入持仓" })).toBeInTheDocument();
     expect(importFailure).toHaveBeenCalledOnce();
   });
