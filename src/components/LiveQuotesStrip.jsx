@@ -20,6 +20,9 @@ export function LiveQuotesStrip() {
   const liveQuotes = useLabStore((state) => state.liveQuotes);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
+  const liveDataCompletedCount = useLabStore((state) => state.liveDataCompletedCount);
+  const liveDataReceivedCount = useLabStore((state) => state.liveDataReceivedCount);
+  const liveDataTotalCount = useLabStore((state) => state.liveDataTotalCount);
   const liveDataError = useLabStore((state) => state.liveDataError);
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
   const retryLiveData = useLabStore((state) => state.retryLiveData);
@@ -28,5 +31,6 @@ export function LiveQuotesStrip() {
   const errorState = resolveLiveDataState({ configured: true, loading: false, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length });
   const errorCopy = liveDataStateCopy(errorState, { receivedCount: returnedCount, totalCount: watchlist.length });
   if (!realDataMode) return null;
-  return <section className="live-quotes-strip" aria-label="实时行情"><div className="live-quotes-heading"><strong>实时行情</strong><span>{liveDataLoading ? "正在更新…" : `${formatRefreshTime(liveDataLastRefreshAt)} · 自动更新`}</span></div><div className="live-quotes-grid">{watchlist.map((item) => <LiveQuoteCard key={item.symbol} item={item} quote={quoteForSymbol(liveQuotes, item.symbol)} />)}</div>{liveDataError ? <DataState compact state={errorState} title={errorCopy.title} description={errorCopy.description} actionLabel="立即重试" actionDisabled={liveDataLoading} onAction={() => { void retryLiveData(); }} /> : null}</section>;
+  const progressCopy = liveDataLoading && liveDataTotalCount ? `正在更新 · ${liveDataCompletedCount}/${liveDataTotalCount} 完成 · ${liveDataReceivedCount} 个成功` : liveDataLoading ? "正在更新…" : `${formatRefreshTime(liveDataLastRefreshAt)} · 自动更新`;
+  return <section className="live-quotes-strip" aria-label="实时行情"><div className="live-quotes-heading"><strong>实时行情</strong><span aria-live="polite">{progressCopy}</span></div><div className="live-quotes-grid">{watchlist.map((item) => <LiveQuoteCard key={item.symbol} item={item} quote={quoteForSymbol(liveQuotes, item.symbol)} />)}</div>{liveDataError ? <DataState compact state={errorState} title={errorCopy.title} description={errorCopy.description} actionLabel="立即重试" actionDisabled={liveDataLoading} onAction={() => { void retryLiveData(); }} /> : null}</section>;
 }

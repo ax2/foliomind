@@ -626,7 +626,7 @@ async function executeMonitorForItem(rule, item) {
 export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
-  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
+  rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, liveDataStartedAt: null, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 0, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -641,7 +641,7 @@ function dataChannelChanged(previous, next) {
 }
 
 const quoteRefreshReset = {
-  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "", liveDataLoading: false, selectedQuoteLoading: {},
+  liveQuotes: {}, liveDataLastRefreshAt: null, liveDataError: "", liveDataLoading: false, liveDataStartedAt: null, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 0, selectedQuoteLoading: {},
   quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {},
   quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {},
 };
@@ -704,7 +704,7 @@ export const useLabStore = create((set, get) => ({
     const requestGeneration = ++liveRequestGeneration;
     const requestController = new AbortController();
     liveRequestController = requestController;
-    set({ liveDataLoading: true, liveDataError: "" });
+    set({ liveDataLoading: true, liveDataError: "", liveDataStartedAt: nowIso(), liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: items.length });
     const errors = [];
     let received = 0;
     try {
@@ -725,7 +725,7 @@ export const useLabStore = create((set, get) => ({
             delivered = merged.delivered;
             portfolioChanged = merged.portfolioChanged;
             optimisticPositions = merged.portfolioPositions;
-            return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), liveDataLastRefreshAt: nowIso() };
+            return { liveQuotes: merged.liveQuotes, ...(portfolioChanged ? { portfolioPositions: merged.portfolioPositions, notifications: merged.notifications } : {}), liveDataLastRefreshAt: nowIso(), liveDataReceivedCount: current.liveDataReceivedCount + 1 };
           });
           if (portfolioChanged) {
             try {
@@ -741,6 +741,8 @@ export const useLabStore = create((set, get) => ({
           if (requestGeneration !== liveRequestGeneration) return false;
           errors.push(`${item.name}：${friendlyDataMessage(error)}`);
           return false;
+        } finally {
+          if (requestGeneration === liveRequestGeneration) set((current) => ({ liveDataCompletedCount: Math.min(current.liveDataTotalCount, current.liveDataCompletedCount + 1) }));
         }
       });
       if (requestGeneration !== liveRequestGeneration) return false;

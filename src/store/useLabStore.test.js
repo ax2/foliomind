@@ -238,6 +238,21 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().liveQuotes["600519"]).toMatchObject({ price: 1297.4, change: 0.39, asOf: "2026-09-05T07:30:00Z" });
   });
 
+  it("records honest quote sweep progress for slow real-data updates", async () => {
+    const watchlist = [
+      { symbol: "600519", name: "贵州茅台", market: "沪深" },
+      { symbol: "AAPL", name: "Apple", market: "NASDAQ" },
+    ];
+    useLabStore.setState({ integrationStatus: { credentialConfigured: true, settings: { modelId: "" } }, userStateLoaded: true, watchlist });
+    runtime.queryCachedData.mockImplementation(async ({ symbol }) => ({ data: { quotes: [{ symbol, price: 100, asOf: "2026-09-05T09:00:00Z", source: "真实 CAP" }] }, mode: "qveris-cap", audits: [] }));
+
+    const pending = useLabStore.getState().refreshLiveData();
+    expect(useLabStore.getState()).toMatchObject({ liveDataLoading: true, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 2 });
+    await expect(pending).resolves.toBe(true);
+    expect(useLabStore.getState()).toMatchObject({ liveDataLoading: false, liveDataCompletedCount: 2, liveDataReceivedCount: 2, liveDataTotalCount: 2 });
+    expect(useLabStore.getState().liveDataStartedAt).toEqual(expect.any(String));
+  });
+
   it("cancels a slow full quote sweep without leaving the store busy", async () => {
     let startedResolve;
     let requestSignal;

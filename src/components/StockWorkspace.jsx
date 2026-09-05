@@ -49,6 +49,10 @@ export function StockWorkspace() {
   const quoteSeriesLoaded = useLabStore((state) => state.quoteSeriesLoaded);
   const quoteSeriesError = useLabStore((state) => state.quoteSeriesError);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
+  const liveDataStartedAt = useLabStore((state) => state.liveDataStartedAt);
+  const liveDataCompletedCount = useLabStore((state) => state.liveDataCompletedCount);
+  const liveDataReceivedCount = useLabStore((state) => state.liveDataReceivedCount);
+  const liveDataTotalCount = useLabStore((state) => state.liveDataTotalCount);
   const selectedQuoteLoading = useLabStore((state) => state.selectedQuoteLoading);
   const liveDataError = useLabStore((state) => state.liveDataError);
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
@@ -70,6 +74,7 @@ export function StockWorkspace() {
   const [showMovingAverage20, setShowMovingAverage20] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
+  const [loadingNow, setLoadingNow] = useState(Date.now());
   const stock = watchlist.find((item) => item.symbol === symbol) ?? stocks[symbol] ?? { symbol, name: symbol, market: "", category: "" };
   const quote = quoteForSymbol(liveQuotes, symbol);
   const realDataMode = hasRealDataAccess(integrationStatus);
@@ -84,9 +89,17 @@ export function StockWorkspace() {
   const series = quote?.seriesByRange?.[chartRange] || (chartRange === "分时" ? quote?.series : []) || [];
   const provider = integrationStatus?.settings?.dataProvider || "qveris_finance";
   const channel = integrationStatus?.settings?.dataChannel || "qveris-cap";
+  useEffect(() => {
+    if (!liveDataLoading) return undefined;
+    setLoadingNow(Date.now());
+    const timer = window.setInterval(() => setLoadingNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [liveDataLoading]);
+  const loadingElapsedSeconds = liveDataStartedAt ? Math.max(0, Math.floor((loadingNow - Date.parse(liveDataStartedAt)) / 1000)) : 0;
+  const loadingProgress = liveDataTotalCount ? Math.min(100, Math.round((liveDataCompletedCount / liveDataTotalCount) * 100)) : 0;
   const healthState = integrationStatusLoading ? "checking" : integrationStatusError ? "connection-error" : !realDataMode ? "preview" : liveDataLoading ? "loading" : hasQuote ? freshness.state : liveDataError ? "error" : "empty";
   const healthTitle = { checking: "正在读取数据连接", "connection-error": "数据连接暂不可用", preview: "预览模式", loading: "正在获取真实行情", fresh: "真实行情 · 数据新鲜", stale: "真实行情 · 可能已延迟", unknown: "真实行情 · 数据时间未知", error: "暂未获取到行情", empty: "等待真实行情" }[healthState];
-  const healthDetail = integrationStatusLoading ? "正在读取本地 Host 配置，不会使用示例行情" : integrationStatusError ? "无法确认当前凭据和数据渠道；打开设置重试" : hasQuote ? `${provider} · MKT.L1.RT · ${formatQuoteFreshness(quote.asOf, Date.now(), stock.market)}` : realDataMode ? `${provider} · ${channel}${liveDataLastRefreshAt ? ` · 最近尝试 ${formatRefreshTime(liveDataLastRefreshAt)}` : ""}` : "保存 API Key 后显示真实行情";
+  const healthDetail = integrationStatusLoading ? "正在读取本地 Host 配置，不会使用示例行情" : integrationStatusError ? "无法确认当前凭据和数据渠道；打开设置重试" : hasQuote ? `${provider} · MKT.L1.RT · ${formatQuoteFreshness(quote.asOf, Date.now(), stock.market)}` : realDataMode ? liveDataLoading ? `${provider} · ${channel} · 已完成 ${liveDataCompletedCount}/${liveDataTotalCount} · 成功 ${liveDataReceivedCount} 个 · 已用 ${loadingElapsedSeconds}s` : `${provider} · ${channel}${liveDataLastRefreshAt ? ` · 最近尝试 ${formatRefreshTime(liveDataLastRefreshAt)}` : ""}` : "保存 API Key 后显示真实行情";
   const requestAgentAnalysis = () => {
     setMoreOpen(false);
     setActiveView("chat");
@@ -141,7 +154,7 @@ export function StockWorkspace() {
       </header>
       <section className={`data-health-strip data-health-${healthState}`} aria-label="行情数据状态">
         <span className="data-health-dot" aria-hidden="true" />
-        <div className="data-health-copy"><strong>{healthTitle}</strong><small>{healthDetail}</small></div>
+        <div className="data-health-copy"><strong>{healthTitle}</strong><small>{healthDetail}</small>{liveDataLoading && <span className="data-health-progress" role="progressbar" aria-label="行情更新进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow={loadingProgress}><i style={{ width: `${loadingProgress}%` }} /></span>}</div>
         <button className="data-health-action" disabled={healthState === "checking"} onClick={() => { if (healthState === "loading") cancelLiveDataRefresh(); else if (integrationStatusError || (!realDataMode && healthState !== "checking")) setActiveView("settings"); else if (realDataMode) void refreshLiveData(); }}><ArrowsClockwise size={14} />{integrationStatusLoading ? "读取中…" : integrationStatusError ? "去设置重试" : realDataMode ? healthState === "loading" ? "停止更新" : hasQuote ? "刷新" : "重新获取" : "去设置"}</button><button className="data-health-evidence" type="button" onClick={() => setEvidenceOpen(true)}>来源与证据</button>
       </section>
       <SetupChecklist userStateLoaded={userStateLoaded} integrationStatus={integrationStatus} integrationStatusLoading={integrationStatusLoading} integrationStatusError={integrationStatusError} hasQuote={hasQuote} liveDataLoading={liveDataLoading} onSettings={() => setActiveView("settings")} onRefresh={() => { void refreshSelectedQuote(symbol); }} onCancel={cancelLiveDataRefresh} />

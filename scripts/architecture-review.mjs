@@ -201,6 +201,7 @@ check("CAP 测试嵌套结果真实性", developerPanel.includes("capabilityStat
 check("CAP 测试状态元数据空态", developerPanel.includes("nonRenderableKeys") && developerPanel.includes("status_code") && developerPanel.includes("message") && prd.includes("Stage 3EW"), "能力测试不能把只有 2xx 状态、成功标志或诊断元数据的响应误报为可用数据，应显示诚实空态");
 check("移动端标的操作可见", styles.includes(".stock-header {\n    align-items: flex-start;\n    flex-wrap: wrap;") && styles.includes(".stock-header > div:last-child {\n    width: 100%;") && qaPlaywright.includes("移动端标的操作完整可见") && prd.includes("Stage 3FB 移动端标的操作可见"), "窄屏标的详情页必须将刷新、Agent、收藏和更多操作收敛到可见行内，并由 Playwright 检查控件边界");
 check("移动端组合操作可见", styles.includes(".portfolio-table-head { display: none; }") && styles.includes(".portfolio-row > span::before") && styles.includes(".portfolio-actions .icon-button {\n    min-height: 30px;") && qaPlaywright.includes("移动端组合操作完整可见") && prd.includes("Stage 3FC 移动端组合操作可见"), "窄屏组合明细必须以带字段标签的卡片布局展示，并保证编辑、计划和删除操作位于可见视口内");
+check("行情刷新进度可观测", labStore.includes("liveDataCompletedCount") && labStore.includes("liveDataReceivedCount") && labStore.includes("liveDataStartedAt") && stockWorkspace.includes("data-health-progress") && liveQuotes.includes("liveDataCompletedCount") && prd.includes("Stage 3FG 真实行情刷新进度可观测"), "真实行情慢刷新必须记录并展示已完成/总数、成功返回数和耗时，取消或迟到结果不得破坏进度语义");
 
 const failed = checks.filter((item) => !item.pass);
 console.log(JSON.stringify({ version, reviewedAt: new Date().toISOString(), checks, result: failed.length ? "needs-attention" : "pass" }, null, 2));
