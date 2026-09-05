@@ -3,6 +3,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
+import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { changeToneClass, formatCompactQuoteFreshness, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { useDialogFocus } from "../lib/useDialogFocus.js";
 import { useLabStore } from "../store/useLabStore.js";
@@ -125,7 +126,7 @@ export function WatchlistSidebar() {
       setFeedback(`已导入 ${result.added} 个标的${result.skipped ? `，跳过 ${result.skipped} 个重复项` : ""}${issueText}`);
       setToolsOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(friendlyDataMessage(cause, "自选文件暂时无法导入，请检查格式后重试"));
     }
   };
   const closeDialog = () => { setDialogOpen(false); setQuery(""); setError(""); setNewGroupMode(false); setNewGroupName(""); };
@@ -133,7 +134,7 @@ export function WatchlistSidebar() {
   const removeItem = useCallback(async (symbol) => {
     setError("");
     try { await removeWatchlist(symbol); setFeedback("已从自选移除"); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) { setError(friendlyDataMessage(cause, "暂时无法移除自选，请稍后重试")); }
   }, [removeWatchlist]);
   const moveItem = useCallback(async (symbol, direction) => {
     setError("");
@@ -141,13 +142,13 @@ export function WatchlistSidebar() {
       const moved = await moveWatchlistItem(symbol, direction);
       if (moved) setFeedback(direction === "up" ? "已上移自选" : "已下移自选");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(friendlyDataMessage(cause, "暂时无法调整自选顺序，请稍后重试"));
     }
   }, [moveWatchlistItem]);
   const selectItem = useCallback((symbol) => selectSymbol(symbol), [selectSymbol]);
   const addItem = async (item) => {
     if (!selectedAddGroup) { setError("请输入分组名称"); return; }
-    try { await addWatchlist({ ...item, group: selectedAddGroup }); closeDialog(); } catch (value) { setError(value instanceof Error ? value.message : String(value)); }
+    try { await addWatchlist({ ...item, group: selectedAddGroup }); closeDialog(); } catch (value) { setError(friendlyDataMessage(value, "暂时无法添加自选，请稍后重试")); }
   };
   const chooseSuggestion = async (item) => { await addItem(item); };
   const submit = async (event) => {

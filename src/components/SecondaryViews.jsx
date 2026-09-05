@@ -1182,7 +1182,7 @@ export function SettingsView() {
       const snapshot = parseUserStateBackup(await file.text());
       await replaceUserState(snapshot);
       setNotice("本地数据已导入，行情缓存已清空并会重新获取真实数据");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "备份文件暂时无法导入"); }
+    } catch (error) { setNotice(friendlyDataMessage(error, "备份文件格式不正确或暂时无法导入，请检查后重试")); }
     finally { setBackupBusy(false); }
   };
   return <div className="secondary-page settings-page" aria-busy={loadState === "loading" || busy || runtimeConfiguring}><header><div><h1>设置</h1><p>真实数据、模型网关与本地凭据</p></div><span>{environmentLabel}</span></header>

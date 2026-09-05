@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { friendlyModelMessage } from "./friendlyMessages.js";
+import { friendlyDataMessage, friendlyModelMessage } from "./friendlyMessages.js";
+
+describe("friendlyDataMessage", () => {
+  it("does not expose unknown upstream details", () => {
+    expect(friendlyDataMessage(new Error("unexpected provider payload detail"), "导入失败，请重试")).toBe("导入失败，请重试");
+  });
+
+  it("keeps actionable credential classification", () => {
+    expect(friendlyDataMessage(new Error("401 unauthorized"), "导入失败，请重试")).toBe("数据服务凭据需要重新确认，请到设置中检查配置");
+  });
+});
 
 describe("friendlyModelMessage", () => {
   it("separates model credential errors from data errors", () => {

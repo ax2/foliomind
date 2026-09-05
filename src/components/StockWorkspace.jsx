@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { stocks } from "../data/market.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteField, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { hasModelAccess, hasRealDataAccess } from "../lib/dataStatus.js";
+import { friendlyDataMessage } from "../lib/friendlyMessages.js";
 import { useLabStore } from "../store/useLabStore.js";
 import { EvidenceDrawer } from "./EvidenceDrawer.jsx";
 import { MarketChart } from "./MarketChart.jsx";
@@ -118,7 +119,7 @@ export function StockWorkspace() {
         setActionNotice("已加入自选");
       }
     } catch (error) {
-      setActionNotice(error?.message || "收藏操作暂时失败");
+      setActionNotice(friendlyDataMessage(error, "收藏操作暂时失败，请稍后重试"));
     } finally {
       setActionBusy(false);
     }
@@ -130,7 +131,7 @@ export function StockWorkspace() {
       await navigator.clipboard.writeText(symbol);
       setActionNotice(`已复制 ${symbol}`);
     } catch (error) {
-      setActionNotice(error?.message || "复制失败，请手动选择代码");
+      setActionNotice(friendlyDataMessage(error, "复制失败，请手动选择代码"));
     }
   };
   const refreshCurrentQuote = () => {
