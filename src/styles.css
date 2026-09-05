@@ -1352,6 +1352,7 @@ textarea:focus-visible {
 .data-state-error { border-color: #f0cbc8; background: #fff8f7; }
 .data-state-error .data-state-icon { background: #fbe9e7; color: #ba4a42; }
 .data-state-partial .data-state-icon { background: #fff2df; color: #b57428; }
+.data-state-stale .data-state-icon { background: #fff2df; color: #b57428; }
 .data-state-success .data-state-icon { background: #e5f5ed; color: #2d9c67; }
 .live-quotes-strip > .data-state { margin-top: 8px; }
 .index-board > .data-state { grid-column: 1 / -1; }

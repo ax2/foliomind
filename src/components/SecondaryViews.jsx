@@ -199,6 +199,10 @@ export function PortfolioView() {
   const portfolioImportInput = useRef(null);
   const { dialogRef: portfolioDialogRef, captureFocus: capturePortfolioFocus } = useDialogFocus(dialogOpen, () => setDialogOpen(false));
   const metrics = useMemo(() => portfolioMetrics(positions, liveQuotes), [positions, liveQuotes]);
+  const stalePortfolioCount = useMemo(() => positions.reduce((count, position) => {
+    const quote = quoteForSymbol(liveQuotes, position.symbol);
+    return count + (isValidQuotePrice(quote?.price) && quoteFreshness(quote?.asOf).state === "stale" ? 1 : 0);
+  }, 0), [positions, liveQuotes]);
   const allocationRows = useMemo(() => portfolioAllocationRows(positions, liveQuotes), [positions, liveQuotes]);
   const sortedPortfolioRows = useMemo(() => sortPortfolioRows(metrics.rows, portfolioSortKey, portfolioSortDirection), [metrics.rows, portfolioSortKey, portfolioSortDirection]);
   const filteredPortfolioRows = useMemo(() => {
@@ -226,7 +230,7 @@ export function PortfolioView() {
     return { points, min, max, zeroY, first: points[0], latest: points.at(-1) };
   }, [performanceSeries]);
   const realDataMode = hasRealDataAccess(integrationStatus);
-  const portfolioDataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: metrics.pricedCount, totalCount: metrics.totalCount });
+  const portfolioDataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: metrics.pricedCount, totalCount: metrics.totalCount, staleCount: stalePortfolioCount });
   const money = (value) => value == null ? "—" : formatPrice(value);
   const generateReview = async () => {
     setReviewNotice("");
@@ -474,10 +478,11 @@ export function MarketView() {
     setViewNotice(`已删除“${selected.name}”视图`);
   };
   const returnedQuotes = watchlist.filter((item) => isValidQuotePrice(quoteForSymbol(liveQuotes, item.symbol)?.price));
+  const staleQuoteCount = returnedQuotes.reduce((count, item) => count + (quoteFreshness(quoteForSymbol(liveQuotes, item.symbol)?.asOf).state === "stale" ? 1 : 0), 0);
   const breadth = useMemo(() => marketBreadth(watchlist, liveQuotes), [watchlist, liveQuotes]);
   const summary = useMemo(() => marketWatchlistSummary(watchlist, liveQuotes), [watchlist, liveQuotes]);
   const anomalies = useMemo(() => detectMarketAnomalies(watchlist, liveQuotes), [watchlist, liveQuotes]);
-  const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedQuotes.length, totalCount: watchlist.length });
+  const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedQuotes.length, totalCount: watchlist.length, staleCount: staleQuoteCount });
   const retry = () => { void refreshLiveData(); };
   const openSettings = () => setActiveView("settings");
   const openMarketSymbol = (event, symbol) => {
@@ -535,7 +540,11 @@ export function ResearchView() {
   const sorted = useMemo(() => sortResearchItems(filtered, liveQuotes, sortKey, sortDirection), [filtered, liveQuotes, sortKey, sortDirection]);
   const activeFilterCount = activeResearchFilterCount(filters);
   const returnedCount = watchlist.filter((item) => isValidQuotePrice(quoteForSymbol(liveQuotes, item.symbol)?.price)).length;
-  const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length });
+  const staleQuoteCount = watchlist.reduce((count, item) => {
+    const quote = quoteForSymbol(liveQuotes, item.symbol);
+    return count + (isValidQuotePrice(quote?.price) && quoteFreshness(quote?.asOf).state === "stale" ? 1 : 0);
+  }, 0);
+  const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length, staleCount: staleQuoteCount });
   const retry = () => { void refreshLiveData(); };
   const openSettings = () => setActiveView("settings");
   const openResearchSymbol = (event, symbol) => {

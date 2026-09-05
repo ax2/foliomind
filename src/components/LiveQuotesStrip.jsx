@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useLabStore } from "../store/useLabStore.js";
-import { hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
+import { DATA_STATES, hasRealDataAccess, liveDataStateCopy, resolveLiveDataState } from "../lib/dataStatus.js";
 import { changeToneClass, formatPercent, formatPrice, formatQuoteFreshness, formatRefreshTime, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { DataState } from "./DataState.jsx";
 
@@ -28,9 +28,13 @@ export function LiveQuotesStrip() {
   const retryLiveData = useLabStore((state) => state.retryLiveData);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const returnedCount = watchlist.filter((item) => isValidQuotePrice(quoteForSymbol(liveQuotes, item.symbol)?.price)).length;
-  const errorState = resolveLiveDataState({ configured: true, loading: false, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length });
+  const staleQuoteCount = watchlist.reduce((count, item) => {
+    const quote = quoteForSymbol(liveQuotes, item.symbol);
+    return count + (isValidQuotePrice(quote?.price) && quoteFreshness(quote?.asOf).state === "stale" ? 1 : 0);
+  }, 0);
+  const errorState = resolveLiveDataState({ configured: true, loading: false, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length, staleCount: staleQuoteCount });
   const errorCopy = liveDataStateCopy(errorState, { receivedCount: returnedCount, totalCount: watchlist.length });
   if (!realDataMode) return null;
   const progressCopy = liveDataLoading && liveDataTotalCount ? `正在更新 · ${liveDataCompletedCount}/${liveDataTotalCount} 完成 · ${liveDataReceivedCount} 个成功` : liveDataLoading ? "正在更新…" : `${formatRefreshTime(liveDataLastRefreshAt)} · 自动更新`;
-  return <section className="live-quotes-strip" aria-label="实时行情"><div className="live-quotes-heading"><strong>实时行情</strong><span aria-live="polite">{progressCopy}</span></div><div className="live-quotes-grid">{watchlist.map((item) => <LiveQuoteCard key={item.symbol} item={item} quote={quoteForSymbol(liveQuotes, item.symbol)} />)}</div>{liveDataError ? <DataState compact state={errorState} title={errorCopy.title} description={errorCopy.description} actionLabel="立即重试" actionDisabled={liveDataLoading} onAction={() => { void retryLiveData(); }} /> : null}</section>;
+  return <section className="live-quotes-strip" aria-label="实时行情"><div className="live-quotes-heading"><strong>实时行情</strong><span aria-live="polite">{progressCopy}</span></div><div className="live-quotes-grid">{watchlist.map((item) => <LiveQuoteCard key={item.symbol} item={item} quote={quoteForSymbol(liveQuotes, item.symbol)} />)}</div>{(liveDataError || errorState === DATA_STATES.STALE) ? <DataState compact state={errorState} title={errorCopy.title} description={errorCopy.description} actionLabel="立即重试" actionDisabled={liveDataLoading} onAction={() => { void retryLiveData(); }} /> : null}</section>;
 }

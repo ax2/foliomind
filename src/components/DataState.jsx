@@ -6,6 +6,7 @@ const iconByState = {
   empty: CloudSlash,
   error: WarningCircle,
   partial: Info,
+  stale: WarningCircle,
   success: CheckCircle,
 };
 

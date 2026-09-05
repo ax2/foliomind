@@ -4,6 +4,7 @@ export const DATA_STATES = Object.freeze({
   EMPTY: "empty",
   ERROR: "error",
   PARTIAL: "partial",
+  STALE: "stale",
   SUCCESS: "success",
 });
 
@@ -20,12 +21,13 @@ export function hasModelAccess(integrationStatus) {
   return Boolean(integrationStatus?.credentialConfigured && integrationStatus?.settings?.modelId);
 }
 
-export function resolveLiveDataState({ configured, loading, error, receivedCount = 0, totalCount = 0 }) {
+export function resolveLiveDataState({ configured, loading, error, receivedCount = 0, totalCount = 0, staleCount = 0 }) {
   if (!configured) return DATA_STATES.NO_CREDENTIAL;
   if (loading) return DATA_STATES.LOADING;
   if (receivedCount <= 0 && error) return DATA_STATES.ERROR;
   if (receivedCount <= 0 || totalCount <= 0) return DATA_STATES.EMPTY;
   if (error || receivedCount < totalCount) return DATA_STATES.PARTIAL;
+  if (staleCount > 0) return DATA_STATES.STALE;
   return DATA_STATES.SUCCESS;
 }
 
@@ -58,6 +60,11 @@ export function liveDataStateCopy(state, { receivedCount = 0, totalCount = 0 } =
   if (state === DATA_STATES.PARTIAL) return {
     title: "部分行情暂未更新",
     description: `${coverage}已返回；缺失值保持为空，不参与组合和研究计算。`,
+    action: "retry",
+  };
+  if (state === DATA_STATES.STALE) return {
+    title: "行情可能已延迟",
+    description: `${coverage}已返回，但数据时间超过新鲜度阈值；刷新后再使用这些数值。`,
     action: "retry",
   };
   return {
