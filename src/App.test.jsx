@@ -701,6 +701,24 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText(/整个自选（动态）/)).toBeInTheDocument();
   });
 
+  it("pauses and resumes all monitor rules from the alert manager", async () => {
+    useLabStore.setState({
+      userStateLoaded: true,
+      rules: [
+        { id: "bulk-on", symbol: "600519", strategyId: "price_change", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }], logic: "AND", intervalSeconds: 300, enabled: true },
+        { id: "bulk-off", symbol: "AAPL", strategyId: "price_change", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }], logic: "AND", intervalSeconds: 300, enabled: false },
+      ],
+    });
+    render(<MonitorView />);
+
+    fireEvent.click(screen.getByRole("button", { name: "全部暂停" }));
+    await waitFor(() => expect(useLabStore.getState().rules.every((rule) => rule.enabled === false)).toBe(true));
+    expect(screen.getAllByRole("status").some((element) => element.textContent.includes("已暂停 1 条盯盘规则"))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "全部启用" }));
+    await waitFor(() => expect(useLabStore.getState().rules.every((rule) => rule.enabled === true)).toBe(true));
+    expect(screen.getAllByRole("status").some((element) => element.textContent.includes("已启用 2 条盯盘规则"))).toBe(true);
+  });
+
   it("searches, filters, sorts, and edits an existing monitor rule", async () => {
     useLabStore.setState({
       userStateLoaded: true,

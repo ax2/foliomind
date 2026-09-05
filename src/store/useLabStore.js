@@ -1601,6 +1601,29 @@ export const useLabStore = create((set, get) => ({
       throw error;
     }
   },
+  setAllRulesEnabled: async (enabled) => {
+    const target = enabled === true;
+    const previous = get().rules;
+    const changed = previous.filter((rule) => rule.enabled !== target);
+    if (!changed.length) return 0;
+    const changedIds = new Set(changed.map((rule) => rule.id));
+    const previousById = new Map(changed.map((rule) => [rule.id, rule]));
+    const nextById = new Map(changed.map((rule) => [rule.id, { ...rule, enabled: target }]));
+    set((state) => ({ rules: state.rules.map((rule) => nextById.get(rule.id) || rule) }));
+    try {
+      await get().persistUserState();
+      return changed.length;
+    } catch (error) {
+      // Restore only rows that still equal this optimistic batch. A concurrent
+      // edit to one rule must survive a failed bulk persistence attempt.
+      set((state) => ({ rules: state.rules.map((rule) => {
+        if (!changedIds.has(rule.id)) return rule;
+        const optimistic = nextById.get(rule.id);
+        return JSON.stringify(rule) === JSON.stringify(optimistic) ? previousById.get(rule.id) : rule;
+      }) }));
+      throw error;
+    }
+  },
   addRule: async (input = {}) => {
     const strategy = strategyFor(input.strategyId);
     const rule = normalizeRule({ ...input, id: createId("rule"), symbol: String(input.symbol || get().selectedSymbol || "600519"), strategyId: strategy.id });

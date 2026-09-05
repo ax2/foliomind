@@ -28,6 +28,7 @@ FolioMind 是一个面向 Windows 和 macOS 的开源金融研究 Agent。产品
 - 公司事件提醒：真实事件进入未来 7 天窗口时提供一次提前提醒，事件当天再提醒一次；按事件和阶段幂等去重，并支持站内/系统通知。
 - 盯盘告警按触发边沿去重：条件持续成立时不重复刷屏，恢复后再次触发才生成新消息。
 - 盯盘消息支持可选的系统通知；用户主动授权后，桌面端和 localhost 调试页可选择接收全部提醒或仅关键提醒，普通消息始终保留在站内；消息中心支持清理已读和导出当前筛选 CSV，未读提醒不会被清理。
+- 盯盘规则中心支持一键全部暂停/全部启用；批量保存失败会精确回滚，不覆盖期间发生的其它规则编辑。
 - 桌面端与本地 Web Host 均支持按间隔执行真实盯盘检查；普通浏览器预览不会伪造检查结果。
 - 市场行情总览与跨市场自选列表，缺失数据保持为空；支持核心估值、交易盘面、完整字段和自定义命名行情视图。
 - 市场页顶部行情概览卡支持鼠标、Enter 和空格快捷进入标的详情；缺失涨跌幅保持中性，不误显示方向。
@@ -164,10 +165,10 @@ Playwright 回归脚本默认检查 `http://127.0.0.1:4173`；本地 Web Host �
 
 ## 发布安装包
 
-GitHub Actions 的 `release` workflow 会在 `main` 的版本提交后自动运行，也支持手工触发；版本从 `package.json`、Cargo 和 Tauri 配置一致性校验中读取（当前为 `0.1.214`）。若同一版本已经正式发布，后续同版本提交会在准备阶段安全跳过，不重复构建或覆盖资产。发布会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
+GitHub Actions 的 `release` workflow 会在 `main` 的版本提交后自动运行，也支持手工触发；版本从 `package.json`、Cargo 和 Tauri 配置一致性校验中读取（当前为 `0.1.215`）。若同一版本已经正式发布，后续同版本提交会在准备阶段安全跳过，不重复构建或覆盖资产。发布会先完成格式、严格 Clippy、测试以及隔离 Web/Local Host Playwright 回归，再构建 Windows NSIS/MSI 和 macOS Apple Silicon DMG；确认三类安装包齐全并通过 SHA-256 校验后，才创建或复用 `v<version>` draft release、上传安装包与 `SHA256SUMS.txt` 并正式发布。Windows 安装包使用稳定的 WiX UpgradeCode、禁止降级并采用 current-user 安装模式；可识别的同一产品新版本会直接覆盖升级，不要求用户先手动卸载或重复确认，只有无法识别为同一产品时才保留系统安全确认。配置、API Key 和用户数据位于安装目录之外，会保留在升级后。
 
 ```bash
-gh workflow run release.yml --repo ax2/foliomind -f version=0.1.214 -f prerelease=false
+gh workflow run release.yml --repo ax2/foliomind -f version=0.1.215 -f prerelease=false
 ```
 
 发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。

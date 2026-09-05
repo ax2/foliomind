@@ -628,6 +628,7 @@ export function MonitorView() {
   const monitorHistory = useLabStore((state) => state.monitorHistory);
   const watchlist = useLabStore((state) => state.watchlist);
   const toggleRule = useLabStore((state) => state.toggleRule);
+  const setAllRulesEnabled = useLabStore((state) => state.setAllRulesEnabled);
   const addRule = useLabStore((state) => state.addRule);
   const updateRule = useLabStore((state) => state.updateRule);
   const deleteRule = useLabStore((state) => state.deleteRule);
@@ -642,6 +643,8 @@ export function MonitorView() {
   const [ruleQuery, setRuleQuery] = useState("");
   const [ruleFilter, setRuleFilter] = useState("all");
   const [ruleSort, setRuleSort] = useState("recent");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNotice, setBulkNotice] = useState("");
   const [form, setForm] = useState(() => ({ scope: "symbol", symbol: watchlist[0]?.symbol || "600519", conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300, triggerMode: "edge", expiresAt: "" }));
   const { dialogRef: monitorDialogRef, captureFocus: captureMonitorFocus } = useDialogFocus(dialogOpen, () => { setDialogOpen(false); setEditingRule(null); });
   useEffect(() => { if (form.scope === "symbol" && !watchlist.some((item) => item.symbol === form.symbol) && watchlist[0]) setForm((value) => ({ ...value, symbol: watchlist[0].symbol })); }, [watchlist, form.scope, form.symbol]);
@@ -672,6 +675,20 @@ export function MonitorView() {
     } catch (cause) { setActionError(errorMessage(cause)); }
   };
   const removeRule = (id) => { setActionError(""); void deleteRule(id).catch((cause) => setActionError(errorMessage(cause))); };
+  const setAllEnabled = async (enabled) => {
+    if (bulkBusy) return;
+    setBulkBusy(true);
+    setActionError("");
+    setBulkNotice("");
+    try {
+      const count = await setAllRulesEnabled(enabled);
+      setBulkNotice(count ? `${enabled ? "已启用" : "已暂停"} ${count} 条盯盘规则` : `所有盯盘规则已经${enabled ? "启用" : "暂停"}`);
+    } catch (cause) {
+      setActionError(errorMessage(cause, `${enabled ? "启用" : "暂停"}盯盘规则暂时失败，请稍后重试`));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
   const updateCondition = (index, next) => setForm((value) => ({ ...value, conditions: value.conditions.map((condition, position) => position === index ? next : condition) }));
   const removeCondition = (index) => setForm((value) => ({ ...value, conditions: value.conditions.filter((_, position) => position !== index) }));
   const addCondition = () => setForm((value) => ({ ...value, conditions: [...value.conditions, defaultConditionFor("price_change")] }));
@@ -695,7 +712,7 @@ export function MonitorView() {
     });
   }, [normalizedRuleQuery, ruleFilter, ruleSort, rules]);
   return <div className="secondary-page monitor-page">
-    <header><div><h1>个股盯盘</h1><p>用条件组合监控真实市场数据，并在触发边沿提醒</p></div><button className="primary-action" onClick={openCreate}><Plus size={17} />新建盯盘</button></header>
+    <header><div><h1>个股盯盘</h1><p>用条件组合监控真实市场数据，并在触发边沿提醒</p></div><div className="page-header-actions"><button className="secondary-button" type="button" disabled={bulkBusy || !rules.some((rule) => rule.enabled)} onClick={() => { void setAllEnabled(false); }}>全部暂停</button><button className="secondary-button" type="button" disabled={bulkBusy || !rules.some((rule) => !rule.enabled)} onClick={() => { void setAllEnabled(true); }}>全部启用</button><button className="primary-action" onClick={openCreate}><Plus size={17} />新建盯盘</button></div></header>
     {!realDataMode ? <LiveDataState compact state={DATA_STATES.NO_CREDENTIAL} totalCount={watchlist.length} onSettings={() => setActiveView("settings")} /> : null}
     <section className="strategy-strip"><strong>条件类型</strong>{CONDITION_TYPES.map((type) => <span key={type.id} title={type.description}>{type.name}</span>)}</section>
     <section className="rule-list">
@@ -708,6 +725,7 @@ export function MonitorView() {
       })}
     </section>
     {realDataMode ? <p className="security-note">检查结果会保留在本地审计时间线；缺失字段显示为“待核实”，不会当作未触发。历史记录最多保留 500 条。</p> : null}
+    {bulkNotice ? <p className="settings-notice" role="status">{bulkNotice}</p> : null}
     {actionError ? <p className="form-error" role="alert">{actionError}</p> : null}
     {dialogOpen && <div className="modal-backdrop" role="presentation"><form ref={monitorDialogRef} className="modal-card condition-modal" role="dialog" aria-modal="true" aria-labelledby="monitor-dialog-title" onSubmit={saveRule}><div className="modal-heading"><h2 id="monitor-dialog-title">{editingRule ? "编辑盯盘条件" : "新建盯盘条件"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => { setDialogOpen(false); setEditingRule(null); }}><X size={18} /></button></div><p className="modal-help">{editingRule ? "修改后会保留历史检查记录，但清除旧触发边沿；下一次真实数据检查完成后才会重新判断。" : "规则创建分三步：选择范围、组合真实数据条件、设定检查频率。自选组规则会跟随当前自选动态增删标的，并按标的独立去重。"}</p><label>监控范围<select aria-label="监控范围" value={form.scope} onChange={(event) => setForm((value) => ({ ...value, scope: event.target.value }))}><option value="symbol">单个标的</option><option value="watchlist">整个自选</option></select></label>{form.scope === "symbol" ? <label>标的<select aria-label="监控标的" value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label> : <p className="monitor-scope-note">将检查当前自选中的 {watchlist.length} 个标的；以后新增或删除自选会自动跟随。</p>}<ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><label>触发方式<select aria-label="触发方式" value={form.triggerMode} onChange={(event) => setForm((value) => ({ ...value, triggerMode: event.target.value }))}>{MONITOR_TRIGGER_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}</select><small className="field-help">{MONITOR_TRIGGER_MODES.find((mode) => mode.id === form.triggerMode)?.description}</small></label><label>有效期（可选）<input aria-label="盯盘有效期" type="date" min={new Date().toISOString().slice(0, 10)} value={form.expiresAt} onChange={(event) => setForm((value) => ({ ...value, expiresAt: event.target.value }))} /><small className="field-help">到期后规则自动停用，不再发起数据请求；留空表示长期有效。</small></label><button className="primary-action" type="submit">{editingRule ? "保存修改" : "保存并启用"}</button></form></div>}
   </div>;

@@ -768,6 +768,44 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().notifications[0].read).toBe(false);
   });
 
+  it("pauses and resumes all monitor rules with one canonical save", async () => {
+    useLabStore.setState({ rules: [
+      { id: "rule-on", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
+      { id: "rule-off", symbol: "AAPL", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: false },
+      { id: "rule-on-2", symbol: "300750", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
+    ] });
+    persistence.saveUserState.mockClear();
+
+    await expect(useLabStore.getState().setAllRulesEnabled(false)).resolves.toBe(2);
+    expect(useLabStore.getState().rules.every((rule) => rule.enabled === false)).toBe(true);
+    expect(persistence.saveUserState).toHaveBeenCalledTimes(1);
+
+    await expect(useLabStore.getState().setAllRulesEnabled(true)).resolves.toBe(3);
+    expect(useLabStore.getState().rules.every((rule) => rule.enabled === true)).toBe(true);
+    await expect(useLabStore.getState().setAllRulesEnabled(true)).resolves.toBe(0);
+    expect(persistence.saveUserState).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores a failed bulk pause without overwriting a concurrent rule edit", async () => {
+    const error = new Error("disk full");
+    const rules = [
+      { id: "rule-one", symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
+      { id: "rule-two", symbol: "AAPL", strategyId: "price_change", threshold: 3, intervalSeconds: 300, enabled: true },
+    ];
+    useLabStore.setState({ rules });
+    persistence.saveUserState.mockClear();
+    persistence.saveUserState.mockImplementationOnce(async () => {
+      useLabStore.setState((state) => ({ rules: state.rules.map((rule) => rule.id === "rule-two" ? { ...rule, threshold: 5 } : rule) }));
+      throw error;
+    });
+
+    await expect(useLabStore.getState().setAllRulesEnabled(false)).rejects.toBe(error);
+    expect(useLabStore.getState().rules).toEqual([
+      { ...rules[0], enabled: true },
+      { ...rules[1], enabled: false, threshold: 5 },
+    ]);
+  });
+
   it("clears only read notifications and persists the remaining inbox", async () => {
     useLabStore.setState({ notifications: [
       { id: "read-1", title: "已读", body: "旧消息", read: true, createdAt: "2026-09-05T01:00:00Z" },
