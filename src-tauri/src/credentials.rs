@@ -14,6 +14,23 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 pub const SERVICE: &str = "app.foliomind.desktop";
 pub const ACCOUNT: &str = "qveris-api-key";
 
+/// Return a stable, credential-free revision for cross-process status
+/// reconciliation. The secret itself never leaves the credential boundary;
+/// the revision is only used to invalidate stale in-memory data.
+pub fn credential_revision(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    // FNV-1a is intentionally used here instead of a process-randomized
+    // hasher: revisions must compare equal across independently running
+    // desktop/Web Host processes while remaining credential-free.
+    let hash = value.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3_u64)
+    });
+    Some(format!("{hash:016x}"))
+}
+
 pub trait CredentialStore: Send + Sync {
     fn read_qveris_key(&self) -> Result<Option<String>, String>;
     fn write_qveris_key(&self, value: &str) -> Result<(), String>;
@@ -202,5 +219,17 @@ mod tests {
         );
         store.delete_qveris_key().unwrap();
         assert_eq!(store.read_qveris_key().unwrap(), None);
+    }
+
+    #[test]
+    fn credential_revision_is_stable_but_changes_for_different_keys() {
+        let first = credential_revision(Some("key-one")).unwrap();
+        assert_eq!(
+            credential_revision(Some(" key-one ")).as_deref(),
+            Some(first.as_str())
+        );
+        assert_ne!(Some(first), credential_revision(Some("key-two")));
+        assert_eq!(credential_revision(None), None);
+        assert_eq!(credential_revision(Some("  ")), None);
     }
 }

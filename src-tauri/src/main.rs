@@ -13,7 +13,7 @@ mod user_state;
 mod web_host;
 
 use config::IntegrationSettings;
-use credentials::{CredentialStore, OsCredentialStore};
+use credentials::{credential_revision, CredentialStore, OsCredentialStore};
 use executor::{AuditEvent, BridgeEnvironment, RunExecutor};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1100,6 +1100,7 @@ fn qveris_credential_clear(host: State<'_, PiHost>) -> Result<(), String> {
 struct IntegrationStatus {
     credential_configured: bool,
     key_prefix: Option<String>,
+    credential_revision: Option<String>,
     settings: IntegrationSettings,
 }
 
@@ -1135,6 +1136,7 @@ fn integration_status(
     Ok(IntegrationStatus {
         credential_configured: key.is_some(),
         key_prefix: api_key_prefix(key),
+        credential_revision: credential_revision(key.as_deref()),
         settings: config::load(&app)?,
     })
 }

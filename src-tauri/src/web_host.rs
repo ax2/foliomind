@@ -202,6 +202,7 @@ fn route_request(
             let status = IntegrationStatus {
                 key_prefix: super::api_key_prefix(key.clone()),
                 credential_configured: key.is_some(),
+                credential_revision: super::credential_revision(key.as_deref()),
                 settings: config::load(app).map_err(internal_error)?,
             };
             serde_json::to_value(status).map_err(internal_error)
@@ -212,14 +213,17 @@ fn route_request(
                 .write_qveris_key(&input.api_key)
                 .map_err(internal_error)?;
             host.discard_staged_model_catalog(None);
-            Ok(json!({"configured": true}))
+            let key = host.credentials.read_qveris_key().map_err(internal_error)?;
+            Ok(
+                json!({"configured": true, "keyPrefix": super::api_key_prefix(key.clone()), "credentialRevision": super::credential_revision(key.as_deref())}),
+            )
         }
         ("DELETE", "/api/integration/credential") => {
             host.credentials
                 .delete_qveris_key()
                 .map_err(internal_error)?;
             host.discard_staged_model_catalog(None);
-            Ok(json!({"configured": false}))
+            Ok(json!({"configured": false, "keyPrefix": null, "credentialRevision": null}))
         }
         ("POST", "/api/integration/models/sync") => {
             let envelope: InputEnvelope<SettingsInput> =
