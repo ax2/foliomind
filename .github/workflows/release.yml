@@ -143,6 +143,9 @@ jobs:
             .qa/
             ${{ runner.temp }}/foliomind-web.log
           if-no-files-found: warn
+      - name: Clean generated Web QA output
+        if: always()
+        run: npm run clean
       - name: Stop standalone Web Host
         if: always()
         run: |
@@ -224,6 +227,9 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.paths }}
           if-no-files-found: error
+      - name: Clean generated build output
+        if: always()
+        run: npm run clean
 
   publish:
     needs: [prepare, build]

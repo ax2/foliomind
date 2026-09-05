@@ -75,3 +75,6 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.paths }}
           if-no-files-found: error
+      - name: Clean generated build output
+        if: always()
+        run: npm run clean
