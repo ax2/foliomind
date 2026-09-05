@@ -18,7 +18,11 @@ export const DATA_SELECTOR_MAX_LENGTH = 128;
 export const CAPABILITY_CATALOG_VERSION = 3;
 const BRIDGE_LIMIT = 20;
 const CAPABILITY_DIRECTORY_LIMIT = 100;
-export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 2;
+// Local Web is the rapid-debug path and can overlap four bounded CAP calls.
+// Desktop has its own conservative native limit; keeping the Host default at
+// four prevents opening the developer panel from silently downgrading Web
+// refreshes to the desktop limit.
+export const DEFAULT_MAX_CONCURRENT_DATA_REQUESTS = 4;
 export const MAX_DIRECT_DATA_CACHE_ENTRIES = 256;
 const token = `fh_${randomUUID()}`;
 const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(

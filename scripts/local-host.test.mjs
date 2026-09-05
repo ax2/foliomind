@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { abortInFlightRequests, acquireStateFileLock, adaptParameters, allDataCacheHit, atomicJson, BUILTIN_CAPABILITY_CATALOG, cacheSharedResult, capabilityAuditOperation, classifyRequest, costFrom, costSummary, createAbortScope, createCacheWarmupGate, createRuntimeGate, dateStringInTimeZone, debugPayload, DEFAULT_DATA_CHANNEL, DEFAULT_DATA_PROVIDER, DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, directCapabilityParameters, MAX_DIRECT_DATA_CACHE_ENTRIES, isAbortError, isRetryableUpstreamError, isRetryableUpstreamStatus, linkAbortSignal, normalizeCapabilityResult, normalizeDiscoveredCapability, retryDelayMs, shouldFallbackForDataKind, shouldFallbackToCachedTool, shouldInvalidateToolCache, STATE_FILE_LOCK_STALE_MS, subscribeToSharedRequest, upstreamWithRetry, validateDataSelector, validateDiscoveredCapabilitySelection, validateEndpointUrl, validateIntegrationSettings } from "./local-host.mjs";
 
-test("uses two concurrent data requests by default for local web refreshes", () => {
-  assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 2);
+test("uses four concurrent data requests by default for local web refreshes", () => {
+  assert.equal(DEFAULT_MAX_CONCURRENT_DATA_REQUESTS, 4);
 });
 
 test("uses the Shanghai local calendar date for CAP defaults across UTC boundaries", () => {
