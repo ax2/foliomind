@@ -18,7 +18,7 @@ async function readTextFile(file) {
   });
 }
 
-const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDataMode, previewMode, sortKey, canMoveUp, canMoveDown, onSelect, onRemove, onMove }) {
+const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDataMode, sortKey, canMoveUp, canMoveDown, onSelect, onRemove, onMove }) {
   const hasQuote = isValidQuotePrice(quote?.price);
   const hasChange = Number.isFinite(quote?.change);
   const market = item.market;
@@ -27,7 +27,7 @@ const WatchlistRow = memo(function WatchlistRow({ item, selected, quote, realDat
   return <div className={selected ? "watch-row selected" : "watch-row"}>
     <button className="watch-row-main" onClick={() => onSelect(item.symbol)} title={item.name}>
       <span><strong title={item.name}>{item.name}</strong><small>{item.symbol}{item.category ? ` · ${item.category}` : ""}</small></span>
-      <span className={`quote ${changeToneClass(quote?.change)}`}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasChange ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : previewMode ? "预览模式" : "等待配置"}</small>{hasQuote && <small className={`quote-freshness quote-source-${freshness.state}`} title={`${quote.source || "数据服务"} · ${freshnessLabel}`}>{formatCompactQuoteFreshness(quote.asOf, Date.now(), market)}</small>}</span>
+      <span className={`quote ${changeToneClass(quote?.change)}`}><strong>{hasQuote ? quote.price.toFixed(2) : "—"}</strong><small>{hasChange ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}%` : realDataMode ? "尚未查询" : "等待配置真实数据"}</small>{hasQuote && <small className={`quote-freshness quote-source-${freshness.state}`} title={`${quote.source || "数据服务"} · ${freshnessLabel}`}>{formatCompactQuoteFreshness(quote.asOf, Date.now(), market)}</small>}</span>
     </button>
     <span className="watch-row-actions">
       {sortKey === "custom" && <>
@@ -66,7 +66,6 @@ export function WatchlistSidebar() {
   const [feedback, setFeedback] = useState("");
   const fileInput = useRef(null);
   const realDataMode = hasRealDataAccess(integrationStatus);
-  const previewMode = integrationStatus?.demo === true;
   const normalizedWatchlist = useMemo(() => watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name), [watchlist]);
   const groups = useMemo(() => [...new Set(normalizedWatchlist.map((item) => item.group))], [normalizedWatchlist]);
   const groupCounts = useMemo(() => new Map(groups.map((group) => [group, normalizedWatchlist.filter((item) => item.group === group).length])), [groups, normalizedWatchlist]);
@@ -84,8 +83,7 @@ export function WatchlistSidebar() {
       return [item.symbol, item.name, item.category, item.market, item.group]
         .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedFilter));
     });
-    const sortableQuotes = previewMode ? Object.fromEntries(filtered.map((item) => [item.symbol, quoteForSymbol(liveQuotes, item.symbol) || stocks[item.symbol]])) : liveQuotes;
-    const sorted = sortWatchlistItems(filtered, sortableQuotes, sortKey, sortDirection);
+    const sorted = sortWatchlistItems(filtered, liveQuotes, sortKey, sortDirection);
     const grouped = new Map();
     sorted.forEach((item) => {
       const group = normalizeWatchlistItem(item).group;
@@ -93,7 +91,7 @@ export function WatchlistSidebar() {
       grouped.get(group).push(item);
     });
     return [...grouped.entries()];
-  }, [filterQuery, groupFilter, liveQuotes, normalizedWatchlist, previewMode, sortDirection, sortKey]);
+  }, [filterQuery, groupFilter, liveQuotes, normalizedWatchlist, sortDirection, sortKey]);
   const openDialog = () => {
     captureFocus();
     setGroupChoice(groups[0] || "自选");
@@ -172,7 +170,7 @@ export function WatchlistSidebar() {
     {filterQuery && <p className="watchlist-search-result" role="status">已筛选 {groupedItems.reduce((count, [, items]) => count + items.length, 0)}/{normalizedWatchlist.length} 个标的</p>}
     {sortKey === "custom" && normalizedWatchlist.length > 1 && !filterQuery && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || (previewMode ? stocks[item.symbol] : null)} realDataMode={realDataMode} previewMode={previewMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => setFilterQuery("")}>清除搜索</button>}</div>}
+      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || null} realDataMode={realDataMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => setFilterQuery("")}>清除搜索</button>}</div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}

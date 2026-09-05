@@ -151,6 +151,21 @@ describe("FolioMind core flows", () => {
     expect(screen.getByText(/不会用演示数据代替/)).toBeInTheDocument();
   });
 
+  it("keeps the watchlist empty until a real quote is returned", () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      integrationStatusLoading: false,
+      integrationStatusError: "",
+      integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true },
+      liveQuotes: {},
+    });
+    render(<WatchlistSidebar />);
+    expect(screen.queryByText("1568.88")).not.toBeInTheDocument();
+    expect(screen.queryByText("227.57")).not.toBeInTheDocument();
+    expect(screen.getAllByText("等待配置真实数据").length).toBeGreaterThan(0);
+  });
+
   it("switches watchlist symbols and chart ranges", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /宁德时代/ }));
