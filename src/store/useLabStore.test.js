@@ -99,7 +99,7 @@ describe("lab store streaming lifecycle", () => {
     integration.loadStatus.mockRejectedValueOnce(new Error("private host error")).mockResolvedValueOnce({ credentialConfigured: true, keyPrefix: "latest…" });
     await expect(useLabStore.getState().reconcileIntegrationChange()).resolves.toBe(false);
     expect(useLabStore.getState()).toMatchObject({ integrationStatus: null, integrationStatusLoading: false, liveQuotes: {} });
-    expect(useLabStore.getState().integrationStatusError).not.toContain("private host error");
+    expect(useLabStore.getState().integrationStatusError).toBe("配置已在其他窗口变更，暂时无法读取最新配置，请重试");
     await useLabStore.getState().hydrateIntegrationStatus();
     expect(useLabStore.getState().integrationStatus.keyPrefix).toBe("latest…");
   });
