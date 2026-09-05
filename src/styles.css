@@ -830,6 +830,12 @@ textarea:focus-visible {
   align-items: center;
   gap: 5px;
   height: 34px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.range-tabs::-webkit-scrollbar {
+  display: none;
 }
 .range-tabs button {
   border: 0;
@@ -839,6 +845,8 @@ textarea:focus-visible {
   color: #4f5764;
   cursor: pointer;
   font-size: 12px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .range-tabs button:hover {
   background: #f4f6f8;
