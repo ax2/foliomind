@@ -172,7 +172,7 @@ GitHub Actions 的 `release` workflow 会在 `main` 的版本提交后自动运�
 gh workflow run release.yml --repo ax2/foliomind -f version=0.1.225 -f prerelease=false
 ```
 
-发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。
+发布前可运行 `npm run review:architecture`，检查版本、真实数据边界、状态脱敏、安装升级路径、Release 资产和 PRD 阶段设计。Release 的 npm 安全审计在服务异常或连续重试失败时会阻断发布，不会以警告放行。
 
 视觉源文件位于 `design/foliomind-concept.png`，最终视觉验收记录见 `design-qa.md`。
 
