@@ -1,5 +1,5 @@
 import { lstat, rm } from "node:fs/promises";
-import { resolve, relative } from "node:path";
+import { resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -18,7 +18,10 @@ const dryRun = process.argv.includes("--dry-run");
 
 for (const relativePath of GENERATED_PATHS) {
   const target = resolve(root, relativePath);
-  const resolvedRelative = relative(root, target);
+  // `relative()` uses the host separator; normalize it before comparing with
+  // the repository's POSIX-style allowlist so Windows cannot reject a valid
+  // generated path (or accidentally bypass the boundary check).
+  const resolvedRelative = relative(root, target).split(sep).join("/");
   if (resolvedRelative !== relativePath || resolvedRelative.startsWith("..")) {
     throw new Error(`拒绝清理工作区外路径: ${relativePath}`);
   }
