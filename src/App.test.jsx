@@ -622,6 +622,7 @@ describe("FolioMind core flows", () => {
     render(<NotificationsView />);
     const messageSurface = screen.getByRole("button", { name: "未读消息：宁德时代 · 突破提醒" });
     const card = messageSurface.closest("article");
+    expect(messageSurface.tagName).toBe("BUTTON");
     expect(card).not.toHaveAttribute("role", "button");
     expect(messageSurface.querySelector("button")).toBeNull();
     expect(card?.querySelector(".notification-item-actions")).toBeInTheDocument();

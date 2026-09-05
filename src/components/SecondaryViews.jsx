@@ -817,22 +817,16 @@ export function EventsView() {
 }
 
 function NotificationCard({ item, onMarkRead, onOpenSymbol, onOpenMonitor }) {
-  const handleKeyDown = (event) => {
-    if (!["Enter", " "].includes(event.key)) return;
-    event.preventDefault();
-    onMarkRead(item);
-  };
-
   return <article className={item.read ? "notification read" : "notification unread"}>
-    <div className="notification-main" tabIndex="0" role="button" aria-label={`${item.read ? "已读" : "未读"}消息：${item.title}`} onClick={() => onMarkRead(item)} onKeyDown={handleKeyDown}>
-      <div className={`notification-severity ${item.severity}`} />
-      <div className="notification-copy">
-        <div className="notification-heading"><strong>{item.title}</strong><span className={`notification-kind ${item.kind}`}>{item.kind === "portfolio-alert" ? "组合提醒" : item.kind === "monitor" ? "盯盘" : item.kind === "event" ? "事件提醒" : "消息"}</span></div>
-        <p>{item.body}</p>
+    <button type="button" className="notification-main" aria-label={`${item.read ? "已读" : "未读"}消息：${item.title}`} onClick={() => onMarkRead(item)}>
+      <span className={`notification-severity ${item.severity}`} aria-hidden="true" />
+      <span className="notification-copy">
+        <span className="notification-heading"><strong>{item.title}</strong><span className={`notification-kind ${item.kind}`}>{item.kind === "portfolio-alert" ? "组合提醒" : item.kind === "monitor" ? "盯盘" : item.kind === "event" ? "事件提醒" : "消息"}</span></span>
+        <span className="notification-body">{item.body}</span>
         <small>{new Date(item.createdAt).toLocaleString("zh-CN")} · {item.source === "data-service" ? "真实数据服务" : "浏览器预览"}{item.symbol ? ` · ${item.symbol}` : ""}</small>
-      </div>
+      </span>
       {!item.read && <span className="unread-dot" />}
-    </div>
+    </button>
     {(item.symbol || item.kind === "monitor") && <div className="notification-item-actions">
       <button type="button" className="notification-link" onClick={() => onOpenSymbol(item)} disabled={!item.symbol}>查看标的</button>
       {item.kind === "monitor" && <button type="button" className="notification-link" onClick={() => onOpenMonitor(item)}>查看盯盘</button>}
