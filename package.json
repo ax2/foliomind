@@ -19,7 +19,7 @@
     "desktop:build": "npm run fetch:pi && npm run fetch:bash && tauri build",
     "audit:security": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
     "review:architecture": "node scripts/architecture-review.mjs",
-    "test": "vitest run && node --test packages/qveris-bridge/index.test.mjs scripts/local-host.test.mjs scripts/local-host.integration.test.mjs scripts/verify-release-assets.test.mjs",
+    "test": "vitest run && node --test packages/qveris-bridge/index.test.mjs scripts/local-host.test.mjs scripts/local-host.integration.test.mjs scripts/verify-release-assets.test.mjs scripts/clean-generated.test.mjs",
     "test:watch": "vitest",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
