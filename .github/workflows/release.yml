@@ -207,6 +207,7 @@ jobs:
           done
           echo "::warning::npm audit service was temporarily unavailable after three attempts; local tests and build gates remain mandatory"
       - run: npm test
+      - run: npm run review:architecture
       - run: npm run build
       - run: npm run test:sites
       - run: npm run fetch:pi
