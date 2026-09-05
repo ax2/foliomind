@@ -174,6 +174,25 @@ async def main() -> None:
           clientWidth: document.documentElement.clientWidth,
         })""")
         checks.append({"flow": "移动端视口无横向溢出", "passed": mobile_layout["scrollWidth"] == mobile_layout["clientWidth"], "detail": mobile_layout})
+        mobile_controls = await page.evaluate("""() => {
+          const selectors = [
+            '.stock-header-actions .live-data-button',
+            '.stock-header-actions .agent-data-button',
+            '.stock-header-actions .stock-bookmark',
+            '.stock-header-actions .stock-more-button',
+          ];
+          const viewport = document.documentElement.clientWidth;
+          const controls = selectors.map((selector) => {
+            const element = document.querySelector(selector);
+            if (!element) return { selector, present: false, visible: false };
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const visible = style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+            return { selector, present: true, visible, left: Math.round(rect.left), right: Math.round(rect.right) };
+          });
+          return { controls, allVisibleWithinViewport: controls.filter((item) => item.visible).every((item) => item.left >= 0 && item.right <= viewport) };
+        }""")
+        checks.append({"flow": "移动端标的操作完整可见", "passed": mobile_controls["allVisibleWithinViewport"], "detail": mobile_controls})
         await page.screenshot(path=OUTPUT / "implementation-mobile-final.png")
         await browser.close()
 
