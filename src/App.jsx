@@ -42,7 +42,11 @@ export function App() {
     return () => { window.removeEventListener("offline", onOffline); window.removeEventListener("online", onOnline); };
   }, []);
   useEffect(() => {
-    if (!isLocalWebRuntime() || typeof window === "undefined" || typeof document === "undefined") return undefined;
+    // Both the standalone Web Host and the desktop Host can be changed by a
+    // sibling process (for example, a local debug window or an external
+    // credential rotation). Reconcile on focus/visibility for either runtime
+    // so the desktop UI does not retain stale credential or endpoint state.
+    if ((!isLocalWebRuntime() && !isDesktopRuntime()) || typeof window === "undefined" || typeof document === "undefined") return undefined;
     const reconcile = () => {
       if (document.visibilityState === "visible") void refreshIntegrationStatus();
     };

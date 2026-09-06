@@ -1250,6 +1250,25 @@ describe("FolioMind core flows", () => {
     }
   });
 
+  it("reconciles integration status when the desktop window regains focus", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    render(<App />);
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+    integrationMocks.loadIntegrationStatus.mockClear();
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+  });
+
   it.each([false, true])("refreshes the full quote set when the saved credential changes (same prefix: %s)", async (samePrefix) => {
     const refreshLiveData = vi.fn().mockResolvedValue(true);
     const integrationStatus = {
