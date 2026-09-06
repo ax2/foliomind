@@ -137,6 +137,37 @@ fn default_workspace() -> WorkspacePreferences {
     WorkspacePreferences::default()
 }
 
+const MAX_SAVED_WORKSPACE_VIEWS: usize = 12;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedWorkspaceView {
+    pub id: String,
+    pub name: String,
+    pub preferences: WorkspaceViewPreferences,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceViewPreferences {
+    #[serde(default = "default_workspace_group")]
+    pub watchlist_group: String,
+    #[serde(default)]
+    pub watchlist_query: String,
+    #[serde(default = "default_workspace_sort")]
+    pub watchlist_sort: String,
+    #[serde(default = "default_workspace_direction")]
+    pub watchlist_direction: String,
+    #[serde(default = "default_workspace_range")]
+    pub chart_range: String,
+    #[serde(default = "default_true")]
+    pub show_grid: bool,
+    #[serde(default)]
+    pub show_moving_average: bool,
+    #[serde(default)]
+    pub show_moving_average20: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacePreferences {
@@ -156,6 +187,8 @@ pub struct WorkspacePreferences {
     pub show_moving_average: bool,
     #[serde(default)]
     pub show_moving_average20: bool,
+    #[serde(default)]
+    pub saved_views: Vec<SavedWorkspaceView>,
 }
 
 fn default_workspace_group() -> String {
@@ -185,6 +218,7 @@ impl Default for WorkspacePreferences {
             show_grid: true,
             show_moving_average: false,
             show_moving_average20: false,
+            saved_views: Vec::new(),
         }
     }
 }
@@ -669,6 +703,7 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || state.monitor_history.len() > MAX_MONITOR_HISTORY
         || state.portfolio_reviews.len() > MAX_PORTFOLIO_REVIEWS
         || state.installed_skill_ids.len() > MAX_INSTALLED_SKILLS
+        || state.workspace.saved_views.len() > MAX_SAVED_WORKSPACE_VIEWS
     {
         return Err("user state exceeds size limit".into());
     }
@@ -692,6 +727,32 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         )
     {
         return Err("workspace preference is invalid".into());
+    }
+    for view in &state.workspace.saved_views {
+        validate_text(&view.id, "workspace view id", 64)?;
+        validate_text(&view.name, "workspace view name", 64)?;
+        if !matches!(
+            view.preferences.watchlist_sort.as_str(),
+            "custom" | "name" | "price" | "change"
+        ) || !matches!(
+            view.preferences.watchlist_direction.as_str(),
+            "asc" | "desc"
+        ) || !matches!(
+            view.preferences.chart_range.as_str(),
+            "分时" | "5日" | "日K" | "周K" | "月K" | "季K" | "年K"
+        ) {
+            return Err("workspace view preference is invalid".into());
+        }
+        validate_text(
+            &view.preferences.watchlist_group,
+            "workspace view group",
+            64,
+        )?;
+        validate_text_allow_empty(
+            &view.preferences.watchlist_query,
+            "workspace view query",
+            160,
+        )?;
     }
     let mut installed_skill_ids = HashSet::new();
     for skill_id in &state.installed_skill_ids {
@@ -1456,6 +1517,33 @@ mod tests {
             state.installed_skill_ids,
             vec!["fundamental".to_string(), "monitor".to_string()]
         );
+        assert!(state.workspace.saved_views.is_empty());
+    }
+
+    #[test]
+    fn saved_workspace_views_round_trip_and_validate_bounds() {
+        let mut state = UserState::default();
+        state.workspace.saved_views.push(SavedWorkspaceView {
+            id: "view-core".into(),
+            name: "核心观察".into(),
+            preferences: WorkspaceViewPreferences {
+                watchlist_group: "核心持仓".into(),
+                watchlist_query: "科技".into(),
+                watchlist_sort: "change".into(),
+                watchlist_direction: "desc".into(),
+                chart_range: "日K".into(),
+                show_grid: true,
+                show_moving_average: true,
+                show_moving_average20: false,
+            },
+        });
+        assert!(validate(&state).is_ok());
+        let encoded = serde_json::to_value(&state).expect("workspace view should serialize");
+        let restored: UserState =
+            serde_json::from_value(encoded).expect("workspace view should deserialize");
+        assert_eq!(restored.workspace.saved_views[0].name, "核心观察");
+        state.workspace.saved_views[0].preferences.watchlist_sort = "invalid".into();
+        assert!(validate(&state).is_err());
     }
 
     #[test]
