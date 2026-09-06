@@ -28,6 +28,7 @@ const desktopLifecycleMocks = vi.hoisted(() => ({
   reconcileDesktopNow: vi.fn(),
   listenForDesktopReconcile: vi.fn().mockResolvedValue(() => {}),
   listenForBackgroundReviewStatus: vi.fn().mockResolvedValue(() => {}),
+  listenForBackgroundPremarket: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("lightweight-charts", () => ({
@@ -90,6 +91,9 @@ beforeEach(() => {
   });
   useLabStore.setState({
     ...initialLabState,
+    // Component-focused tests start with a canonical snapshot; loading/error
+    // behavior is covered by the explicit hydration tests below.
+    userStateLoaded: true,
     skillItems: initialLabState.skillItems.map((item) => ({ ...item })),
     messages: initialLabState.messages.map((message) => ({ ...message })),
     rules: initialLabState.rules.map((rule) => ({ ...rule })),

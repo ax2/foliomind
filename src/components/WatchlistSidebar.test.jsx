@@ -3,9 +3,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialLabState, useLabStore } from "../store/useLabStore.js";
 import { WatchlistSidebar } from "./WatchlistSidebar.jsx";
 
+vi.mock("../lib/localHost.js", async (importOriginal) => ({ ...await importOriginal(), isLocalWebRuntime: () => true }));
+
 afterEach(cleanup);
 
 describe("WatchlistSidebar custom ordering", () => {
+  it("does not render default rows before canonical user state is loaded", () => {
+    useLabStore.setState({ ...initialLabState, userStateLoaded: false });
+    render(<WatchlistSidebar />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在读取本地工作区");
+    expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
+  });
+
   it("filters watchlist rows locally by name, symbol, category, or market", async () => {
     useLabStore.setState({
       ...initialLabState,

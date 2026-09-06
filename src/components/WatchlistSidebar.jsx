@@ -4,6 +4,8 @@ import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
 import { friendlyDataMessage } from "../lib/friendlyMessages.js";
+import { isLocalWebRuntime } from "../lib/localHost.js";
+import { isDesktopRuntime } from "../lib/piRuntime.js";
 import { changeToneClass, formatCompactQuoteFreshness, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { useDialogFocus } from "../lib/useDialogFocus.js";
 import { useLabStore } from "../store/useLabStore.js";
@@ -46,6 +48,7 @@ export function WatchlistSidebar() {
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const integrationStatusLoading = useLabStore((state) => state.integrationStatusLoading);
   const integrationStatusError = useLabStore((state) => state.integrationStatusError);
+  const userStateLoaded = useLabStore((state) => state.userStateLoaded);
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const selectSymbol = useLabStore((state) => state.selectSymbol);
   const addWatchlist = useLabStore((state) => state.addWatchlist);
@@ -78,6 +81,7 @@ export function WatchlistSidebar() {
     return () => { mountedRef.current = false; };
   }, []);
   const realDataMode = hasRealDataAccess(integrationStatus);
+  const managedRuntime = isLocalWebRuntime() || isDesktopRuntime();
   useEffect(() => {
     setFilterQuery(workspace.watchlistQuery);
     setGroupFilter(workspace.watchlistGroup);
@@ -219,7 +223,7 @@ export function WatchlistSidebar() {
     {filterQuery && <p className="watchlist-search-result" role="status">已筛选 {groupedItems.reduce((count, [, items]) => count + items.length, 0)}/{normalizedWatchlist.length} 个标的</p>}
     {sortKey === "custom" && normalizedWatchlist.length > 1 && !filterQuery && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || null} realDataMode={realDataMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => { setFilterQuery(""); setWorkspacePreference("watchlistQuery", ""); }}>清除搜索</button>}</div>}
+      {managedRuntime && !userStateLoaded ? <div className="watchlist-filter-empty" role="status"><strong>正在读取本地工作区</strong><span>工作区恢复完成后显示你的自选标的。</span></div> : groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || null} realDataMode={realDataMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => { setFilterQuery(""); setWorkspacePreference("watchlistQuery", ""); }}>清除搜索</button>}</div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}
