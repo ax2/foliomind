@@ -198,13 +198,16 @@ async def main() -> None:
         checks.append({"flow": "视口无溢出", "passed": layout["scrollWidth"] == layout["clientWidth"] and layout["scrollHeight"] == layout["clientHeight"], "detail": layout})
         await page.set_viewport_size({"width": 390, "height": 844})
         await page.reload(wait_until="networkidle")
-        await page.get_by_role("button", name="组合", exact=True).click()
-        await page.locator(".portfolio-row").first.wait_for(timeout=8_000)
         mobile_layout = await page.evaluate("""() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
         })""")
         checks.append({"flow": "移动端视口无横向溢出", "passed": mobile_layout["scrollWidth"] == mobile_layout["clientWidth"], "detail": mobile_layout})
+        # The selected stock detail remains mounted from the desktop flow;
+        # the mobile layout intentionally hides the watchlist sidebar, so do
+        # not try to click a hidden row here. Waiting for the detail heading
+        # keeps this assertion scoped to the visible mobile workspace.
+        await page.locator(".stock-header h1").first.wait_for(timeout=8_000)
         mobile_controls = await page.evaluate("""() => {
           const selectors = [
             '.stock-header-actions .live-data-button',
@@ -223,7 +226,9 @@ async def main() -> None:
           });
           return { controls, allVisibleWithinViewport: controls.filter((item) => item.visible).every((item) => item.left >= 0 && item.right <= viewport) };
         }""")
-        checks.append({"flow": "移动端标的操作完整可见", "passed": mobile_controls["allVisibleWithinViewport"], "detail": mobile_controls})
+        checks.append({"flow": "移动端标的操作完整可见", "passed": len(mobile_controls["controls"]) == 4 and all(item["present"] and item["visible"] for item in mobile_controls["controls"]) and mobile_controls["allVisibleWithinViewport"], "detail": mobile_controls})
+        await page.get_by_role("button", name="组合", exact=True).click()
+        await page.locator(".portfolio-row").first.wait_for(timeout=8_000)
         mobile_portfolio_controls = await page.evaluate("""() => {
           const controls = [...document.querySelectorAll('.portfolio-actions .icon-button')].map((element) => {
             const rect = element.getBoundingClientRect();
