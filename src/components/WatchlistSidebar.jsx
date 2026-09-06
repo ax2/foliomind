@@ -68,6 +68,11 @@ export function WatchlistSidebar() {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const fileInput = useRef(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const realDataMode = hasRealDataAccess(integrationStatus);
   useEffect(() => {
     setFilterQuery(workspace.watchlistQuery);
@@ -140,9 +145,11 @@ export function WatchlistSidebar() {
     setError("");
     try {
       await resetWorkspacePreferences();
+      if (!mountedRef.current) return;
       setFeedback("已恢复默认工作区视图");
       setToolsOpen(false);
     } catch (cause) {
+      if (!mountedRef.current) return;
       setError(friendlyDataMessage(cause, "工作区暂时无法重置，请稍后重试"));
     }
   };

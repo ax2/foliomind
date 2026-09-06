@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialLabState, useLabStore } from "../store/useLabStore.js";
 import { WatchlistSidebar } from "./WatchlistSidebar.jsx";
 
@@ -83,5 +83,18 @@ describe("WatchlistSidebar custom ordering", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "重置工作区视图" }));
     await waitFor(() => expect(useLabStore.getState().workspace).toEqual(initialLabState.workspace));
     expect(useLabStore.getState().watchlist).toHaveLength(1);
+  });
+
+  it("does not update state when a reset resolves after unmount", async () => {
+    let release;
+    const resetWorkspacePreferences = vi.fn(() => new Promise((resolve) => { release = resolve; }));
+    useLabStore.setState({ ...initialLabState, userStateLoaded: true, resetWorkspacePreferences, watchlist: [{ symbol: "A", name: "第一项", market: "自定义", group: "核心" }] });
+    render(<WatchlistSidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "自选工具" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重置工作区视图" }));
+    expect(resetWorkspacePreferences).toHaveBeenCalledTimes(1);
+    cleanup();
+    release();
+    await Promise.resolve();
   });
 });
