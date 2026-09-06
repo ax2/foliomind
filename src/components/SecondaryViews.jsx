@@ -975,6 +975,7 @@ export function SettingsView() {
   const portfolioPositions = useLabStore((state) => state.portfolioPositions);
   const monitorHistory = useLabStore((state) => state.monitorHistory);
   const skillItems = useLabStore((state) => state.skillItems);
+  const workspace = useLabStore((state) => state.workspace);
   const replaceUserState = useLabStore((state) => state.replaceUserState);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const integrationStatusLoading = useLabStore((state) => state.integrationStatusLoading);
@@ -1195,7 +1196,7 @@ export function SettingsView() {
   const exportBackup = () => {
     try {
       const installedSkillIds = installedSkillIdsForBackup(skillItems);
-      const content = serializeUserStateBackup({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, installedSkillIds });
+      const content = serializeUserStateBackup({ watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, monitorHistory, installedSkillIds, workspace });
       const blob = new Blob([content], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

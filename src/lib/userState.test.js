@@ -145,6 +145,16 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(serializeUserStateBackup({ watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] })).watchlist[0].group).toBe("美股");
   });
 
+  it("includes reusable workspace views in portable backups without runtime data", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      workspace: { watchlistSort: "change", savedViews: [{ id: "view-core", name: "核心观察", preferences: { watchlistSort: "change", chartRange: "日K" }, quote: 1234, apiKey: "sk-secret" }] },
+    });
+    expect(raw).not.toContain("sk-secret");
+    expect(raw).not.toContain("quote");
+    expect(parseUserStateBackup(raw).workspace.savedViews).toMatchObject([{ id: "view-core", name: "核心观察", preferences: { watchlistSort: "change", chartRange: "日K" } }]);
+  });
+
   it("round-trips monitor audit history without prompts or credentials", () => {
     const raw = serializeUserStateBackup({
       watchlist: [{ symbol: "600519", name: "贵州茅台" }],
