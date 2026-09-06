@@ -35,6 +35,10 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
   desktop:
+    # A push to main is built once by release.yml, which also owns the
+    # published installers. Keep this workflow for PRs and manual checks so
+    # main pushes do not consume a second set of desktop runners.
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
