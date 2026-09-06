@@ -15,6 +15,7 @@ const quoteFormatting = await load("src/lib/quoteFormatting.js");
 const desktopWorkflow = await load(".github/workflows/desktop.yml");
 const dataStateComponent = await load("src/components/DataState.jsx");
 const marketData = await load("src/data/market.js");
+const workspaceModule = await load("src/lib/workspace.js");
 const architectureReview = await load("docs/architecture-review.md");
 const capabilityEnvelope = await load("src/lib/capabilityEnvelope.js");
 const capabilityEnvelopeTest = await load("src/lib/capabilityEnvelope.test.js");
@@ -58,6 +59,7 @@ check("真实数据边界", marketViews.includes("DATA_STATES") && marketViews.i
 check("状态脱敏", userState.includes("normalizeUserState") && userState.includes("revision:") && userState.includes("watchlist:") && userState.includes("briefingSchedule:") && !userState.includes("integration-settings.json") && !userState.includes("apiKey"), "用户状态 schema 只处理脱敏用户事实");
 check("工作区偏好持久化", userState.includes("workspace") && userStateTransport.includes("workspace") && nativeUserState.includes("WorkspacePreferences") && nativeUserState.includes("workspace") && labStore.includes("setWorkspacePreference") && stockWorkspace.includes("setWorkspacePreference") && watchlistSidebar.includes("setWorkspacePreference") && prd.includes("Stage 3FS 工作区偏好跨端持久化"), "自选筛选/排序和图表偏好必须通过白名单用户状态在 Web/桌面间恢复，不得只停留在组件内存");
 check("工作区安全重置门禁", labStore.includes("resetWorkspacePreferences") && watchlistSidebar.includes("resetWorkspacePreferences") && watchlistSidebar.includes("重置工作区视图") && qaPlaywright.includes("工作区偏好持久化与安全重置") && prd.includes("Stage 3FT 工作区视图安全重置"), "工作区重置必须只清理视图偏好，并由发布前 Playwright 验证跨端恢复与保留自选数据");
+check("可复用工作区视图", workspaceModule.includes("MAX_SAVED_WORKSPACE_VIEWS") && workspaceModule.includes("savedViews") && labStore.includes("saveWorkspaceView") && labStore.includes("applyWorkspaceView") && labStore.includes("deleteWorkspaceView") && watchlistSidebar.includes("保存当前视图") && prd.includes("Stage 3FU 可复用工作区视图"), "工作区视图必须支持有界保存、应用、删除和跨端持久化，不得保存行情或凭据");
 check("发布资产", workflow.includes("SHA256SUMS") && workflow.includes("gh release upload") && workflow.includes("verify-release-assets.mjs") && workflow.includes("gh release download") && workflow.includes("sha256sum --strict --check SHA256SUMS.txt") && packageJson.scripts.test.includes("verify-release-assets.test.mjs"), "Release workflow 需校验、上传、下载复核并验证安装包校验和");
 check("CI 超时边界", workflow.includes("timeout-minutes: 45") && workflow.includes("timeout-minutes: 20") && workflow.includes("timeout-minutes: 15") && (await load(".github/workflows/desktop.yml")).includes("timeout-minutes: 45") && prd.includes("Stage 3FQ CI 任务超时与可恢复边界"), "测试、Web QA、跨平台构建和发布任务必须有有限超时，避免 runner 永久占用");
 check("CI 架构审查门禁", workflow.includes("npm run review:architecture") && desktopWorkflow.includes("npm run review:architecture"), "Release 与桌面 CI 必须执行架构审查，防止门禁只在本地运行");

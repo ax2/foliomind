@@ -293,6 +293,37 @@ textarea:focus-visible {
   font-size: 10px;
   line-height: 1.35;
 }
+.saved-view-create {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  padding: 5px 8px;
+  color: #697586;
+  font-size: 10px;
+}
+.saved-view-create span { grid-column: 1 / -1; }
+.saved-view-create input {
+  min-width: 0;
+  height: 27px;
+  padding: 0 6px;
+  border: 1px solid #dfe3e9;
+  border-radius: 5px;
+  font-size: 11px;
+}
+.saved-view-create button { width: auto; height: 27px; padding: 0 8px; font-size: 11px; }
+.saved-workspace-views {
+  display: flex;
+  align-items: end;
+  gap: 5px;
+  padding: 3px 10px 5px;
+  border-bottom: 1px solid #eceef2;
+}
+.saved-workspace-views label { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.saved-workspace-views label span { color: #8b94a1; font-size: 9px; }
+.saved-workspace-views select { width: 100%; min-width: 0; height: 25px; border: 1px solid #dfe3e9; border-radius: 5px; color: #465264; font-size: 11px; }
+.saved-workspace-views > div { display: flex; gap: 2px; max-width: 58px; flex-wrap: wrap; }
+.saved-workspace-views > div button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: #8b94a1; background: transparent; cursor: pointer; }
+.saved-workspace-views > div button:hover, .saved-workspace-views > div button:focus-visible { color: #b42318; background: #fff1f0; }
 .watchlist-search-wrap {
   position: relative;
   display: flex;

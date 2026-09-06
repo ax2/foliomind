@@ -55,6 +55,9 @@ export function WatchlistSidebar() {
   const workspace = useLabStore((state) => state.workspace);
   const setWorkspacePreference = useLabStore((state) => state.setWorkspacePreference);
   const resetWorkspacePreferences = useLabStore((state) => state.resetWorkspacePreferences);
+  const saveWorkspaceView = useLabStore((state) => state.saveWorkspaceView);
+  const applyWorkspaceView = useLabStore((state) => state.applyWorkspaceView);
+  const deleteWorkspaceView = useLabStore((state) => state.deleteWorkspaceView);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [filterQuery, setFilterQuery] = useState(workspace.watchlistQuery);
@@ -67,6 +70,7 @@ export function WatchlistSidebar() {
   const [newGroupName, setNewGroupName] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [viewName, setViewName] = useState("");
   const fileInput = useRef(null);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -153,6 +157,24 @@ export function WatchlistSidebar() {
       setError(friendlyDataMessage(cause, "工作区暂时无法重置，请稍后重试"));
     }
   };
+  const saveView = async () => {
+    try {
+      const view = await saveWorkspaceView(viewName);
+      setViewName("");
+      setFeedback(`已保存视图“${view.name}”`);
+    } catch (cause) { setError(friendlyDataMessage(cause, "视图暂时无法保存，请稍后重试")); }
+  };
+  const applyView = async (event) => {
+    const id = event.target.value;
+    if (!id) return;
+    try { await applyWorkspaceView(id); setFeedback("已应用保存的工作区视图"); }
+    catch (cause) { setError(friendlyDataMessage(cause, "视图暂时无法应用，请稍后重试")); }
+    event.target.value = "";
+  };
+  const removeView = async (id, name) => {
+    try { await deleteWorkspaceView(id); setFeedback(`已删除视图“${name}”`); }
+    catch (cause) { setError(friendlyDataMessage(cause, "视图暂时无法删除，请稍后重试")); }
+  };
   const closeDialog = () => { setDialogOpen(false); setQuery(""); setError(""); setNewGroupMode(false); setNewGroupName(""); };
   const { dialogRef, captureFocus } = useDialogFocus(dialogOpen, closeDialog);
   const removeItem = useCallback(async (symbol) => {
@@ -182,7 +204,7 @@ export function WatchlistSidebar() {
     await addItem(suggestions[0] || { symbol: value.toUpperCase(), name: value, market: "自定义", category: "自选" });
   };
   return <aside className="watchlist-sidebar">
-    <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><button type="button" role="menuitem" onClick={() => void resetWorkspace()}><ArrowCounterClockwise size={15} />重置工作区视图</button><small>支持 FolioMind CSV 或 TradingView 交易所前缀列表；重置不会删除自选数据</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
+    <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><button type="button" role="menuitem" onClick={() => void resetWorkspace()}><ArrowCounterClockwise size={15} />重置工作区视图</button><label className="saved-view-create"><span>保存当前视图</span><input aria-label="新视图名称" value={viewName} maxLength={64} placeholder="例如：核心持仓" onChange={(event) => setViewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void saveView(); } }} /><button type="button" disabled={!viewName.trim()} onClick={() => void saveView()}>保存</button></label><small>视图只保存筛选、排序和图表偏好，不包含行情、凭据或用户数据；最多保留 12 个。</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
     <div className="watchlist-search-wrap">
       <MagnifyingGlass size={15} aria-hidden="true" />
       <input type="search" value={filterQuery} onChange={(event) => { setFilterQuery(event.target.value); setWorkspacePreference("watchlistQuery", event.target.value); }} placeholder="搜索名称、代码或分类" aria-label="搜索自选" />
@@ -193,6 +215,7 @@ export function WatchlistSidebar() {
       <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => { setSortKey(event.target.value); setWorkspacePreference("watchlistSort", event.target.value); }}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => { const next = sortDirection === "asc" ? "desc" : "asc"; setSortDirection(next); setWorkspacePreference("watchlistDirection", next); }}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
     </div>
+    {workspace.savedViews.length > 0 && <div className="saved-workspace-views" aria-label="已保存工作区视图"><label><span>保存的视图</span><select aria-label="应用已保存视图" defaultValue="" onChange={applyView}><option value="">选择视图…</option>{workspace.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><div>{workspace.savedViews.map((view) => <button type="button" key={view.id} aria-label={`删除视图${view.name}`} title={`删除${view.name}`} onClick={() => { void removeView(view.id, view.name); }}>×</button>)}</div></div>}
     {filterQuery && <p className="watchlist-search-result" role="status">已筛选 {groupedItems.reduce((count, [, items]) => count + items.length, 0)}/{normalizedWatchlist.length} 个标的</p>}
     {sortKey === "custom" && normalizedWatchlist.length > 1 && !filterQuery && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">

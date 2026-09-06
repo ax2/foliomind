@@ -20,7 +20,7 @@ import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTrigge
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
 import { capabilityArray, capabilityData, capabilitySource } from "../lib/capabilityEnvelope.js";
-import { DEFAULT_WORKSPACE, normalizeWorkspace } from "../lib/workspace.js";
+import { DEFAULT_WORKSPACE, MAX_SAVED_WORKSPACE_VIEWS, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -1076,9 +1076,38 @@ export const useLabStore = create((set, get) => ({
   },
   setChartRange: (chartRange) => { const next = normalizeWorkspace({ ...get().workspace, chartRange }); set({ chartRange: next.chartRange, workspace: next }); void get().persistUserState().catch(() => null); },
   setWorkspacePreference: (key, value) => { const next = normalizeWorkspace({ ...get().workspace, [key]: value }); set({ workspace: next, chartRange: next.chartRange }); void get().persistUserState().catch(() => null); },
+  saveWorkspaceView: async (name) => {
+    const label = String(name ?? "").trim().slice(0, 64);
+    if (!label) throw new Error("请输入视图名称");
+    const previous = get().workspace;
+    const id = `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const savedViews = [{ id, name: label, preferences: workspaceViewPreferences(previous) }, ...previous.savedViews.filter((view) => view.name !== label)].slice(0, MAX_SAVED_WORKSPACE_VIEWS);
+    const next = normalizeWorkspace({ ...previous, savedViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedViews.find((view) => view.id === id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  applyWorkspaceView: async (id) => {
+    const previous = get().workspace;
+    const view = previous.savedViews.find((candidate) => candidate.id === id);
+    if (!view) return false;
+    const next = normalizeWorkspace({ ...previous, ...view.preferences });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  deleteWorkspaceView: async (id) => {
+    const previous = get().workspace;
+    const savedViews = previous.savedViews.filter((view) => view.id !== id);
+    if (savedViews.length === previous.savedViews.length) return false;
+    const next = normalizeWorkspace({ ...previous, savedViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
   resetWorkspacePreferences: async () => {
     const previous = get().workspace;
-    const next = { ...DEFAULT_WORKSPACE };
+    const next = { ...DEFAULT_WORKSPACE, savedViews: previous.savedViews };
     set({ workspace: next, chartRange: next.chartRange });
     try {
       await get().persistUserState();

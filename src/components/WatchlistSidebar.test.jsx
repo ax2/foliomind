@@ -85,6 +85,25 @@ describe("WatchlistSidebar custom ordering", () => {
     expect(useLabStore.getState().watchlist).toHaveLength(1);
   });
 
+  it("saves and reapplies a bounded workspace view without changing watchlist data", async () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      persistUserState: vi.fn().mockResolvedValue(true),
+      workspace: { ...initialLabState.workspace, watchlistQuery: "科技", watchlistSort: "change" },
+      watchlist: [{ symbol: "A", name: "第一项", market: "自定义", group: "核心" }],
+    });
+    render(<WatchlistSidebar />);
+    fireEvent.click(screen.getByRole("button", { name: "自选工具" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "新视图名称" }), { target: { value: "核心观察" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "应用已保存视图" })).toHaveTextContent("核心观察"));
+    fireEvent.change(screen.getByRole("combobox", { name: "自选排序" }), { target: { value: "name" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "应用已保存视图" }), { target: { value: useLabStore.getState().workspace.savedViews[0].id } });
+    await waitFor(() => expect(useLabStore.getState().workspace.watchlistSort).toBe("change"));
+    expect(useLabStore.getState().watchlist).toHaveLength(1);
+  });
+
   it("does not update state when a reset resolves after unmount", async () => {
     let release;
     const resetWorkspacePreferences = vi.fn(() => new Promise((resolve) => { release = resolve; }));
