@@ -10,6 +10,8 @@ export const GENERATED_PATHS = Object.freeze([
   "dist",
   ".qa",
   ".cache",
+  "scripts/__pycache__",
+  "tests/__pycache__",
   "src-tauri/target",
   "src-tauri/target-linux",
 ]);

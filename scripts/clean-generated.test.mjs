@@ -7,6 +7,8 @@ test("cleaner keeps an explicit, runtime-safe generated path allowlist", () => {
     "dist",
     ".qa",
     ".cache",
+    "scripts/__pycache__",
+    "tests/__pycache__",
     "src-tauri/target",
     "src-tauri/target-linux",
   ]);
