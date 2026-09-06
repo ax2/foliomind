@@ -174,6 +174,18 @@ async def main() -> None:
             await expect(stock_heading).to_contain_text(first_name)
         else:
             checks.append({"flow": "单一自选股工作区可用", "passed": True})
+        # Verify the persisted workspace view can be recovered without
+        # touching the underlying watchlist rows: set a local filter, reload,
+        # then use the explicit reset action and confirm the rows return.
+        workspace_search = page.get_by_role("searchbox", name="搜索自选")
+        await workspace_search.fill("__qa_workspace_filter__")
+        await page.reload(wait_until="networkidle")
+        await expect(page.get_by_role("searchbox", name="搜索自选")).to_have_value("__qa_workspace_filter__")
+        await page.get_by_role("button", name="自选工具", exact=True).click()
+        await page.get_by_role("menuitem", name="重置工作区视图", exact=True).click()
+        await expect(page.get_by_role("searchbox", name="搜索自选")).to_have_value("")
+        await expect(rows.first).to_be_visible()
+        checks.append({"flow": "工作区偏好持久化与安全重置", "passed": True})
         await page.reload(wait_until="networkidle")
         await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
         layout = await page.evaluate("""() => ({
