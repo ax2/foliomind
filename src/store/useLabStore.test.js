@@ -38,6 +38,20 @@ describe("lab store streaming lifecycle", () => {
     expect(shouldFallbackToAgent(new Error("金融数据渠道暂时不可用"))).toBe(false);
   });
 
+  it("resets view preferences without deleting user data", async () => {
+    const watchlist = [{ symbol: "TEST", name: "测试标的", market: "自定义", group: "核心" }];
+    useLabStore.setState({ watchlist, workspace: { ...initialLabState.workspace, watchlistQuery: "科技", watchlistSort: "price", watchlistDirection: "desc", chartRange: "周K", showGrid: false }, chartRange: "周K" });
+    persistence.saveUserState.mockClear();
+
+    await expect(useLabStore.getState().resetWorkspacePreferences()).resolves.toBe(true);
+    expect(useLabStore.getState().workspace).toEqual(initialLabState.workspace);
+    expect(useLabStore.getState().chartRange).toBe("分时");
+    expect(useLabStore.getState().watchlist).toEqual(watchlist);
+    const [savedState] = persistence.saveUserState.mock.calls.at(-1);
+    expect(savedState).toMatchObject({ workspace: initialLabState.workspace });
+    expect(savedState.watchlist).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "TEST" })]));
+  });
+
   it("keeps user state unloaded and exposes a retry after a Host read failure", async () => {
     const error = new Error("Host unavailable");
     persistence.loadUserState.mockRejectedValueOnce(error).mockResolvedValueOnce({ revision: 8, watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });

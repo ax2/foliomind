@@ -1076,6 +1076,18 @@ export const useLabStore = create((set, get) => ({
   },
   setChartRange: (chartRange) => { const next = normalizeWorkspace({ ...get().workspace, chartRange }); set({ chartRange: next.chartRange, workspace: next }); void get().persistUserState().catch(() => null); },
   setWorkspacePreference: (key, value) => { const next = normalizeWorkspace({ ...get().workspace, [key]: value }); set({ workspace: next, chartRange: next.chartRange }); void get().persistUserState().catch(() => null); },
+  resetWorkspacePreferences: async () => {
+    const previous = get().workspace;
+    const next = { ...DEFAULT_WORKSPACE };
+    set({ workspace: next, chartRange: next.chartRange });
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state);
+      throw error;
+    }
+  },
   toggleSkill: async (id) => {
     const previous = get().skillItems;
     const next = previous.map((item) => item.id === id ? { ...item, installed: !item.installed } : item);

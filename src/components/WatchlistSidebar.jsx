@@ -1,4 +1,4 @@
-import { CaretDown, CaretUp, DownloadSimple, DotsThree, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CaretDown, CaretUp, DownloadSimple, DotsThree, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
@@ -54,6 +54,7 @@ export function WatchlistSidebar() {
   const moveWatchlistItem = useLabStore((state) => state.moveWatchlistItem);
   const workspace = useLabStore((state) => state.workspace);
   const setWorkspacePreference = useLabStore((state) => state.setWorkspacePreference);
+  const resetWorkspacePreferences = useLabStore((state) => state.resetWorkspacePreferences);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [filterQuery, setFilterQuery] = useState(workspace.watchlistQuery);
@@ -135,6 +136,16 @@ export function WatchlistSidebar() {
       setError(friendlyDataMessage(cause, "自选文件暂时无法导入，请检查格式后重试"));
     }
   };
+  const resetWorkspace = async () => {
+    setError("");
+    try {
+      await resetWorkspacePreferences();
+      setFeedback("已恢复默认工作区视图");
+      setToolsOpen(false);
+    } catch (cause) {
+      setError(friendlyDataMessage(cause, "工作区暂时无法重置，请稍后重试"));
+    }
+  };
   const closeDialog = () => { setDialogOpen(false); setQuery(""); setError(""); setNewGroupMode(false); setNewGroupName(""); };
   const { dialogRef, captureFocus } = useDialogFocus(dialogOpen, closeDialog);
   const removeItem = useCallback(async (symbol) => {
@@ -164,7 +175,7 @@ export function WatchlistSidebar() {
     await addItem(suggestions[0] || { symbol: value.toUpperCase(), name: value, market: "自定义", category: "自选" });
   };
   return <aside className="watchlist-sidebar">
-    <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><small>支持 FolioMind CSV 或 TradingView 交易所前缀列表</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
+    <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><button type="button" role="menuitem" onClick={() => void resetWorkspace()}><ArrowCounterClockwise size={15} />重置工作区视图</button><small>支持 FolioMind CSV 或 TradingView 交易所前缀列表；重置不会删除自选数据</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
     <div className="watchlist-search-wrap">
       <MagnifyingGlass size={15} aria-hidden="true" />
       <input type="search" value={filterQuery} onChange={(event) => { setFilterQuery(event.target.value); setWorkspacePreference("watchlistQuery", event.target.value); }} placeholder="搜索名称、代码或分类" aria-label="搜索自选" />

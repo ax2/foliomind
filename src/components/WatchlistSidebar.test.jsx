@@ -68,4 +68,20 @@ describe("WatchlistSidebar custom ordering", () => {
     expect(screen.queryByRole("button", { name: "上移A" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "下移B" })).not.toBeInTheDocument();
   });
+
+  it("offers a safe workspace view reset from the tools menu", async () => {
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      workspace: { ...initialLabState.workspace, watchlistQuery: "科技", chartRange: "周K" },
+      chartRange: "周K",
+      watchlist: [{ symbol: "A", name: "第一项", market: "自定义", group: "核心" }],
+    });
+    render(<WatchlistSidebar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "自选工具" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "重置工作区视图" }));
+    await waitFor(() => expect(useLabStore.getState().workspace).toEqual(initialLabState.workspace));
+    expect(useLabStore.getState().watchlist).toHaveLength(1);
+  });
 });
