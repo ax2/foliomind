@@ -35,6 +35,8 @@ function SetupChecklist({ userStateLoaded, integrationStatus, integrationStatusL
 export function StockWorkspace() {
   const symbol = useLabStore((state) => state.selectedSymbol);
   const chartRange = useLabStore((state) => state.chartRange);
+  const workspace = useLabStore((state) => state.workspace);
+  const setWorkspacePreference = useLabStore((state) => state.setWorkspacePreference);
   const setChartRange = useLabStore((state) => state.setChartRange);
   const watchlist = useLabStore((state) => state.watchlist);
   const liveQuotes = useLabStore((state) => state.liveQuotes);
@@ -70,9 +72,10 @@ export function StockWorkspace() {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
-  const [showGrid, setShowGrid] = useState(true);
-  const [showMovingAverage, setShowMovingAverage] = useState(false);
-  const [showMovingAverage20, setShowMovingAverage20] = useState(false);
+  const [showGrid, setShowGrid] = useState(workspace.showGrid);
+  const [showMovingAverage, setShowMovingAverage] = useState(workspace.showMovingAverage);
+  const [showMovingAverage20, setShowMovingAverage20] = useState(workspace.showMovingAverage20);
+  useEffect(() => { setShowGrid(workspace.showGrid); setShowMovingAverage(workspace.showMovingAverage); setShowMovingAverage20(workspace.showMovingAverage20); }, [workspace.showGrid, workspace.showMovingAverage, workspace.showMovingAverage20]);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
   const [loadingNow, setLoadingNow] = useState(Date.now());
@@ -164,7 +167,7 @@ export function StockWorkspace() {
         <div className="quote-stats">{quoteFields.map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.[key])}</dd></dl>)}</div>
       </section>
       <section className="chart-section">
-        <div className="range-tabs">{ranges.map((range) => <button key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}<div className="chart-settings-wrap"><button type="button" className="chart-settings" aria-label="图表设置" aria-expanded={chartSettingsOpen} aria-controls="chart-settings-popover" onClick={() => setChartSettingsOpen((value) => !value)}><SlidersHorizontal size={18} /></button>{chartSettingsOpen && <div id="chart-settings-popover" className="chart-settings-popover" role="group" aria-label="图表设置"><strong>图表设置</strong><label><input type="checkbox" checked={showGrid} onChange={(event) => setShowGrid(event.target.checked)} />显示网格线</label><label><input type="checkbox" checked={showMovingAverage} onChange={(event) => setShowMovingAverage(event.target.checked)} />显示 MA5</label><label><input type="checkbox" checked={showMovingAverage20} onChange={(event) => setShowMovingAverage20(event.target.checked)} />显示 MA20</label><button type="button" className="notification-link" onClick={() => { setShowGrid(true); setShowMovingAverage(false); setShowMovingAverage20(false); }}>恢复默认</button></div>}</div></div>
+        <div className="range-tabs">{ranges.map((range) => <button key={range} className={chartRange === range ? "active" : ""} onClick={() => setChartRange(range)}>{range}</button>)}<div className="chart-settings-wrap"><button type="button" className="chart-settings" aria-label="图表设置" aria-expanded={chartSettingsOpen} aria-controls="chart-settings-popover" onClick={() => setChartSettingsOpen((value) => !value)}><SlidersHorizontal size={18} /></button>{chartSettingsOpen && <div id="chart-settings-popover" className="chart-settings-popover" role="group" aria-label="图表设置"><strong>图表设置</strong><label><input type="checkbox" checked={showGrid} onChange={(event) => { setShowGrid(event.target.checked); setWorkspacePreference("showGrid", event.target.checked); }} />显示网格线</label><label><input type="checkbox" checked={showMovingAverage} onChange={(event) => { setShowMovingAverage(event.target.checked); setWorkspacePreference("showMovingAverage", event.target.checked); }} />显示 MA5</label><label><input type="checkbox" checked={showMovingAverage20} onChange={(event) => { setShowMovingAverage20(event.target.checked); setWorkspacePreference("showMovingAverage20", event.target.checked); }} />显示 MA20</label><button type="button" className="notification-link" onClick={() => { setShowGrid(true); setShowMovingAverage(false); setShowMovingAverage20(false); setWorkspacePreference("showGrid", true); setWorkspacePreference("showMovingAverage", false); setWorkspacePreference("showMovingAverage20", false); }}>恢复默认</button></div>}</div></div>
         <MarketChart series={series} range={chartRange} market={stock.market} showGrid={showGrid} showMovingAverage={showMovingAverage} showMovingAverage20={showMovingAverage20} loading={Boolean(quoteDetailsLoading[symbol] || quoteSeriesLoading[symbol]?.[chartRange])} error={quoteSeriesError[symbol]?.[chartRange] || ""} onRetry={() => { void retryQuoteSeries(symbol, chartRange); }} />
       </section>
       <section className="fundamentals"><h3>关键指标 <small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "真实财务数据"}</small></h3><div>{[["营业收入", "revenue"], ["净利润", "netProfit"], ["毛利率", "grossMargin"], ["净利率", "netMargin"], ["ROE", "roe"]].map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.fundamentals?.[key] ?? quote?.fundamentals?.[label])}</dd><small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "查询详情后显示"}</small></dl>)}</div></section>

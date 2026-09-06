@@ -149,6 +149,7 @@ export function mergeUserStateChanges(baseState, localState, remoteState) {
   for (const [field, key] of Object.entries(collectionKeys)) merged[field] = mergeCollection(base[field], local[field], remote[field], key, field, conflicts);
   merged.briefingSchedule = mergeObject(base.briefingSchedule, local.briefingSchedule, remote.briefingSchedule, "briefingSchedule", conflicts);
   merged.premarketBriefing = mergeObject(base.premarketBriefing, local.premarketBriefing, remote.premarketBriefing, "premarketBriefing", conflicts);
+  merged.workspace = mergeObject(base.workspace, local.workspace, remote.workspace, "workspace", conflicts);
   merged.installedSkillIds = mergeInstalledSkillIds(base.installedSkillIds, local.installedSkillIds, remote.installedSkillIds, conflicts);
   if (conflicts.length) throw new UserStateMergeConflictError(conflicts);
   return normalizeUserState(merged);

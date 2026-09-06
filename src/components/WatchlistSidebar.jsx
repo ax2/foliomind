@@ -1,5 +1,5 @@
 import { CaretDown, CaretUp, DownloadSimple, DotsThree, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
 import { hasRealDataAccess } from "../lib/dataStatus.js";
@@ -52,13 +52,15 @@ export function WatchlistSidebar() {
   const importWatchlistItems = useLabStore((state) => state.importWatchlistItems);
   const removeWatchlist = useLabStore((state) => state.removeWatchlist);
   const moveWatchlistItem = useLabStore((state) => state.moveWatchlistItem);
+  const workspace = useLabStore((state) => state.workspace);
+  const setWorkspacePreference = useLabStore((state) => state.setWorkspacePreference);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [filterQuery, setFilterQuery] = useState("");
+  const [filterQuery, setFilterQuery] = useState(workspace.watchlistQuery);
   const [error, setError] = useState("");
-  const [groupFilter, setGroupFilter] = useState("all");
-  const [sortKey, setSortKey] = useState("custom");
-  const [sortDirection, setSortDirection] = useState("asc");
+  const [groupFilter, setGroupFilter] = useState(workspace.watchlistGroup);
+  const [sortKey, setSortKey] = useState(workspace.watchlistSort);
+  const [sortDirection, setSortDirection] = useState(workspace.watchlistDirection);
   const [groupChoice, setGroupChoice] = useState("");
   const [newGroupMode, setNewGroupMode] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
@@ -66,6 +68,12 @@ export function WatchlistSidebar() {
   const [feedback, setFeedback] = useState("");
   const fileInput = useRef(null);
   const realDataMode = hasRealDataAccess(integrationStatus);
+  useEffect(() => {
+    setFilterQuery(workspace.watchlistQuery);
+    setGroupFilter(workspace.watchlistGroup);
+    setSortKey(workspace.watchlistSort);
+    setSortDirection(workspace.watchlistDirection);
+  }, [workspace.watchlistQuery, workspace.watchlistGroup, workspace.watchlistSort, workspace.watchlistDirection]);
   const normalizedWatchlist = useMemo(() => watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name), [watchlist]);
   const groups = useMemo(() => [...new Set(normalizedWatchlist.map((item) => item.group))], [normalizedWatchlist]);
   const groupCounts = useMemo(() => new Map(groups.map((group) => [group, normalizedWatchlist.filter((item) => item.group === group).length])), [groups, normalizedWatchlist]);
@@ -159,18 +167,18 @@ export function WatchlistSidebar() {
     <div className="sidebar-heading"><h2>自选</h2><div className="sidebar-heading-actions"><button aria-label="添加自选" onClick={openDialog}><Plus size={19} /></button><div className="sidebar-tools"><button aria-label="自选工具" aria-expanded={toolsOpen} onClick={() => { setToolsOpen((value) => !value); setError(""); }}><DotsThree size={20} /></button>{toolsOpen && <div className="sidebar-tools-menu" role="menu"><button type="button" role="menuitem" onClick={exportWatchlist}><DownloadSimple size={15} />导出自选 CSV</button><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><UploadSimple size={15} />导入 CSV / TXT</button><small>支持 FolioMind CSV 或 TradingView 交易所前缀列表</small></div>}<input ref={fileInput} aria-label="导入自选文件" type="file" accept=".csv,.txt,text/csv,text/plain" hidden onChange={(event) => void importFile(event)} /></div></div></div>
     <div className="watchlist-search-wrap">
       <MagnifyingGlass size={15} aria-hidden="true" />
-      <input type="search" value={filterQuery} onChange={(event) => setFilterQuery(event.target.value)} placeholder="搜索名称、代码或分类" aria-label="搜索自选" />
-      {filterQuery && <button type="button" className="watchlist-search-clear" aria-label="清除自选搜索" onClick={() => setFilterQuery("")}><X size={13} /></button>}
+      <input type="search" value={filterQuery} onChange={(event) => { setFilterQuery(event.target.value); setWorkspacePreference("watchlistQuery", event.target.value); }} placeholder="搜索名称、代码或分类" aria-label="搜索自选" />
+      {filterQuery && <button type="button" className="watchlist-search-clear" aria-label="清除自选搜索" onClick={() => { setFilterQuery(""); setWorkspacePreference("watchlistQuery", ""); }}><X size={13} /></button>}
     </div>
     <div className="watchlist-controls" aria-label="自选视图控制">
-      <label><span>分组</span><select aria-label="自选分组" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}><option value="all">全部（{normalizedWatchlist.length}）</option>{groups.map((group) => <option key={group} value={group}>{group}（{groupCounts.get(group)}）</option>)}</select></label>
-      <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-      {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
+      <label><span>分组</span><select aria-label="自选分组" value={groupFilter} onChange={(event) => { setGroupFilter(event.target.value); setWorkspacePreference("watchlistGroup", event.target.value); }}><option value="all">全部（{normalizedWatchlist.length}）</option>{groups.map((group) => <option key={group} value={group}>{group}（{groupCounts.get(group)}）</option>)}</select></label>
+      <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => { setSortKey(event.target.value); setWorkspacePreference("watchlistSort", event.target.value); }}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+      {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => { const next = sortDirection === "asc" ? "desc" : "asc"; setSortDirection(next); setWorkspacePreference("watchlistDirection", next); }}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
     </div>
     {filterQuery && <p className="watchlist-search-result" role="status">已筛选 {groupedItems.reduce((count, [, items]) => count + items.length, 0)}/{normalizedWatchlist.length} 个标的</p>}
     {sortKey === "custom" && normalizedWatchlist.length > 1 && !filterQuery && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
-      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || null} realDataMode={realDataMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => setFilterQuery("")}>清除搜索</button>}</div>}
+      {groupedItems.length ? groupedItems.map(([group, items]) => <section key={group} aria-label={`${group}自选`}><h3><span>{group}</span><small>{items.length}</small></h3>{items.map((item, index) => <WatchlistRow key={item.symbol} item={item} selected={selectedSymbol === item.symbol} quote={quoteForSymbol(liveQuotes, item.symbol) || null} realDataMode={realDataMode} sortKey={sortKey} canMoveUp={sortKey === "custom" && !filterQuery && index > 0} canMoveDown={sortKey === "custom" && !filterQuery && index < items.length - 1} onSelect={selectItem} onRemove={removeItem} onMove={moveItem} />)}</section>) : <div className="watchlist-filter-empty" role="status"><strong>{filterQuery ? "没有匹配的自选" : "该分组暂无标的"}</strong><span>{filterQuery ? "尝试搜索其它名称、代码或分类。" : "切换分组或添加新的自选。"}</span>{filterQuery && <button type="button" className="notification-link" onClick={() => { setFilterQuery(""); setWorkspacePreference("watchlistQuery", ""); }}>清除搜索</button>}</div>}
     </div>
     {feedback && <p className="sidebar-feedback" role="status">{feedback}</p>}
     {error && !dialogOpen && <p className="sidebar-feedback error" role="alert">{error}</p>}

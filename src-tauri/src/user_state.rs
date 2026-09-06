@@ -133,6 +133,62 @@ fn default_installed_skill_ids() -> Vec<String> {
     vec!["fundamental".into(), "monitor".into()]
 }
 
+fn default_workspace() -> WorkspacePreferences {
+    WorkspacePreferences::default()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePreferences {
+    #[serde(default = "default_workspace_group")]
+    pub watchlist_group: String,
+    #[serde(default)]
+    pub watchlist_query: String,
+    #[serde(default = "default_workspace_sort")]
+    pub watchlist_sort: String,
+    #[serde(default = "default_workspace_direction")]
+    pub watchlist_direction: String,
+    #[serde(default = "default_workspace_range")]
+    pub chart_range: String,
+    #[serde(default = "default_true")]
+    pub show_grid: bool,
+    #[serde(default)]
+    pub show_moving_average: bool,
+    #[serde(default)]
+    pub show_moving_average20: bool,
+}
+
+fn default_workspace_group() -> String {
+    "all".into()
+}
+fn default_workspace_sort() -> String {
+    "custom".into()
+}
+fn default_workspace_direction() -> String {
+    "asc".into()
+}
+fn default_workspace_range() -> String {
+    "分时".into()
+}
+fn default_true() -> bool {
+    true
+}
+
+impl Default for WorkspacePreferences {
+    fn default() -> Self {
+        Self {
+            watchlist_group: default_workspace_group(),
+            watchlist_query: String::new(),
+            watchlist_sort: default_workspace_sort(),
+            watchlist_direction: default_workspace_direction(),
+            chart_range: default_workspace_range(),
+            show_grid: true,
+            show_moving_average: false,
+            show_moving_average20: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorRule {
@@ -412,6 +468,8 @@ pub struct UserState {
     pub premarket_briefing: Option<Value>,
     #[serde(default = "default_installed_skill_ids")]
     pub installed_skill_ids: Vec<String>,
+    #[serde(default = "default_workspace")]
+    pub workspace: WorkspacePreferences,
 }
 
 impl Default for UserState {
@@ -445,6 +503,7 @@ impl Default for UserState {
             briefing_schedule: BriefingSchedule::default(),
             premarket_briefing: None,
             installed_skill_ids: default_installed_skill_ids(),
+            workspace: WorkspacePreferences::default(),
         }
     }
 }
@@ -612,6 +671,27 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || state.installed_skill_ids.len() > MAX_INSTALLED_SKILLS
     {
         return Err("user state exceeds size limit".into());
+    }
+    validate_text(
+        &state.workspace.watchlist_group,
+        "workspace watchlist group",
+        64,
+    )?;
+    validate_text_allow_empty(
+        &state.workspace.watchlist_query,
+        "workspace watchlist query",
+        160,
+    )?;
+    if !matches!(
+        state.workspace.watchlist_sort.as_str(),
+        "custom" | "name" | "price" | "change"
+    ) || !matches!(state.workspace.watchlist_direction.as_str(), "asc" | "desc")
+        || !matches!(
+            state.workspace.chart_range.as_str(),
+            "分时" | "5日" | "日K" | "周K" | "月K" | "季K" | "年K"
+        )
+    {
+        return Err("workspace preference is invalid".into());
     }
     let mut installed_skill_ids = HashSet::new();
     for skill_id in &state.installed_skill_ids {

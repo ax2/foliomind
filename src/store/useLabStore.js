@@ -20,6 +20,7 @@ import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTrigge
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
 import { capabilityArray, capabilityData, capabilitySource } from "../lib/capabilityEnvelope.js";
+import { DEFAULT_WORKSPACE, normalizeWorkspace } from "../lib/workspace.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -87,7 +88,7 @@ function abortPendingDataRequests() {
 }
 
 function persistenceState(snapshot) {
-  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, premarketBriefing: snapshot.premarketBriefing, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id) });
+  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, premarketBriefing: snapshot.premarketBriefing, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id), workspace: snapshot.workspace });
 }
 const samePersistenceState = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 function persistSnapshot(snapshot) {
@@ -640,7 +641,7 @@ async function executeMonitorForItem(rule, item) {
 
 export const initialLabState = {
   credentialGeneration: 0,
-  activeView: "watchlist", selectedSymbol: "600519", chartRange: "分时", watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
+  activeView: "watchlist", selectedSymbol: "600519", chartRange: DEFAULT_WORKSPACE.chartRange, workspace: { ...DEFAULT_WORKSPACE }, watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
   rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, liveDataStartedAt: null, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 0, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
 };
@@ -1073,7 +1074,8 @@ export const useLabStore = create((set, get) => ({
     const resolved = get().watchlist.find((item) => quoteSymbolKey(item.symbol) === key)?.symbol || requested;
     set({ selectedSymbol: resolved, activeView: "watchlist" });
   },
-  setChartRange: (chartRange) => set({ chartRange }),
+  setChartRange: (chartRange) => { const next = normalizeWorkspace({ ...get().workspace, chartRange }); set({ chartRange: next.chartRange, workspace: next }); void get().persistUserState().catch(() => null); },
+  setWorkspacePreference: (key, value) => { const next = normalizeWorkspace({ ...get().workspace, [key]: value }); set({ workspace: next, chartRange: next.chartRange }); void get().persistUserState().catch(() => null); },
   toggleSkill: async (id) => {
     const previous = get().skillItems;
     const next = previous.map((item) => item.id === id ? { ...item, installed: !item.installed } : item);
@@ -1119,7 +1121,7 @@ export const useLabStore = create((set, get) => ({
             const selectedSymbol = nextWatchlist.some((item) => item.symbol === state.selectedSymbol)
               ? state.selectedSymbol
               : nextWatchlist[0]?.symbol || state.selectedSymbol;
-            return { watchlist: nextWatchlist, selectedSymbol, rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), premarketBriefing: hydrated.premarketBriefing, monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
+            return { watchlist: nextWatchlist, selectedSymbol, chartRange: hydrated.workspace.chartRange, workspace: normalizeWorkspace(hydrated.workspace), rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), premarketBriefing: hydrated.premarketBriefing, monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
           });
           if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
         } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true, userStateLoading: false, userStateError: "" }); await persistSnapshot(get()); }
