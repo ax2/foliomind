@@ -51,4 +51,13 @@ describe("research numeric filters", () => {
     expect(missingRow?.split(",")).toEqual(["B", "普通标的", "港股", "", "", "", "", "", "", ""]);
     expect(csv).not.toContain("quote");
   });
+
+  it("does not label a category as a market in exported rows", () => {
+    const csv = researchResultsCsv([{ symbol: "C", name: "无市场标的", category: "科技" }], {
+      C: { price: 10, change: 0, asOf: "2026-09-12T08:00:00Z", source: "真实 CAP" },
+    });
+    const row = csv.split("\r\n").find((line) => line.startsWith("C,"));
+    expect(row?.split(",")).toEqual(["C", "无市场标的", "", "10", "0", "", "", "", "2026-09-12T08:00:00Z", "真实 CAP"]);
+    expect(row).not.toContain("科技");
+  });
 });

@@ -59,7 +59,7 @@ export function researchResultsCsv(items, quotes = {}) {
     lines.push([
       item?.symbol || "",
       item?.name || "",
-      item?.market || item?.category || "",
+      item?.market || "",
       csvNumber(quote?.price, { positive: true }),
       csvNumber(quote?.change),
       csvNumber(quote?.pe),
