@@ -487,6 +487,19 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("button", { name: "加入标的5对比" })).toBeDisabled();
   });
 
+  it("clears research comparison selection when real data becomes incomplete", async () => {
+    const watchlist = [{ symbol: "A", name: "标的A", market: "沪深" }, { symbol: "B", name: "标的B", market: "沪深" }];
+    const liveQuotes = { A: { price: 100, change: 1, asOf: "2026-09-12T08:00:00Z" }, B: { price: 101, change: 1, asOf: "2026-09-12T08:00:00Z" } };
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: "2026-09-12T08:00:00Z" });
+    render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: "加入标的A对比" }));
+    expect(screen.getByRole("region", { name: "研究结果对比" })).toBeInTheDocument();
+    act(() => useLabStore.setState({ liveDataLoading: true }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "研究结果对比" })).not.toBeInTheDocument());
+    act(() => useLabStore.setState({ liveDataLoading: false }));
+    expect(screen.queryByRole("region", { name: "研究结果对比" })).not.toBeInTheDocument();
+  });
+
   it("opens the monitor composer with a research result", async () => {
     useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } }, rules: [], monitorComposerRequest: null });
     render(<ResearchView />);

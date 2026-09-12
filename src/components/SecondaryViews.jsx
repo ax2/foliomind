@@ -530,6 +530,9 @@ export function ResearchView() {
   }, 0);
   const dataState = resolveLiveDataState({ configured: realDataMode, loading: liveDataLoading, error: liveDataError, receivedCount: returnedCount, totalCount: watchlist.length, staleCount: staleQuoteCount });
   const comparisonItems = useMemo(() => dataState === DATA_STATES.SUCCESS ? watchlist.filter((item) => comparisonSymbols.includes(item.symbol)) : [], [dataState, watchlist, comparisonSymbols]);
+  useEffect(() => {
+    if (dataState !== DATA_STATES.SUCCESS && comparisonSymbols.length) setComparisonSymbols([]);
+  }, [dataState, comparisonSymbols.length]);
   const toggleComparison = (item) => {
     if (!item?.symbol) return;
     setComparisonSymbols((current) => {
