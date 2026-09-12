@@ -85,7 +85,10 @@ $previousInstaller = Assert-Installer -Path $PreviousInstallerPath
 $currentInstaller = Assert-Installer -Path $CurrentInstallerPath
 $configDirectory = Join-Path ($env:APPDATA ?? (Join-Path $env:USERPROFILE "AppData\Roaming")) "app.foliomind.desktop"
 $markerPath = Join-Path $configDirectory "upgrade-smoke-marker.txt"
+$statePath = Join-Path $configDirectory "user-state.json"
 $markerValue = "foliomind-upgrade-smoke-$([Guid]::NewGuid().ToString('N'))"
+$stateValue = '{"revision":7,"onboardingCompleted":true,"watchlist":[{"symbol":"600519","name":"Upgrade smoke","market":"沪深","category":"Test","group":"A股"}],"monitorRules":[],"notifications":[],"portfolioPositions":[],"monitorHistory":[],"portfolioReviews":[],"briefingSchedule":{},"premarketBriefing":null,"installedSkillIds":["fundamental","monitor"],"workspace":{"watchlistGroup":"A股","watchlistQuery":"600519","watchlistSort":"change","watchlistDirection":"desc","chartRange":"日K","showGrid":false,"showMovingAverage":true,"showMovingAverage20":true,"marketColumns":["price","change"],"savedViews":[],"savedMonitorTemplates":[],"savedResearchScreens":[],"savedMarketViews":[]}}'
+$stateValue | ConvertFrom-Json | Out-Null
 $oldUninstaller = $null
 $currentUninstaller = $null
 $activeMsiPath = $null
@@ -93,6 +96,7 @@ $activeMsiPath = $null
 try {
   New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
   Set-Content -LiteralPath $markerPath -Value $markerValue -NoNewline -Encoding utf8
+  Set-Content -LiteralPath $statePath -Value $stateValue -NoNewline -Encoding utf8
 
   if ($Kind -eq "nsis") {
     Invoke-CheckedProcess -FilePath $previousInstaller.FullName -ArgumentList @("/S")
@@ -133,6 +137,10 @@ try {
       (Get-Content -LiteralPath $markerPath -Raw) -ne $markerValue) {
     throw "User configuration marker was not preserved across $Kind upgrade"
   }
+  if (-not (Test-Path -LiteralPath $statePath -PathType Leaf) -or
+      (Get-Content -LiteralPath $statePath -Raw) -ne $stateValue) {
+    throw "User state fixture was not preserved across $Kind upgrade"
+  }
   if ($Kind -eq "nsis") {
     $currentUninstaller = Join-Path $currentExecutable.DirectoryName "uninstall.exe"
     if (-not (Test-Path -LiteralPath $currentUninstaller -PathType Leaf)) {
@@ -155,6 +163,10 @@ try {
       (Get-Content -LiteralPath $markerPath -Raw) -ne $markerValue) {
     throw "User configuration marker was removed by $Kind uninstall"
   }
+  if (-not (Test-Path -LiteralPath $statePath -PathType Leaf) -or
+      (Get-Content -LiteralPath $statePath -Raw) -ne $stateValue) {
+    throw "User state fixture was removed by $Kind uninstall"
+  }
 
   Write-Host "Installer upgrade smoke passed: $Kind previous install, current upgrade, config preservation, and uninstall"
 } finally {
@@ -168,5 +180,8 @@ try {
   }
   if (Test-Path -LiteralPath $markerPath -PathType Leaf) {
     Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+  }
+  if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+    Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
   }
 }
