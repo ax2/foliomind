@@ -6,7 +6,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
-import { listenForBackgroundPremarket, listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
+import { listenForBackgroundPremarket, listenForBackgroundReviewStatus, listenForDesktopReconcile, listenForDesktopResume, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { isLocalWebRuntime } from "./lib/localHost.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
@@ -126,14 +126,24 @@ export function App() {
       reconcile({ recover });
     };
     const timer = window.setInterval(reconcileOnInterval, INTEGRATION_STATUS_RECONCILE_INTERVAL_MS);
+    let disposed = false;
+    let unlistenResume = () => {};
+    if (isDesktopRuntime()) {
+      void listenForDesktopResume(markActiveAndReconcile).then((cleanup) => {
+        if (disposed) cleanup();
+        else unlistenResume = cleanup;
+      }).catch(() => {});
+    }
     window.addEventListener("focus", markActiveAndReconcile);
     window.addEventListener("pageshow", markActiveAndReconcile);
     document.addEventListener("visibilitychange", markActiveAndReconcile);
     return () => {
+      disposed = true;
       window.clearInterval(timer);
       window.removeEventListener("focus", markActiveAndReconcile);
       window.removeEventListener("pageshow", markActiveAndReconcile);
       document.removeEventListener("visibilitychange", markActiveAndReconcile);
+      unlistenResume();
     };
   }, [refreshIntegrationStatus, refreshLiveData, refreshPolicy]);
   useEffect(() => {

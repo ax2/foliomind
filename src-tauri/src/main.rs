@@ -1475,6 +1475,9 @@ fn main() {
             }
         };
     app.run(move |app_handle, event| {
+        if matches!(&event, tauri::RunEvent::Resumed) {
+            let _ = app_handle.emit(desktop_lifecycle::RESUMED_EVENT, ());
+        }
         if matches!(
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit

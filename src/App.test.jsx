@@ -28,6 +28,7 @@ const desktopLifecycleMocks = vi.hoisted(() => ({
   loadDesktopLifecycleStatus: vi.fn(),
   reconcileDesktopNow: vi.fn(),
   listenForDesktopReconcile: vi.fn().mockResolvedValue(() => {}),
+  listenForDesktopResume: vi.fn().mockResolvedValue(() => {}),
   listenForBackgroundReviewStatus: vi.fn().mockResolvedValue(() => {}),
   listenForBackgroundPremarket: vi.fn().mockResolvedValue(() => {}),
 }));
@@ -82,6 +83,7 @@ beforeEach(() => {
   desktopLifecycleMocks.loadDesktopLifecycleStatus.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
   desktopLifecycleMocks.reconcileDesktopNow.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
   desktopLifecycleMocks.listenForDesktopReconcile.mockReset().mockResolvedValue(() => {});
+  desktopLifecycleMocks.listenForDesktopResume.mockReset().mockResolvedValue(() => {});
   desktopLifecycleMocks.listenForBackgroundReviewStatus.mockReset().mockResolvedValue(() => {});
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
@@ -1464,6 +1466,31 @@ describe("FolioMind core flows", () => {
     integrationMocks.loadIntegrationStatus.mockClear();
 
     act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it("reconciles integration status on a native operating-system resume", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    let resumeHandler;
+    desktopLifecycleMocks.listenForDesktopResume.mockImplementationOnce(async (handler) => {
+      resumeHandler = handler;
+      return vi.fn();
+    });
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    render(<App />);
+    await waitFor(() => expect(resumeHandler).toBeTypeOf("function"));
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+    integrationMocks.loadIntegrationStatus.mockClear();
+
+    act(() => resumeHandler());
     await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
   });
 
