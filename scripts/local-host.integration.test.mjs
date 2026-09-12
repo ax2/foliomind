@@ -17,10 +17,12 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function startHost(dataDir) {
+async function startHost(dataDir, { clearEnvCredential = false } = {}) {
+  const env = { ...process.env, FOLIOMIND_HOST_PORT: "0", FOLIOMIND_DEV_DATA_DIR: dataDir };
+  if (clearEnvCredential) delete env.QVERIS_API_KEY;
   const child = spawn(process.execPath, ["scripts/local-host.mjs"], {
     cwd: projectRoot,
-    env: { ...process.env, FOLIOMIND_HOST_PORT: "0", FOLIOMIND_DEV_DATA_DIR: dataDir },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -148,8 +150,8 @@ test("Local Host accepts an explicitly completed empty workspace", async (contex
 test("two Local Hosts serialize credential writes and keep revision pairs consistent", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-lock-"));
   context.after(() => rm(dataDir, { recursive: true, force: true }));
-  const first = await startHost(dataDir);
-  const second = await startHost(dataDir);
+  const first = await startHost(dataDir, { clearEnvCredential: true });
+  const second = await startHost(dataDir, { clearEnvCredential: true });
   context.after(async () => {
     await stopHost(first.child);
     await stopHost(second.child);
@@ -184,13 +186,33 @@ test("Local Host detects an unmanaged same-prefix credential replacement", async
   const before = await hostRequest(host, "/api/integration/status");
   assert.equal(before.payload.credentialRevision, saved.payload.credentialRevision);
 
-  // Simulate an external editor or credential migration that cannot update
-  // the Local Host's random revision sidecar. The replacement deliberately
-  // keeps the visible prefix unchanged.
+  // Simulate an external editor or credential migration. The replacement
+  // deliberately keeps the visible prefix unchanged.
   await writeFile(join(dataDir, "qveris-api-key"), "sk_same_prefix_replaced\n", { encoding: "utf8", mode: 0o600 });
   const after = await hostRequest(host, "/api/integration/status");
   assert.equal(after.payload.keyPrefix, before.payload.keyPrefix);
   assert.notEqual(after.payload.credentialRevision, before.payload.credentialRevision);
+});
+
+test("Local Host returns one deterministic revision for every process", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-revision-contract-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const first = await startHost(dataDir, { clearEnvCredential: true });
+  const second = await startHost(dataDir, { clearEnvCredential: true });
+  context.after(async () => {
+    await stopHost(first.child);
+    await stopHost(second.child);
+  });
+
+  const saved = await hostRequest(first, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_cross_process_contract" } });
+  const status = await hostRequest(second, "/api/integration/status");
+  assert.equal(status.payload.credentialRevision, saved.payload.credentialRevision);
+  assert.match(status.payload.credentialRevision, /^[0-9a-f]{64}$/);
+
+  const cleared = await hostRequest(second, "/api/integration/credential", { method: "DELETE" });
+  assert.equal(cleared.payload.credentialRevision, null);
+  const empty = await hostRequest(first, "/api/integration/status");
+  assert.equal(empty.payload.credentialRevision, null);
 });
 
 test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {

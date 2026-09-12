@@ -16,6 +16,7 @@ tauri-plugin-opener = "=2.5.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 keyring = { version = "4.1.5", features = ["v1"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+sha2 = "0.10"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

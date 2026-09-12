@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
 };
 
+use sha2::{Digest, Sha256};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
@@ -22,13 +23,11 @@ pub fn credential_revision(value: Option<&str>) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    // FNV-1a is intentionally used here instead of a process-randomized
-    // hasher: revisions must compare equal across independently running
-    // desktop/Web Host processes while remaining credential-free.
-    let hash = value.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3_u64)
-    });
-    Some(format!("{hash:016x}"))
+    // SHA-256 is deterministic across Local Host and native desktop Host
+    // processes while avoiding a short, collision-prone revision token. The
+    // digest is only used for local invalidation and never used as a key.
+    let digest = Sha256::digest(value.as_bytes());
+    Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 pub trait CredentialStore: Send + Sync {
@@ -224,6 +223,10 @@ mod tests {
     #[test]
     fn credential_revision_is_stable_but_changes_for_different_keys() {
         let first = credential_revision(Some("key-one")).unwrap();
+        assert_eq!(
+            first,
+            "9b346041bc9a49574eb2665b2ad2a0a3f9f9cce4e42f5d1f26deb8a256b5966a"
+        );
         assert_eq!(
             credential_revision(Some(" key-one ")).as_deref(),
             Some(first.as_str())

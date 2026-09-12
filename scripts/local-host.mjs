@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFile, chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { homedir, platform } from "node:os";
@@ -31,7 +31,6 @@ const dataDir = process.env.FOLIOMIND_DEV_DATA_DIR || join(
 );
 const settingsFile = join(dataDir, "integration-settings.json");
 const credentialFile = join(dataDir, "qveris-api-key");
-const credentialRevisionFile = join(dataDir, "qveris-credential-revision");
 const stateFile = join(dataDir, "user-state.json");
 const stateBackupFile = join(dataDir, "user-state.json.backup");
 const MAX_USER_STATE_BYTES = 4 * 1024 * 1024;
@@ -965,29 +964,16 @@ async function readKeyUnlocked() {
   try { const value = (await readFile(credentialFile, "utf8")).trim(); if (value) return value; } catch { /* first run */ }
   return String(process.env.QVERIS_API_KEY || "").trim() || null;
 }
-async function readCredentialRevisionUnlocked() {
-  try {
-    const value = (await readFile(credentialRevisionFile, "utf8")).trim();
-    if (value) return value;
-  } catch { /* legacy installs receive a revision on the next write */ }
-  return "legacy";
-}
-async function credentialFileSignatureUnlocked() {
-  try {
-    const metadata = await stat(credentialFile, { bigint: true });
-    // Do not expose the credential or derive a stable public fingerprint from
-    // it. File metadata is only a local invalidation suffix, so an unmanaged
-    // same-prefix replacement still changes the status revision.
-    return `${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
-  } catch { return "missing"; }
-}
-async function credentialRevisionSnapshotUnlocked() {
-  return `${await readCredentialRevisionUnlocked()}:${await credentialFileSignatureUnlocked()}`;
+export function credentialRevision(value) {
+  const key = String(value || "").trim();
+  if (!key) return null;
+  return createHash("sha256").update(key, "utf8").digest("hex");
 }
 async function readCredentialSnapshot() {
   const release = await acquireCredentialFileLock();
   try {
-    return { key: await readKeyUnlocked(), credentialRevision: await credentialRevisionSnapshotUnlocked() };
+    const key = await readKeyUnlocked();
+    return { key, credentialRevision: credentialRevision(key) };
   } finally {
     await release();
   }
@@ -999,17 +985,12 @@ async function writePrivateText(path, value) {
   await rename(tmp, path);
   try { await chmod(path, 0o600); } catch { /* Windows has no POSIX mode. */ }
 }
-async function writeCredentialRevisionUnlocked() {
-  const value = `${randomUUID()}`;
-  await writePrivateText(credentialRevisionFile, `${value}\n`);
-  return value;
-}
 async function saveKey(value) {
   const release = await acquireCredentialFileLock();
   try {
-    await writePrivateText(credentialFile, `${value.trim()}\n`);
-    await writeCredentialRevisionUnlocked();
-    return await credentialRevisionSnapshotUnlocked();
+    const key = value.trim();
+    await writePrivateText(credentialFile, `${key}\n`);
+    return credentialRevision(key);
   } finally {
     await release();
   }
@@ -1018,8 +999,7 @@ async function deleteKey() {
   const release = await acquireCredentialFileLock();
   try {
     try { await unlink(credentialFile); } catch { /* idempotent */ }
-    await writeCredentialRevisionUnlocked();
-    return await credentialRevisionSnapshotUnlocked();
+    return null;
   } finally {
     await release();
   }
