@@ -111,7 +111,7 @@ impl Default for PiHost {
                 staged_model_catalog: None,
             })),
             next_id: Arc::new(AtomicU64::new(1)),
-            credentials: Arc::new(OsCredentialStore),
+            credentials: Arc::new(OsCredentialStore::default()),
             web_events: Arc::new(Mutex::new(Vec::new())),
         }
     }

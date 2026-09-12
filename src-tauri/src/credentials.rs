@@ -36,11 +36,32 @@ pub trait CredentialStore: Send + Sync {
     fn delete_qveris_key(&self) -> Result<(), String>;
 }
 
-pub struct OsCredentialStore;
+pub struct OsCredentialStore {
+    service: String,
+    account: String,
+}
+
+impl Default for OsCredentialStore {
+    fn default() -> Self {
+        Self::new(SERVICE, ACCOUNT)
+    }
+}
 
 impl OsCredentialStore {
+    fn new(service: impl Into<String>, account: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            account: account.into(),
+        }
+    }
+
+    #[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
+    fn for_test_entry(service: impl Into<String>, account: impl Into<String>) -> Self {
+        Self::new(service, account)
+    }
+
     fn entry(&self) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(SERVICE, ACCOUNT)
+        keyring::Entry::new(&self.service, &self.account)
             .map_err(|error| format!("credential store unavailable: {error}"))
     }
 
@@ -207,6 +228,7 @@ impl CredentialStore for InMemoryCredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn in_memory_store_round_trips_without_environment_variables() {
         let store = InMemoryCredentialStore::new();
@@ -234,5 +256,47 @@ mod tests {
         assert_ne!(Some(first), credential_revision(Some("key-two")));
         assert_eq!(credential_revision(None), None);
         assert_eq!(credential_revision(Some("  ")), None);
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires an explicit platform keyring smoke opt-in"]
+    fn os_keyring_round_trips() {
+        assert_eq!(
+            std::env::var("FOLIOMIND_KEYRING_SMOKE").as_deref(),
+            Ok("1"),
+            "set FOLIOMIND_KEYRING_SMOKE=1 to run the platform keyring smoke"
+        );
+
+        let service = format!("app.foliomind.desktop.smoke.{}", uuid::Uuid::new_v4());
+        let account = format!("qveris-api-key-{}", uuid::Uuid::new_v4());
+        let store = OsCredentialStore::for_test_entry(&service, &account);
+        let first = "foliomind-keyring-smoke-first";
+        let second = "foliomind-keyring-smoke-second";
+
+        let result = (|| {
+            assert_eq!(store.read_qveris_key()?, None);
+            store.write_qveris_key(first)?;
+            assert_eq!(store.read_qveris_key()?.as_deref(), Some(first));
+            let first_revision = credential_revision(Some(first)).unwrap();
+
+            // A separate Entry handle models another process or desktop
+            // integration writing the same native credential. The wrapper
+            // must read the fresh value and derive a new non-sensitive revision.
+            let external = keyring::Entry::new(&service, &account)
+                .map_err(|error| format!("cannot create external keyring handle: {error}"))?;
+            external
+                .set_password(second)
+                .map_err(|error| format!("cannot update external keyring handle: {error}"))?;
+            assert_eq!(store.read_qveris_key()?.as_deref(), Some(second));
+            assert_ne!(Some(first_revision), credential_revision(Some(second)));
+
+            store.delete_qveris_key()?;
+            assert_eq!(store.read_qveris_key()?, None);
+            Ok::<(), String>(())
+        })();
+
+        let _ = store.delete_qveris_key();
+        result.unwrap();
     }
 }

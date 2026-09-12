@@ -3030,3 +3030,15 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 - 普通桌面回归与正式 Release 构建均执行升级烟测；该阶段不启动真实应用、不写入凭据、不调用行情或模型、不替代真实平台签名、公证、keyring 外部修改和跨版本数据 schema 迁移验收。
 
 **验收标准**：从最近旧版到当前 NSIS/MSI 的安装—覆盖升级—卸载完成；当前可执行文件载荷有效，用户配置标记和合法状态 fixture 跨升级保持且卸载后仍在；旧版缺失、下载失败、升级失败、残留应用或配置意外删除均阻断 workflow；脚本、workflow、架构审查和构建测试通过。该 fixture 只证明安装器不覆盖/删除状态文件，不替代真实跨版本 schema 迁移验收。
+
+### Stage 3GO Windows/macOS 原生 keyring 回归（本轮增量）
+
+**目标**：把桌面凭据验收从“代码调用了 keyring API”推进到 Windows Credential Manager 与 macOS Keychain 的 CI 原生往返验证，确认凭据轮换后的读取和非敏感 revision 对账实际经过平台凭据存储。
+
+**范围与边界**：
+
+- Windows/macOS 桌面 CI 显式运行被 `#[ignore]` 保护的 Rust 烟测；测试为每次运行生成随机 service/account，不使用生产 `SERVICE`/`ACCOUNT`，并通过 `FOLIOMIND_KEYRING_SMOKE=1` opt-in，普通 `cargo test` 不接触平台凭据。
+- 烟测写入第一个临时值，从包装后的 `OsCredentialStore` 读取，再用第二个独立 `keyring::Entry` 句柄更新同一条平台凭据，确认包装层读取新值且 `credential_revision` 变化，随后删除并确认不存在；测试输出不得包含凭据内容。
+- 该测试覆盖平台 keyring 的真实写入、读取、更新和删除，以及同进程独立句柄的新鲜读取；不宣称已覆盖用户通过 Keychain/Credential Manager GUI 或其它进程修改、休眠恢复、签名/公证、真实用户凭据和跨版本 schema 迁移，这些仍需对应平台真机验收。
+
+**验收标准**：普通桌面 CI 与正式 Release CI 的 Windows/macOS job 均通过原生 keyring 烟测；测试条目随机隔离、清理自身凭据、没有生产账号和密钥日志；架构审查、Rust 格式检查、Node 测试及构建门禁继续通过。

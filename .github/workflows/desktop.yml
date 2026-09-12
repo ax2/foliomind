@@ -116,6 +116,11 @@ jobs:
       - if: runner.os == 'macOS'
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Run native keyring smoke
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        env:
+          FOLIOMIND_KEYRING_SMOKE: "1"
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml os_keyring_round_trips -- --ignored --exact
       - run: npm run desktop:build -- ${{ matrix.args }}
       - name: Smoke test Windows installer
         if: runner.os == 'Windows'
