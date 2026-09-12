@@ -151,7 +151,7 @@ export function normalizeUserState(state = {}) {
   const notifications = sanitizeNotifications(value.notifications);
   const monitorHistory = sanitizeMonitorHistory(value.monitorHistory);
   const monitorRules = migrateLegacySeedRules(sanitizeRules(value.monitorRules ?? value.rules), notifications, monitorHistory);
-  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, watchlist: sanitizeWatchlist(value.watchlist), monitorRules, notifications, portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory, portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), premarketBriefing: sanitizePremarketBriefing(value.premarketBriefing), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills), workspace: normalizeWorkspace(value.workspace) };
+  return { revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0, onboardingCompleted: value.onboardingCompleted !== false, watchlist: sanitizeWatchlist(value.watchlist), monitorRules, notifications, portfolioPositions: sanitizePositions(value.portfolioPositions), monitorHistory, portfolioReviews: sanitizePortfolioReviews(value.portfolioReviews), briefingSchedule: normalizeBriefingSchedule(value.briefingSchedule), premarketBriefing: sanitizePremarketBriefing(value.premarketBriefing), installedSkillIds: sanitizeInstalledSkillIds(value.installedSkillIds ?? value.installedSkills), workspace: normalizeWorkspace(value.workspace) };
 }
 
 export { sanitizeInstalledSkillIds, sanitizeMonitorHistory, sanitizeNotifications, sanitizePortfolioReviews, sanitizePremarketBriefing, sanitizePositions, sanitizeRules, sanitizeWatchlist, text };

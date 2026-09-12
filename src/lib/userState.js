@@ -153,6 +153,10 @@ export function mergeUserStateChanges(baseState, localState, remoteState) {
   merged.premarketBriefing = mergeObject(base.premarketBriefing, local.premarketBriefing, remote.premarketBriefing, "premarketBriefing", conflicts);
   merged.workspace = mergeObject(base.workspace, local.workspace, remote.workspace, "workspace", conflicts);
   merged.installedSkillIds = mergeInstalledSkillIds(base.installedSkillIds, local.installedSkillIds, remote.installedSkillIds, conflicts);
+  const localOnboardingChanged = local.onboardingCompleted !== base.onboardingCompleted;
+  const remoteOnboardingChanged = remote.onboardingCompleted !== base.onboardingCompleted;
+  if (localOnboardingChanged && remoteOnboardingChanged && local.onboardingCompleted !== remote.onboardingCompleted) conflicts.push("onboardingCompleted");
+  else if (localOnboardingChanged) merged.onboardingCompleted = local.onboardingCompleted;
   if (conflicts.length) throw new UserStateMergeConflictError(conflicts);
   return normalizeUserState(merged);
 }

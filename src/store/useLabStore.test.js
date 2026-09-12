@@ -172,6 +172,17 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState()).toMatchObject({ userStateLoaded: true, userStateLoading: false, userStateError: "", watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
   });
 
+  it("holds a first-run workspace behind an explicit empty-state choice", async () => {
+    expect(useLabStore.getState()).toMatchObject({ userStateNeedsSetup: true, userStateLoaded: false, onboardingCompleted: false });
+    expect(persistence.saveUserState).not.toHaveBeenCalled();
+
+    await expect(useLabStore.getState().initializeEmptyWorkspace()).resolves.toBe(true);
+
+    expect(useLabStore.getState()).toMatchObject({ userStateNeedsSetup: false, userStateLoaded: true, onboardingCompleted: true, watchlist: [], selectedSymbol: "", rules: [] });
+    const [savedState] = persistence.saveUserState.mock.calls.at(-1);
+    expect(savedState).toMatchObject({ onboardingCompleted: true, watchlist: [] });
+  });
+
   it("anchors the selected workspace to the hydrated watchlist", async () => {
     useLabStore.setState({ selectedSymbol: "600519", watchlist: initialLabState.watchlist });
     persistence.loadUserState.mockResolvedValueOnce({ revision: 12, watchlist: [
@@ -1053,8 +1064,9 @@ describe("lab store streaming lifecycle", () => {
       monitorRules: [{ id: "r1", symbol: "AAPL", strategyId: "price_change", threshold: 5, intervalSeconds: 300, enabled: true }],
       notifications: [],
       portfolioPositions: [],
+      workspace: { watchlistSort: "change", chartRange: "日K", savedViews: [{ id: "view-imported", name: "导入视图", preferences: { watchlistSort: "change", chartRange: "日K" } }] },
     })).resolves.toBe(true);
-    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "AAPL", liveQuotes: {}, watchlist: [{ symbol: "AAPL" }] });
+    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "AAPL", liveQuotes: {}, watchlist: [{ symbol: "AAPL" }], onboardingCompleted: true, userStateNeedsSetup: false, chartRange: "日K", workspace: { watchlistSort: "change", chartRange: "日K", savedViews: [{ id: "view-imported", name: "导入视图" }] } });
     expect(useLabStore.getState().rules[0]).toMatchObject({ symbol: "AAPL", strategyId: "price_change" });
   });
 

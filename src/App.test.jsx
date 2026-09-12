@@ -6,9 +6,10 @@ import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, 
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { initialLabState, useLabStore } from "./store/useLabStore.js";
+import { initialLabState, resetUserStatePersistence, useLabStore } from "./store/useLabStore.js";
 import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFICATION_MODES } from "./lib/systemNotifications.js";
 import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
+import { serializeUserStateBackup } from "./lib/userState.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
 const originalNavigatorOnline = navigator.onLine;
@@ -69,6 +70,7 @@ vi.mock("./lib/localHost.js", async (importOriginal) => ({
 afterEach(cleanup);
 
 beforeEach(() => {
+  resetUserStatePersistence();
   window.localStorage.removeItem(REFRESH_POLICY_STORAGE_KEY);
   window.localStorage.removeItem("foliomind.market-columns.v1");
   window.localStorage.removeItem("foliomind.market-views.v1");
@@ -95,6 +97,7 @@ beforeEach(() => {
     ...initialLabState,
     // Component-focused tests start with a canonical snapshot; loading/error
     // behavior is covered by the explicit hydration tests below.
+    onboardingCompleted: true,
     userStateLoaded: true,
     skillItems: initialLabState.skillItems.map((item) => ({ ...item })),
     messages: initialLabState.messages.map((message) => ({ ...message })),
@@ -116,6 +119,25 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("本地数据暂时无法读取");
     fireEvent.click(screen.getByRole("button", { name: "重新读取本地数据" }));
     expect(retryHydration).toHaveBeenCalled();
+  });
+
+  it("requires an explicit first-run workspace choice and can import a portable state", async () => {
+    window.localStorage.removeItem("foliomind.user-state.v1");
+    useLabStore.setState({ ...initialLabState, userStateLoaded: false, userStateNeedsSetup: false, persistUserState: vi.fn().mockResolvedValue(true) });
+    render(<App />);
+
+    const dialog = await screen.findByRole("dialog", { name: "先建立你的工作区" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从空工作区开始" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "导入已有状态" })).toBeEnabled();
+
+    const backup = serializeUserStateBackup({ watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }], workspace: { chartRange: "日K" } });
+    const input = screen.getByLabelText("导入 FolioMind JSON 备份");
+    fireEvent.change(input, { target: { files: [new File([backup], "foliomind-backup.json", { type: "application/json" })] } });
+    await waitFor(() => expect(useLabStore.getState()).toMatchObject({ userStateNeedsSetup: false, userStateLoaded: true, onboardingCompleted: true, watchlist: [{ symbol: "AAPL" }], chartRange: "日K" }));
+    expect(screen.queryByRole("dialog", { name: "先建立你的工作区" })).not.toBeInTheDocument();
+    window.localStorage.removeItem("foliomind.user-state.v1");
   });
 
   it("shows a recoverable desktop lifecycle error and handles retry failures", async () => {

@@ -53,7 +53,26 @@ async def main() -> None:
         page.on("console", capture_console)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         await page.goto(TARGET_URL, wait_until="networkidle")
+        onboarding = page.get_by_role("dialog", name="先建立你的工作区")
+        await page.wait_for_function(
+            """() => document.querySelector('[role="dialog"][aria-labelledby="workspace-onboarding-title"]') || document.querySelector('.app-shell[data-user-state-loaded="true"]')""",
+            timeout=15_000,
+        )
+        if await onboarding.count():
+            await expect(onboarding).to_be_visible()
+            await expect(onboarding).to_contain_text("从空工作区开始")
+            await expect(onboarding).to_contain_text("导入已有状态")
+            await page.get_by_role("button", name="从空工作区开始", exact=True).click()
+            await expect(onboarding).to_have_count(0)
+            checks.append({"flow": "首次启动空工作区选择", "passed": True})
         await expect(page.locator('.app-shell[data-user-state-loaded="true"]')).to_be_visible(timeout=15_000)
+        if await page.get_by_role("button", name="自选", exact=True).count():
+            await page.get_by_role("button", name="自选", exact=True).click()
+        if not await page.locator(".watch-row-main").count():
+            await page.get_by_role("button", name="添加自选", exact=True).click()
+            await page.get_by_label("搜索名称或代码").fill("600519")
+            await page.get_by_role("button", name=re.compile("贵州茅台.*600519")).click()
+            await expect(page.locator(".watch-row-main").first).to_be_visible()
         await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
 
         async def click_and_capture(label: str, filename: str, expected: str) -> None:

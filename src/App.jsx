@@ -6,12 +6,10 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { useLabStore } from "./store/useLabStore.js";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
-import { DeveloperPanel } from "./components/DeveloperPanel.jsx";
 import { listenForBackgroundPremarket, listenForBackgroundReviewStatus, listenForDesktopReconcile, reconcileDesktopNow } from "./lib/desktopLifecycle.js";
 import { isDesktopRuntime } from "./lib/piRuntime.js";
 import { isLocalWebRuntime } from "./lib/localHost.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
-import { CommandPalette } from "./components/CommandPalette.jsx";
 import { friendlyDataMessage } from "./lib/friendlyMessages.js";
 import { loadRefreshPolicy, refreshPolicyConfig, subscribeRefreshPolicy } from "./lib/refreshPolicy.js";
 import { subscribeIntegrationChanges } from "./lib/integrationChanges.js";
@@ -25,6 +23,9 @@ const SecondaryViewModule = lazy(() => import("./components/SecondaryViews.jsx")
     return View ? <View /> : null;
   },
 })));
+const WorkspaceOnboarding = lazy(() => import("./components/WorkspaceOnboarding.jsx").then((module) => ({ default: module.WorkspaceOnboarding })));
+const CommandPalette = lazy(() => import("./components/CommandPalette.jsx").then((module) => ({ default: module.CommandPalette })));
+const DeveloperPanel = lazy(() => import("./components/DeveloperPanel.jsx").then((module) => ({ default: module.DeveloperPanel })));
 
 const secondaryViewLoading = <div className="secondary-view-loading" role="status" aria-live="polite">正在打开工作台…</div>;
 
@@ -73,6 +74,7 @@ export function App() {
   const userStateLoaded = useLabStore((state) => state.userStateLoaded);
   const userStateLoading = useLabStore((state) => state.userStateLoading);
   const userStateError = useLabStore((state) => state.userStateError);
+  const userStateNeedsSetup = useLabStore((state) => state.userStateNeedsSetup);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const selectedSymbol = useLabStore((state) => state.selectedSymbol);
   const portfolioPositions = useLabStore((state) => state.portfolioPositions);
@@ -204,13 +206,13 @@ export function App() {
     return <><WatchlistSidebar /><StockWorkspace /><CopilotPanel /></>;
   };
   const showGlobalNotice = settingsNotice && activeView !== "settings";
+  const showWorkspaceOnboarding = userStateNeedsSetup && !userStateError;
   return <AppErrorBoundary><div className={`app-shell view-${activeView}`} data-user-state-loaded={userStateLoaded ? "true" : "false"}>
     <ActivityRail />
     {networkOffline && <div className="global-notice error network-notice" role="alert" aria-live="assertive"><span>当前设备处于离线状态，真实行情和模型请求可能无法完成；网络恢复后可重试。</span></div>}
     {userStateError && <div className="global-notice error" role="alert" aria-live="assertive"><span>{userStateLoading ? "正在重新读取本地数据…" : userStateError}</span><button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取本地数据"}</button></div>}
     {showGlobalNotice && <div className={`global-notice ${settingsNotice.type === "error" ? "error" : "success"}`} role={settingsNotice.type === "error" ? "alert" : "status"} aria-live={settingsNotice.type === "error" ? "assertive" : "polite"}><span>{settingsNotice.text}</span>{settingsNotice.action === "retry" && <button disabled={persistenceRetrying} onClick={() => { void retryPersistedUserState(); }}>{persistenceRetrying ? "保存中…" : "重试保存"}</button>}{settingsNotice.action === "reload" && <button disabled={userStateLoading} onClick={() => { void hydrateUserState(); }}>{userStateLoading ? "读取中…" : "重新读取"}</button>}<button onClick={clearSettingsNotice} aria-label="关闭通知">关闭</button></div>}
-    {renderView()}
-    <CommandPalette />
-    <DeveloperPanel />
+    {showWorkspaceOnboarding ? <Suspense fallback={null}><WorkspaceOnboarding /></Suspense> : renderView()}
+    {!showWorkspaceOnboarding && <Suspense fallback={null}><CommandPalette /><DeveloperPanel /></Suspense>}
   </div></AppErrorBoundary>;
 }

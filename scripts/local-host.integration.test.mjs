@@ -72,6 +72,11 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(unauthenticated.response.status, 401);
   assert.equal(unauthenticated.payload.error, "invalid local host session");
 
+  const firstRun = await hostRequest(host, "/api/user-state");
+  assert.equal(firstRun.response.status, 200);
+  assert.equal(firstRun.payload.onboardingCompleted, false);
+  assert.deepEqual(firstRun.payload.watchlist, []);
+
   const credential = await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_contract_test_123456" } });
   assert.equal(credential.response.status, 200);
   assert.equal(credential.payload.configured, true);
@@ -120,6 +125,24 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(cleared.payload.cleared, true);
   const emptyOverview = await hostRequest(host, "/api/dev/overview");
   assert.equal(emptyOverview.payload.logs.length, 0);
+});
+
+test("Local Host accepts an explicitly completed empty workspace", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-empty-workspace-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const state = { revision: 0, onboardingCompleted: true, watchlist: [], monitorRules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [] };
+  const saved = await hostRequest(host, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } });
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.payload.onboardingCompleted, true);
+  assert.deepEqual(saved.payload.watchlist, []);
+
+  const restored = await hostRequest(host, "/api/user-state");
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.payload.onboardingCompleted, true);
+  assert.deepEqual(restored.payload.watchlist, []);
 });
 
 test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {

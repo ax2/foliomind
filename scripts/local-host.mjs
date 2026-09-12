@@ -47,7 +47,8 @@ const MAX_PERSISTED_DEVELOPER_LOG_BYTES = 8 * 1024 * 1024;
 
 const defaultSettings = { capabilityBaseUrl: DEFAULT_CAPABILITY, modelGatewayBaseUrl: DEFAULT_GATEWAY, modelId: "", models: [], dataChannel: DEFAULT_DATA_CHANNEL, dataProvider: DEFAULT_DATA_PROVIDER };
 const defaultState = {
-  watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }, { symbol: "300750", name: "宁德时代", market: "深市", category: "新能源" }],
+  onboardingCompleted: false,
+  watchlist: [],
   monitorRules: [],
   notifications: [],
   portfolioPositions: [],
@@ -830,7 +831,10 @@ async function readPersistedUserState(path) {
   try { parsed = JSON.parse(await readFile(path, "utf8")); }
   catch (cause) { throw Object.assign(new Error("用户状态文件无法解析"), { code: "USER_STATE_CORRUPTED", cause }); }
   const normalized = normalizeUserState(parsed);
-  if (!normalized.watchlist.length) throw Object.assign(new Error("用户状态文件缺少自选数据"), { code: "USER_STATE_CORRUPTED" });
+  // Empty workspaces are valid only when the state explicitly carries the
+  // onboarding marker. An unmarked empty object is still treated as corrupt,
+  // so recovery cannot silently accept an incomplete legacy file.
+  if (!normalized.watchlist.length && typeof parsed?.onboardingCompleted !== "boolean") throw Object.assign(new Error("用户状态文件缺少自选数据"), { code: "USER_STATE_CORRUPTED" });
   return normalized;
 }
 async function readUserStateUnlocked() {
@@ -982,7 +986,7 @@ function saveUserStateIfRevision(input) {
         error.code = "USER_STATE_CONFLICT";
         throw error;
       }
-      if (!state.watchlist.length) throw new Error("至少保留一个自选标的");
+      if (!state.watchlist.length && state.onboardingCompleted !== true) throw new Error("至少保留一个自选标的");
       const next = { ...state, revision: expectedRevision + 1 };
       const primaryExists = await stat(stateFile).then(() => true).catch(() => false);
       if (primaryExists) await atomicJson(stateBackupFile, current);

@@ -135,6 +135,13 @@ fn default_installed_skill_ids() -> Vec<String> {
     vec!["fundamental".into(), "monitor".into()]
 }
 
+// Existing state files predate first-run onboarding, so a missing field means
+// the user has already used the app. Only a brand-new default state opts into
+// the onboarding screen.
+fn default_onboarding_completed() -> bool {
+    true
+}
+
 fn default_workspace() -> WorkspacePreferences {
     WorkspacePreferences::default()
 }
@@ -550,6 +557,8 @@ impl Default for BriefingSchedule {
 pub struct UserState {
     #[serde(default)]
     pub revision: u64,
+    #[serde(default = "default_onboarding_completed")]
+    pub onboarding_completed: bool,
     pub watchlist: Vec<WatchItem>,
     pub monitor_rules: Vec<MonitorRule>,
     pub notifications: Vec<Notification>,
@@ -573,6 +582,7 @@ impl Default for UserState {
     fn default() -> Self {
         Self {
             revision: 0,
+            onboarding_completed: false,
             watchlist: vec![
                 WatchItem {
                     symbol: "600519".into(),
@@ -603,6 +613,13 @@ impl Default for UserState {
             workspace: WorkspacePreferences::default(),
         }
     }
+}
+
+fn first_run_user_state() -> UserState {
+    let mut state = UserState::default();
+    state.onboarding_completed = false;
+    state.watchlist.clear();
+    state
 }
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1241,7 +1258,7 @@ fn load_unlocked(app: &AppHandle) -> Result<UserState, String> {
         write_private_atomic(&file, &bytes, "user state recovery")?;
         return Ok(state);
     }
-    Ok(UserState::default())
+    Ok(first_run_user_state())
 }
 
 fn legacy_seed_rule(
@@ -1646,6 +1663,7 @@ mod tests {
         let state: UserState =
             serde_json::from_value(legacy).expect("legacy state should deserialize");
         assert!(validate(&state).is_ok());
+        assert!(state.onboarding_completed);
         assert_eq!(state.watchlist[0].group, "A股");
         assert!(state.monitor_rules[0].conditions.is_empty());
         assert_eq!(state.monitor_rules[0].logic, "AND");
@@ -1667,6 +1685,15 @@ mod tests {
             vec!["fundamental".to_string(), "monitor".to_string()]
         );
         assert!(state.workspace.saved_views.is_empty());
+    }
+
+    #[test]
+    fn missing_state_starts_empty_until_onboarding_is_completed() {
+        let state = first_run_user_state();
+        assert!(!state.onboarding_completed);
+        assert!(state.watchlist.is_empty());
+        assert!(state.monitor_rules.is_empty());
+        assert!(validate(&state).is_ok());
     }
 
     #[test]
