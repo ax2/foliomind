@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarDots, CaretLeft, CaretRight, CheckCircle, DownloadSimple, Funnel, Info, List, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, Bell, BellRinging, Briefcase, CalendarBlank, CalendarDots, CaretLeft, CaretRight, CheckCircle, Copy, DownloadSimple, Funnel, Info, List, MagnifyingGlass, Play, Plus, ShieldCheck, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { skills } from "../data/market.js";
 import { monitorTemplates, strategyFor } from "../data/monitorStrategies.js";
 import { apiKeyPrefix, applyIntegrationSettings, clearQVerisCredential, DATA_CHANNEL_OPTIONS, defaultIntegrationSettings, loadIntegrationStatus, queryCapabilityData, saveQVerisCredential, syncQVerisModels, testModelConnection as testModelGateway } from "../lib/integrations.js";
@@ -27,6 +27,7 @@ import { safeExternalUrl } from "../lib/urlSafety.js";
 import { loadRefreshPolicy, REFRESH_POLICIES, refreshPolicyConfig, saveRefreshPolicy } from "../lib/refreshPolicy.js";
 import { notificationCsv } from "../lib/notifications.js";
 import { useDialogFocus } from "../lib/useDialogFocus.js";
+import { MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS } from "../lib/workspace.js";
 
 const normalizeEndpoint = (value) => String(value ?? "").trim().replace(/\/+$/, "");
 const errorMessage = (error, fallback = "") => fallback ? friendlyDataMessage(error, fallback) : friendlySettingsMessage(error);
@@ -45,7 +46,6 @@ const planActionLabels = { created: "建立计划", adjusted: "调整参数", ex
 const MARKET_COLUMNS_STORAGE_KEY = "foliomind.market-columns.v1";
 const MARKET_VIEWS_STORAGE_KEY = "foliomind.market-views.v1";
 const CUSTOM_MARKET_VIEW_ID = "custom";
-const RESEARCH_SCREENS_STORAGE_KEY = "foliomind.research-screens.v1";
 const MARKET_COLUMN_DEFINITIONS = Object.freeze([
   { id: "price", label: "最新价" },
   { id: "change", label: "涨跌幅" },
@@ -62,29 +62,6 @@ const DEFAULT_MARKET_VIEWS = Object.freeze([
   { id: "trading", name: "交易盘面", columns: ["price", "change", "volume", "turnoverRate", "asOf"] },
   { id: "full", name: "完整字段", columns: MARKET_COLUMN_DEFINITIONS.map((column) => column.id) },
 ]);
-
-function loadResearchScreens() {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(RESEARCH_SCREENS_STORAGE_KEY) || "null");
-    if (!Array.isArray(stored)) return [];
-    const unique = new Map();
-    stored.forEach((screen) => {
-      const id = String(screen?.id || "");
-      const name = String(screen?.name || "").trim().slice(0, 32);
-      if (!id.startsWith("screen-") || !name) return;
-      unique.set(id, { id, name, filters: normalizeResearchFilters(screen?.filters) });
-    });
-    return [...unique.values()].slice(0, 10);
-  } catch { return []; }
-}
-
-function createResearchScreenId() {
-  const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID().slice(0, 8)
-    : Math.random().toString(36).slice(2, 10);
-  return `screen-${Date.now().toString(36)}-${suffix}`;
-}
 
 function normalizeMarketColumns(columns) {
   const allowed = new Set(MARKET_COLUMN_DEFINITIONS.map((column) => column.id));
@@ -184,6 +161,7 @@ export function PortfolioView() {
   const liveDataLoading = useLabStore((state) => state.liveDataLoading);
   const liveDataError = useLabStore((state) => state.liveDataError);
   const setActiveView = useLabStore((state) => state.setActiveView);
+  const requestEvidenceDrawer = useLabStore((state) => state.requestEvidenceDrawer);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -376,7 +354,7 @@ export function PortfolioView() {
       {portfolioReviews.length === 0 ? <p className="risk-empty">刷新持仓真实行情后生成第一份复盘；缺失行情不会被估算。</p> : <div className="portfolio-review-list">{portfolioReviews.slice(0, 12).map((review) => <details className="portfolio-review-card" key={review.id}><summary><div><strong>{review.tradingDate} 盘后复盘</strong><small>行情覆盖 {review.pricedCount}/{review.totalCount} · 数据截至 {review.asOf || "未知"}</small></div><div className={review.totalPnl == null ? "" : review.totalPnl >= 0 ? "up" : "down"}><strong>{money(review.totalPnl)}</strong><small>{review.totalPnlPercent == null ? "—" : formatPercent(review.totalPnlPercent)}</small></div></summary><div className="portfolio-review-body"><div className="portfolio-review-metrics"><article><span>组合市值</span><strong>{money(review.totalMarketValue)}</strong></article><article><span>表现最好</span><strong>{review.topGainer?.name || "—"}</strong><small>{review.topGainer?.pnlPercent == null ? "—" : formatPercent(review.topGainer.pnlPercent)}</small></article><article><span>表现最弱</span><strong>{review.topLoser?.name || "—"}</strong><small>{review.topLoser?.pnlPercent == null ? "—" : formatPercent(review.topLoser.pnlPercent)}</small></article></div>{review.riskSignals?.length ? <div className="portfolio-review-section"><strong>风险信号</strong>{review.riskSignals.map((signal, index) => <p key={`${review.id}-risk-${index}`}>{signal.title}：{signal.detail}</p>)}</div> : null}{review.upcomingEvents?.length ? <div className="portfolio-review-section"><strong>未来 7 天事件</strong>{review.upcomingEvents.map((event, index) => <p key={`${review.id}-event-${index}`}>{event.date} · {event.name} · {event.title}（{event.source}）</p>)}</div> : <p className="portfolio-review-empty">当前没有已返回的未来 7 天持仓事件。</p>}<p className="portfolio-review-sources">来源：{review.sources?.join("、") || "数据服务"} · {review.disclaimer}</p><button type="button" className="notification-link" onClick={() => deleteReview(review.id)}>删除本条复盘</button></div></details>)}</div>}
     </section>
     {positions.length > 0 && portfolioDataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={portfolioDataState} receivedCount={metrics.pricedCount} totalCount={metrics.totalCount} onRetry={() => { void refreshLiveData(); }} onCancel={cancelLiveDataRefresh} onSettings={() => setActiveView("settings")} /> : null}
-    {positions.length === 0 ? <div className="empty-state portfolio-empty"><Briefcase size={30} /><strong>还没有持仓</strong><p>添加持仓后，这里会汇总真实行情与盈亏。</p><button className="primary-action" onClick={openCreate}><Plus size={16} />添加第一笔持仓</button></div> : <section className="portfolio-table" aria-label="持仓明细"><div className="portfolio-table-toolbar"><div><h2>持仓明细</h2><small>显示 {filteredPortfolioRows.length}/{positions.length} 个持仓；排序只作用于当前结果，缺失值保持在末尾。</small></div><label className="portfolio-search"><span>搜索</span><input type="search" aria-label="搜索持仓" value={portfolioQuery} onChange={(event) => setPortfolioQuery(event.target.value)} placeholder="名称、代码或市场" /></label><label><span>计划</span><select aria-label="计划状态筛选" value={portfolioPlanFilter} onChange={(event) => setPortfolioPlanFilter(event.target.value)}><option value="all">全部</option><option value="active">跟踪中</option><option value="executed">已执行</option><option value="none">未建立</option></select></label><label><span>排序</span><select aria-label="持仓排序" value={portfolioSortKey} onChange={(event) => setPortfolioSortKey(event.target.value)}>{PORTFOLIO_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><button className="portfolio-sort-direction" type="button" disabled={portfolioSortKey === "default"} aria-label={portfolioSortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setPortfolioSortDirection((value) => value === "asc" ? "desc" : "asc")}>{portfolioSortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button></div>{filteredPortfolioRows.length === 0 ? <div className="portfolio-filter-empty" role="status"><Funnel size={22} /><strong>没有符合条件的持仓</strong><p>调整搜索词或计划筛选；持仓数据没有被删除。</p><button type="button" className="secondary-button" onClick={() => { setPortfolioQuery(""); setPortfolioPlanFilter("all"); }}>清除筛选</button></div> : <><div className="portfolio-table-head"><span>标的</span><span>数量</span><span>成本</span><span>现价</span><span>市值</span><span>未实现盈亏</span><span>占比</span><span>交易计划 / 提醒</span><span>操作</span></div>{filteredPortfolioRows.map((row) => <div className="portfolio-row" key={row.id}><span data-label="标的"><strong>{row.name}</strong><small>{row.symbol}{row.market ? ` · ${row.market}` : ""}</small></span><span data-label="数量">{row.quantity}</span><span data-label="成本">{money(row.averageCost)}</span><span data-label="现价">{money(row.currentPrice)}</span><span data-label="市值">{money(row.marketValue)}</span><span data-label="未实现盈亏" className={row.pnl == null ? "" : row.pnl >= 0 ? "up" : "down"}>{money(row.pnl)}{row.pnlPercent == null ? "" : ` (${formatPercent(row.pnlPercent)})`}</span><span data-label="占比">{row.weight == null ? "—" : formatPercent(row.weight, { signed: false })}</span><span data-label="交易计划 / 提醒" className="portfolio-alert-plan"><small className={`portfolio-plan-status ${row.planStatus || "none"}`}>{PORTFOLIO_PLAN_STATUSES.find((status) => status.id === row.planStatus)?.label || "未建立计划"}{row.planHorizon ? ` · ${PORTFOLIO_PLAN_HORIZONS.find((horizon) => horizon.id === row.planHorizon)?.label.split("（")[0] || row.planHorizon}` : ""}</small>{row.planThesis ? <small className="portfolio-plan-thesis" title={row.planThesis}>{row.planThesis}</small> : null}{row.planActions?.[0] ? <small className="portfolio-plan-action">最近：{planActionLabels[row.planActions[0].type] || "更新"} · {new Date(row.planActions[0].at).toLocaleDateString("zh-CN")}</small> : null}{row.takeProfitPrice == null && row.stopLossPrice == null ? <small>未设置价格提醒</small> : <>{row.takeProfitPrice != null && <small className={row.takeProfitTriggered ? "triggered" : ""}>止盈 {money(row.takeProfitPrice)}{row.takeProfitTriggered ? " · 已触发" : row.planProgress.targetDistancePercent == null ? "" : ` · 距 ${formatPercent(row.planProgress.targetDistancePercent)}`}</small>}{row.stopLossPrice != null && <small className={row.stopLossTriggered ? "triggered stop" : "stop"}>止损 {money(row.stopLossPrice)}{row.stopLossTriggered ? " · 已触发" : row.planProgress.stopDistancePercent == null ? "" : ` · 距 ${formatPercent(row.planProgress.stopDistancePercent)}`}</small>}</>}</span><span data-label="操作" className="portfolio-actions"><button className="icon-button" aria-label={`编辑${row.symbol}持仓`} onClick={() => openEdit(row)}>编辑</button>{row.planStatus === "active" && <button className="icon-button" aria-label={`标记${row.symbol}计划已执行`} onClick={() => { void markPlan(row, "executed"); }}>已执行</button>}{row.planStatus === "executed" && <button className="icon-button" aria-label={`重新跟踪${row.symbol}计划`} onClick={() => { void markPlan(row, "active"); }}>重启</button>}<button className="icon-button" aria-label={`删除${row.symbol}持仓`} onClick={() => { void deletePosition(row); }}>删除</button></span></div>)}</>}</section>}
+    {positions.length === 0 ? <div className="empty-state portfolio-empty"><Briefcase size={30} /><strong>还没有持仓</strong><p>添加持仓后，这里会汇总真实行情与盈亏。</p><button className="primary-action" onClick={openCreate}><Plus size={16} />添加第一笔持仓</button></div> : <section className="portfolio-table" aria-label="持仓明细"><div className="portfolio-table-toolbar"><div><h2>持仓明细</h2><small>显示 {filteredPortfolioRows.length}/{positions.length} 个持仓；排序只作用于当前结果，缺失值保持在末尾。</small></div><label className="portfolio-search"><span>搜索</span><input type="search" aria-label="搜索持仓" value={portfolioQuery} onChange={(event) => setPortfolioQuery(event.target.value)} placeholder="名称、代码或市场" /></label><label><span>计划</span><select aria-label="计划状态筛选" value={portfolioPlanFilter} onChange={(event) => setPortfolioPlanFilter(event.target.value)}><option value="all">全部</option><option value="active">跟踪中</option><option value="executed">已执行</option><option value="none">未建立</option></select></label><label><span>排序</span><select aria-label="持仓排序" value={portfolioSortKey} onChange={(event) => setPortfolioSortKey(event.target.value)}>{PORTFOLIO_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><button className="portfolio-sort-direction" type="button" disabled={portfolioSortKey === "default"} aria-label={portfolioSortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setPortfolioSortDirection((value) => value === "asc" ? "desc" : "asc")}>{portfolioSortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button></div>{filteredPortfolioRows.length === 0 ? <div className="portfolio-filter-empty" role="status"><Funnel size={22} /><strong>没有符合条件的持仓</strong><p>调整搜索词或计划筛选；持仓数据没有被删除。</p><button type="button" className="secondary-button" onClick={() => { setPortfolioQuery(""); setPortfolioPlanFilter("all"); }}>清除筛选</button></div> : <><div className="portfolio-table-head"><span>标的</span><span>数量</span><span>成本</span><span>现价</span><span>市值</span><span>未实现盈亏</span><span>占比</span><span>交易计划 / 提醒</span><span>操作</span></div>{filteredPortfolioRows.map((row) => <div className="portfolio-row" key={row.id}><span data-label="标的"><strong>{row.name}</strong><small>{row.symbol}{row.market ? ` · ${row.market}` : ""}</small></span><span data-label="数量">{row.quantity}</span><span data-label="成本">{money(row.averageCost)}</span><span data-label="现价">{money(row.currentPrice)}</span><span data-label="市值">{money(row.marketValue)}</span><span data-label="未实现盈亏" className={row.pnl == null ? "" : row.pnl >= 0 ? "up" : "down"}>{money(row.pnl)}{row.pnlPercent == null ? "" : ` (${formatPercent(row.pnlPercent)})`}</span><span data-label="占比">{row.weight == null ? "—" : formatPercent(row.weight, { signed: false })}</span><span data-label="交易计划 / 提醒" className="portfolio-alert-plan"><small className={`portfolio-plan-status ${row.planStatus || "none"}`}>{PORTFOLIO_PLAN_STATUSES.find((status) => status.id === row.planStatus)?.label || "未建立计划"}{row.planHorizon ? ` · ${PORTFOLIO_PLAN_HORIZONS.find((horizon) => horizon.id === row.planHorizon)?.label.split("（")[0] || row.planHorizon}` : ""}</small>{row.planThesis ? <small className="portfolio-plan-thesis" title={row.planThesis}>{row.planThesis}</small> : null}{row.planActions?.[0] ? <small className="portfolio-plan-action">最近：{planActionLabels[row.planActions[0].type] || "更新"} · {new Date(row.planActions[0].at).toLocaleDateString("zh-CN")}</small> : null}{row.takeProfitPrice == null && row.stopLossPrice == null ? <small>未设置价格提醒</small> : <>{row.takeProfitPrice != null && <small className={row.takeProfitTriggered ? "triggered" : ""}>止盈 {money(row.takeProfitPrice)}{row.takeProfitTriggered ? " · 已触发" : row.planProgress.targetDistancePercent == null ? "" : ` · 距 ${formatPercent(row.planProgress.targetDistancePercent)}`}</small>}{row.stopLossPrice != null && <small className={row.stopLossTriggered ? "triggered stop" : "stop"}>止损 {money(row.stopLossPrice)}{row.stopLossTriggered ? " · 已触发" : row.planProgress.stopDistancePercent == null ? "" : ` · 距 ${formatPercent(row.planProgress.stopDistancePercent)}`}</small>}</>}</span><span data-label="操作" className="portfolio-actions"><button className="icon-button" aria-label={`查看${row.symbol}行情证据`} onClick={() => { requestEvidenceDrawer(row); }}>证据</button><button className="icon-button" aria-label={`编辑${row.symbol}持仓`} onClick={() => openEdit(row)}>编辑</button>{row.planStatus === "active" && <button className="icon-button" aria-label={`标记${row.symbol}计划已执行`} onClick={() => { void markPlan(row, "executed"); }}>已执行</button>}{row.planStatus === "executed" && <button className="icon-button" aria-label={`重新跟踪${row.symbol}计划`} onClick={() => { void markPlan(row, "active"); }}>重启</button>}<button className="icon-button" aria-label={`删除${row.symbol}持仓`} onClick={() => { void deletePosition(row); }}>删除</button></span></div>)}</>}</section>}
     {dialogOpen && <div className="modal-backdrop" role="presentation"><form ref={portfolioDialogRef} className="modal-card portfolio-modal" role="dialog" aria-modal="true" aria-labelledby="portfolio-dialog-title" onSubmit={submit}><div className="modal-heading"><h2 id="portfolio-dialog-title">{editing ? "编辑持仓" : "添加持仓"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => setDialogOpen(false)}><X size={18} /></button></div><p className="modal-help">保存后会使用真实行情计算市值与未实现盈亏；达到提醒价只通知你，不会自动下单。</p><label>标的<select aria-label="持仓标的" value={form.symbol} onChange={(event) => selectSymbol(event.target.value)} required>{!form.symbol && <option value="">请选择标的</option>}{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}{editing && !watchlist.some((item) => item.symbol === editing.symbol) && <option value={editing.symbol}>{editing.name}（{editing.symbol}）</option>}</select></label><label>持仓数量<input aria-label="持仓数量" type="number" min="0.0001" step="any" value={form.quantity} onChange={(event) => setForm((value) => ({ ...value, quantity: event.target.value }))} required /></label><label>平均成本<input aria-label="平均成本" type="number" min="0.01" step="0.01" value={form.averageCost} onChange={(event) => setForm((value) => ({ ...value, averageCost: event.target.value }))} required /></label><div className="portfolio-alert-fields"><label>止盈价（可选）<input aria-label="止盈价" type="number" min="0.01" step="0.01" placeholder="达到后提醒" value={form.takeProfitPrice} onChange={(event) => setForm((value) => ({ ...value, takeProfitPrice: event.target.value }))} /></label><label>止损价（可选）<input aria-label="止损价" type="number" min="0.01" step="0.01" placeholder="跌破后提醒" value={form.stopLossPrice} onChange={(event) => setForm((value) => ({ ...value, stopLossPrice: event.target.value }))} /></label></div><div className="portfolio-plan-fields"><label>买入逻辑（可选）<textarea aria-label="买入逻辑" rows="3" maxLength="2000" placeholder="记录这笔交易想验证的逻辑" value={form.planThesis} onChange={(event) => setForm((value) => ({ ...value, planThesis: event.target.value }))} /></label><label>计划周期（可选）<select aria-label="计划周期" value={form.planHorizon} onChange={(event) => setForm((value) => ({ ...value, planHorizon: event.target.value }))}><option value="">请选择周期</option>{PORTFOLIO_PLAN_HORIZONS.map((horizon) => <option key={horizon.id} value={horizon.id}>{horizon.label}</option>)}</select></label></div>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-action" type="submit" disabled={busy}>{busy ? "保存中…" : "保存持仓"}</button></form></div>}
   </div>;
 }
@@ -514,6 +492,11 @@ export function ResearchView() {
   const liveDataLastRefreshAt = useLabStore((state) => state.liveDataLastRefreshAt);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const selectSymbol = useLabStore((state) => state.selectSymbol);
+  const requestMonitorComposer = useLabStore((state) => state.requestMonitorComposer);
+  const workspace = useLabStore((state) => state.workspace);
+  const saveResearchScreenState = useLabStore((state) => state.saveResearchScreen);
+  const duplicateResearchScreen = useLabStore((state) => state.duplicateResearchScreen);
+  const deleteResearchScreenState = useLabStore((state) => state.deleteResearchScreen);
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("all");
   const [onlyPriced, setOnlyPriced] = useState(false);
@@ -521,15 +504,12 @@ export function ResearchView() {
   const [sortDirection, setSortDirection] = useState("desc");
   const [filters, setFilters] = useState(() => normalizeResearchFilters(DEFAULT_RESEARCH_FILTERS));
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [researchScreens, setResearchScreens] = useState(loadResearchScreens);
+  const researchScreens = workspace.savedResearchScreens;
   const [activeScreenId, setActiveScreenId] = useState("custom");
   const [screenName, setScreenName] = useState("");
   const [screenNotice, setScreenNotice] = useState("");
   const realDataMode = hasRealDataAccess(integrationStatus);
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-  useEffect(() => {
-    try { window.localStorage.setItem(RESEARCH_SCREENS_STORAGE_KEY, JSON.stringify(researchScreens)); } catch { /* Storage may be disabled. */ }
-  }, [researchScreens]);
   const textFiltered = useMemo(() => watchlist.filter((item) => {
     const quote = quoteForSymbol(liveQuotes, item.symbol);
     const change = Number(quote?.change);
@@ -540,6 +520,8 @@ export function ResearchView() {
   const filtered = useMemo(() => filterResearchItems(textFiltered, liveQuotes, filters), [textFiltered, liveQuotes, filters]);
   const sorted = useMemo(() => sortResearchItems(filtered, liveQuotes, sortKey, sortDirection), [filtered, liveQuotes, sortKey, sortDirection]);
   const activeFilterCount = activeResearchFilterCount(filters);
+  const normalizedScreenName = screenName.trim().slice(0, 32);
+  const canSaveScreen = Boolean(normalizedScreenName) && (researchScreens.length < MAX_SAVED_RESEARCH_SCREENS || researchScreens.some((screen) => screen.name === normalizedScreenName));
   const returnedCount = watchlist.filter((item) => isValidQuotePrice(quoteForSymbol(liveQuotes, item.symbol)?.price)).length;
   const staleQuoteCount = watchlist.reduce((count, item) => {
     const quote = quoteForSymbol(liveQuotes, item.symbol);
@@ -570,32 +552,45 @@ export function ResearchView() {
     setActiveScreenId(selected.id);
     setScreenNotice(`已载入“${selected.name}”筛选`);
   };
-  const saveResearchScreen = (event) => {
+  const saveResearchScreen = async (event) => {
     event.preventDefault();
     const name = screenName.trim().slice(0, 32);
     if (!name) { setScreenNotice("请输入筛选名称"); return; }
-    const existing = researchScreens.find((screen) => screen.name === name);
-    if (!existing && researchScreens.length >= 10) { setScreenNotice("最多保存 10 个筛选，请删除不用的筛选后再试"); return; }
-    const id = existing?.id || createResearchScreenId();
-    const next = { id, name, filters: normalizeResearchFilters(filters) };
-    setResearchScreens((current) => existing ? current.map((screen) => screen.id === id ? next : screen) : [...current, next]);
-    setActiveScreenId(id);
-    setScreenName("");
-    setScreenNotice(`已保存“${name}”筛选`);
+    try {
+      const saved = await saveResearchScreenState({ name, filters });
+      setActiveScreenId(saved.id);
+      setScreenName("");
+      setScreenNotice(`已保存“${saved.name}”筛选`);
+    } catch (error) {
+      setScreenNotice(friendlyDataMessage(error, "筛选暂时无法保存，请稍后重试"));
+    }
   };
-  const deleteResearchScreen = () => {
+  const duplicateScreen = async () => {
     const selected = researchScreens.find((screen) => screen.id === activeScreenId);
     if (!selected) return;
-    setResearchScreens((current) => current.filter((screen) => screen.id !== selected.id));
-    setActiveScreenId("custom");
-    setScreenNotice(`已删除“${selected.name}”筛选`);
+    try {
+      const copy = await duplicateResearchScreen(selected.id);
+      if (copy) setScreenNotice(`已复制“${copy.name}”筛选`);
+    } catch (error) {
+      setScreenNotice(friendlyDataMessage(error, "筛选暂时无法复制，请稍后重试"));
+    }
+  };
+  const deleteResearchScreen = async () => {
+    const selected = researchScreens.find((screen) => screen.id === activeScreenId);
+    if (!selected) return;
+    try {
+      const deleted = await deleteResearchScreenState(selected.id);
+      if (deleted) { setActiveScreenId("custom"); setScreenNotice(`已删除“${selected.name}”筛选`); }
+    } catch (error) {
+      setScreenNotice(friendlyDataMessage(error, "筛选暂时无法删除，请稍后重试"));
+    }
   };
   return <div className="secondary-page research-page"><header><div><h1>研究筛选</h1><p>在我的自选中按真实行情筛选标的，不用示例数据填充。</p></div><button className="secondary-button" onClick={realDataMode ? liveDataLoading ? cancelLiveDataRefresh : retry : openSettings}><ArrowsClockwise size={16} />{realDataMode ? liveDataLoading ? "停止更新" : "刷新真实数据" : "配置数据"}</button></header>
     <div className="research-toolbar"><label className="search-box"><MagnifyingGlass size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、代码或市场…" aria-label="搜索标的" /></label><div className="filter-group" aria-label="涨跌方向"><button className={direction === "all" ? "active" : ""} onClick={() => setDirection("all")}>全部</button><button className={direction === "up" ? "active" : ""} onClick={() => setDirection("up")}>上涨</button><button className={direction === "down" ? "active" : ""} onClick={() => setDirection("down")}>下跌</button></div><button className={`filter-toggle${onlyPriced ? " active" : ""}`} aria-pressed={onlyPriced} onClick={() => setOnlyPriced((value) => !value)}><Funnel size={15} />仅显示有行情</button><button type="button" className={`filter-toggle${filtersOpen || activeFilterCount ? " active" : ""}`} aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}><Funnel size={15} />数值条件{activeFilterCount ? `（${activeFilterCount}）` : ""}</button><label className="research-sort-control"><span>排序</span><select aria-label="研究排序" value={sortKey} onChange={(event) => setSortKey(event.target.value)}>{RESEARCH_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><button className="research-sort-direction" type="button" disabled={sortKey === "default"} aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => setSortDirection((value) => value === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "升序 ↑" : "降序 ↓"}</button></div>
     {filtersOpen && <section className="research-filter-panel" aria-label="研究数值条件"><div className="research-filter-heading"><div><strong>真实行情条件</strong><small>只对已返回的真实字段生效；缺失字段不会被猜测。</small></div><button type="button" className="notification-link" onClick={clearResearchFilters} disabled={!activeFilterCount}>清除条件</button></div><div className="research-filter-grid">{RESEARCH_FILTER_FIELDS.map((field) => <label key={field.id} title={field.description}><span>{field.label}{field.suffix ? `（${field.suffix}）` : ""}</span><input type="number" step="any" inputMode="decimal" aria-label={field.label} value={filters[field.id]} onChange={(event) => updateResearchFilter(field.id, event.target.value)} placeholder="不限" /></label>)}</div></section>}
-    <div className="research-screen-bar"><label><span>已保存筛选</span><select aria-label="已保存研究筛选" value={activeScreenId} onChange={(event) => selectResearchScreen(event.target.value)}><option value="custom">临时条件</option>{researchScreens.map((screen) => <option value={screen.id} key={screen.id}>{screen.name}</option>)}</select></label><form onSubmit={saveResearchScreen}><input aria-label="筛选名称" maxLength={32} value={screenName} onChange={(event) => { setScreenName(event.target.value); setScreenNotice(""); }} placeholder="保存当前条件…" /><button type="submit" className="secondary-button">保存筛选</button></form>{activeScreenId !== "custom" && <button type="button" className="icon-button" aria-label="删除当前研究筛选" onClick={deleteResearchScreen}>删除</button>}{screenNotice && <span role="status">{screenNotice}</span>}</div>
+    <div className="research-screen-bar"><label><span>已保存筛选</span><select aria-label="已保存研究筛选" value={activeScreenId} onChange={(event) => selectResearchScreen(event.target.value)}><option value="custom">临时条件</option>{researchScreens.map((screen) => <option value={screen.id} key={screen.id}>{screen.name}</option>)}</select></label><form onSubmit={saveResearchScreen}><input aria-label="筛选名称" maxLength={32} value={screenName} onChange={(event) => { setScreenName(event.target.value); setScreenNotice(""); }} placeholder="保存当前条件…" /><button type="submit" className="secondary-button" disabled={!canSaveScreen}>保存筛选</button></form>{activeScreenId !== "custom" && <><button type="button" className="icon-button" aria-label="复制当前研究筛选" onClick={() => { void duplicateScreen(); }} disabled={researchScreens.length >= MAX_SAVED_RESEARCH_SCREENS}>复制</button><button type="button" className="icon-button" aria-label="删除当前研究筛选" onClick={() => { void deleteResearchScreen(); }}>删除</button></>}{screenNotice && <span role="status">{screenNotice}</span>}</div>
     {returnedCount > 0 && dataState !== DATA_STATES.SUCCESS ? <LiveDataState compact state={dataState} receivedCount={returnedCount} totalCount={watchlist.length} onRetry={retry} onCancel={cancelLiveDataRefresh} onSettings={openSettings} /> : null}
-    {returnedCount === 0 ? <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onCancel={cancelLiveDataRefresh} onSettings={openSettings} /> : sorted.length === 0 ? <DataState state="empty" title="没有符合条件的标的" description="调整搜索词或筛选条件后再试；已有真实行情不会被修改。" /> : <section className="research-table" aria-label="真实行情筛选结果"><div className="research-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>市盈率</span><span>市净率</span><span>数据时间</span></div>{sorted.map((item) => { const quote = quoteForSymbol(liveQuotes, item.symbol); const hasQuote = isValidQuotePrice(quote?.price); const freshness = quoteFreshness(quote?.asOf); return <div className="research-row" role="button" tabIndex="0" aria-label={`打开${item.name}详情`} onClick={(event) => openResearchSymbol(event, item.symbol)} onKeyDown={(event) => openResearchSymbol(event, item.symbol)} key={item.symbol}><span><strong title={item.name}>{item.name}</strong><small>{item.symbol} · {item.market || item.category}</small></span><span>{hasQuote ? formatPrice(quote.price) : "—"}</span><span className={changeToneClass(quote?.change)}>{formatPercent(quote?.change)}</span><span>{quote?.pe == null ? "—" : String(quote.pe)}</span><span>{quote?.pb == null ? "—" : String(quote.pb)}</span><span className={`quote-source quote-source-${freshness.state}`}>{hasQuote ? formatQuoteFreshness(quote.asOf, Date.now(), item.market) : "—"}</span></div>; })}</section>}
+    {returnedCount === 0 ? <LiveDataState state={dataState} receivedCount={0} totalCount={watchlist.length} onRetry={retry} onCancel={cancelLiveDataRefresh} onSettings={openSettings} /> : sorted.length === 0 ? <DataState state="empty" title="没有符合条件的标的" description="调整搜索词或筛选条件后再试；已有真实行情不会被修改。" /> : <section className="research-table" aria-label="真实行情筛选结果"><div className="research-table-head"><span>标的</span><span>最新价</span><span>涨跌幅</span><span>市盈率</span><span>市净率</span><span>数据时间</span><span>操作</span></div>{sorted.map((item) => { const quote = quoteForSymbol(liveQuotes, item.symbol); const hasQuote = isValidQuotePrice(quote?.price); const freshness = quoteFreshness(quote?.asOf); return <div className="research-row" key={item.symbol}><div className="research-row-main" role="button" tabIndex="0" aria-label={`打开${item.name}详情`} onClick={(event) => openResearchSymbol(event, item.symbol)} onKeyDown={(event) => openResearchSymbol(event, item.symbol)}><span><strong title={item.name}>{item.name}</strong><small>{item.symbol} · {item.market || item.category}</small></span><span>{hasQuote ? formatPrice(quote.price) : "—"}</span><span className={changeToneClass(quote?.change)}>{formatPercent(quote?.change)}</span><span>{quote?.pe == null ? "—" : String(quote.pe)}</span><span>{quote?.pb == null ? "—" : String(quote.pb)}</span><span className={`quote-source quote-source-${freshness.state}`}>{hasQuote ? formatQuoteFreshness(quote.asOf, Date.now(), item.market) : "—"}</span></div><button type="button" className="research-row-monitor" onClick={() => { requestMonitorComposer(item); }} aria-label={`为${item.name}创建盯盘`}>创建盯盘</button></div>; })}</section>}
     <p className="security-note">范围：我的自选 · 当前显示 {sorted.length}/{watchlist.length} 个标的 · {returnedCount} 个已返回行情{activeFilterCount ? ` · ${activeFilterCount} 个数值条件` : ""}{liveDataLastRefreshAt ? ` · 最近更新 ${new Date(liveDataLastRefreshAt).toLocaleTimeString("zh-CN")}` : ""}。估值字段缺失时保持空值。</p>
   </div>;
 }
@@ -614,12 +609,21 @@ function ConditionEditor({ condition, index, onChange, onRemove, canRemove }) {
   </div>;
 }
 
-function ConditionBuilder({ conditions, logic, onLogicChange, onConditionChange, onConditionRemove, onAddCondition, onApplyTemplate }) {
+function ConditionBuilder({ conditions, logic, savedTemplates, onLogicChange, onConditionChange, onConditionRemove, onAddCondition, onApplyTemplate, onSaveTemplate, onDuplicateTemplate, onDeleteTemplate, onReset }) {
+  const [templateName, setTemplateName] = useState("");
+  const normalizedTemplateName = templateName.trim().slice(0, 64);
+  const canSaveTemplate = Boolean(normalizedTemplateName) && (savedTemplates.length < MAX_SAVED_MONITOR_TEMPLATES || savedTemplates.some((template) => template.name === normalizedTemplateName));
+  const saveTemplate = async () => {
+    const saved = await onSaveTemplate(templateName, conditions, logic);
+    if (saved) setTemplateName("");
+  };
   return <div className="condition-builder">
     <div className="condition-builder-heading"><div><strong>触发条件</strong><small>缺失字段不会被当作触发；数据不足时自动保留待核实状态。</small></div><label>组合<select aria-label="条件组合逻辑" value={logic} onChange={(event) => onLogicChange(event.target.value)}><option value="AND">全部满足（AND）</option><option value="OR">任一满足（OR）</option></select></label></div>
     <div className="condition-list">{conditions.map((condition, index) => <ConditionEditor key={condition.id} condition={condition} index={index} onChange={(next) => onConditionChange(index, next)} onRemove={() => onConditionRemove(index)} canRemove={conditions.length > 1} />)}</div>
     <div className="condition-builder-actions"><button className="secondary-button" type="button" disabled={conditions.length >= 6} onClick={onAddCondition}><Plus size={15} />添加条件</button><span>{conditions.length}/6</span></div>
     <div className="condition-templates"><small>快速模板</small>{monitorTemplates.map((template) => <button key={template.id} type="button" onClick={() => onApplyTemplate(template)} title={template.description}>{template.name}</button>)}</div>
+    {savedTemplates.length > 0 && <div className="saved-monitor-templates"><small>我的模板</small>{savedTemplates.map((template) => <span key={template.id}><button type="button" className="saved-monitor-template-apply" onClick={() => onApplyTemplate(template)} aria-label={`应用盯盘模板${template.name}`} title={`应用${template.name}`}>{template.name}</button><button type="button" className="saved-monitor-template-copy" onClick={() => { void onDuplicateTemplate(template.id); }} aria-label={`复制盯盘模板${template.name}`} title={savedTemplates.length >= MAX_SAVED_MONITOR_TEMPLATES ? `已达到 ${MAX_SAVED_MONITOR_TEMPLATES} 个模板上限` : `复制${template.name}`} disabled={savedTemplates.length >= MAX_SAVED_MONITOR_TEMPLATES}><Copy size={13} /></button><button type="button" className="saved-monitor-template-delete" onClick={() => { void onDeleteTemplate(template.id); }} aria-label={`删除盯盘模板${template.name}`} title={`删除${template.name}`}><Trash size={13} /></button></span>)}</div>}
+    <div className="monitor-template-actions"><label><span>保存当前条件为模板</span><input aria-label="盯盘模板名称" maxLength={64} value={templateName} placeholder="例如：财报周观察" onChange={(event) => setTemplateName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void saveTemplate(); } }} /></label><button type="button" className="secondary-button" disabled={!canSaveTemplate} onClick={() => { void saveTemplate(); }}>保存为盯盘模板</button><button type="button" className="notification-link" onClick={onReset}>恢复默认条件</button></div>
   </div>;
 }
 
@@ -634,6 +638,12 @@ export function MonitorView() {
   const deleteRule = useLabStore((state) => state.deleteRule);
   const runMonitorCheck = useLabStore((state) => state.runMonitorCheck);
   const monitorBusy = useLabStore((state) => state.monitorBusy);
+  const workspace = useLabStore((state) => state.workspace);
+  const saveMonitorTemplateState = useLabStore((state) => state.saveMonitorTemplate);
+  const duplicateMonitorTemplate = useLabStore((state) => state.duplicateMonitorTemplate);
+  const deleteMonitorTemplate = useLabStore((state) => state.deleteMonitorTemplate);
+  const monitorComposerRequest = useLabStore((state) => state.monitorComposerRequest);
+  const clearMonitorComposerRequest = useLabStore((state) => state.clearMonitorComposerRequest);
   const setActiveView = useLabStore((state) => state.setActiveView);
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const realDataMode = hasRealDataAccess(integrationStatus);
@@ -647,6 +657,15 @@ export function MonitorView() {
   const [bulkNotice, setBulkNotice] = useState("");
   const [form, setForm] = useState(() => ({ scope: "symbol", symbol: watchlist[0]?.symbol || "600519", conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300, triggerMode: "edge", expiresAt: "" }));
   const { dialogRef: monitorDialogRef, captureFocus: captureMonitorFocus } = useDialogFocus(dialogOpen, () => { setDialogOpen(false); setEditingRule(null); });
+  useEffect(() => {
+    if (!monitorComposerRequest) return;
+    captureMonitorFocus();
+    setEditingRule(null);
+    setForm({ scope: "symbol", symbol: monitorComposerRequest.symbol, conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300, triggerMode: "edge", expiresAt: "" });
+    setActionError("");
+    setDialogOpen(true);
+    clearMonitorComposerRequest();
+  }, [clearMonitorComposerRequest, monitorComposerRequest]);
   useEffect(() => { if (form.scope === "symbol" && !watchlist.some((item) => item.symbol === form.symbol) && watchlist[0]) setForm((value) => ({ ...value, symbol: watchlist[0].symbol })); }, [watchlist, form.scope, form.symbol]);
   const selectedStrategy = strategyFor(conditionTypeFor(form.conditions[0]?.type).strategyId);
   const openCreate = () => {
@@ -693,6 +712,30 @@ export function MonitorView() {
   const removeCondition = (index) => setForm((value) => ({ ...value, conditions: value.conditions.filter((_, position) => position !== index) }));
   const addCondition = () => setForm((value) => ({ ...value, conditions: [...value.conditions, defaultConditionFor("price_change")] }));
   const applyTemplate = (template) => setForm((value) => ({ ...value, conditions: normalizeConditions(template.conditions), logic: template.logic, intervalSeconds: template.intervalSeconds }));
+  const saveTemplate = async (name, conditions, logic) => {
+    try {
+      const template = await saveMonitorTemplateState({ name, conditions, logic, intervalSeconds: form.intervalSeconds });
+      setBulkNotice(`已保存盯盘模板“${template.name}”`);
+      setActionError("");
+      return template;
+    } catch (cause) {
+      setActionError(errorMessage(cause, "盯盘模板暂时无法保存，请稍后重试"));
+      return null;
+    }
+  };
+  const duplicateTemplate = async (id) => {
+    try {
+      const template = await duplicateMonitorTemplate(id);
+      if (template) setBulkNotice(`已复制盯盘模板“${template.name}”`);
+    } catch (cause) { setActionError(errorMessage(cause, "盯盘模板暂时无法复制，请稍后重试")); }
+  };
+  const deleteTemplate = async (id) => {
+    try {
+      const deleted = await deleteMonitorTemplate(id);
+      if (deleted) setBulkNotice("已删除盯盘模板");
+    } catch (cause) { setActionError(errorMessage(cause, "盯盘模板暂时无法删除，请稍后重试")); }
+  };
+  const resetConditions = () => setForm((value) => ({ ...value, conditions: [defaultConditionFor("price_change")], logic: "AND", intervalSeconds: 300 }));
   const normalizedRuleQuery = ruleQuery.trim().toLocaleLowerCase("zh-CN");
   const visibleRules = useMemo(() => {
     const filtered = rules.filter((rule) => {
@@ -727,7 +770,7 @@ export function MonitorView() {
     {realDataMode ? <p className="security-note">检查结果会保留在本地审计时间线；缺失字段显示为“待核实”，不会当作未触发。历史记录最多保留 500 条。</p> : null}
     {bulkNotice ? <p className="settings-notice" role="status">{bulkNotice}</p> : null}
     {actionError ? <p className="form-error" role="alert">{actionError}</p> : null}
-    {dialogOpen && <div className="modal-backdrop" role="presentation"><form ref={monitorDialogRef} className="modal-card condition-modal" role="dialog" aria-modal="true" aria-labelledby="monitor-dialog-title" onSubmit={saveRule}><div className="modal-heading"><h2 id="monitor-dialog-title">{editingRule ? "编辑盯盘条件" : "新建盯盘条件"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => { setDialogOpen(false); setEditingRule(null); }}><X size={18} /></button></div><p className="modal-help">{editingRule ? "修改后会保留历史检查记录，但清除旧触发边沿；下一次真实数据检查完成后才会重新判断。" : "规则创建分三步：选择范围、组合真实数据条件、设定检查频率。自选组规则会跟随当前自选动态增删标的，并按标的独立去重。"}</p><label>监控范围<select aria-label="监控范围" value={form.scope} onChange={(event) => setForm((value) => ({ ...value, scope: event.target.value }))}><option value="symbol">单个标的</option><option value="watchlist">整个自选</option></select></label>{form.scope === "symbol" ? <label>标的<select aria-label="监控标的" value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}）</option>)}</select></label> : <p className="monitor-scope-note">将检查当前自选中的 {watchlist.length} 个标的；以后新增或删除自选会自动跟随。</p>}<ConditionBuilder conditions={form.conditions} logic={form.logic} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><label>触发方式<select aria-label="触发方式" value={form.triggerMode} onChange={(event) => setForm((value) => ({ ...value, triggerMode: event.target.value }))}>{MONITOR_TRIGGER_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}</select><small className="field-help">{MONITOR_TRIGGER_MODES.find((mode) => mode.id === form.triggerMode)?.description}</small></label><label>有效期（可选）<input aria-label="盯盘有效期" type="date" min={new Date().toISOString().slice(0, 10)} value={form.expiresAt} onChange={(event) => setForm((value) => ({ ...value, expiresAt: event.target.value }))} /><small className="field-help">到期后规则自动停用，不再发起数据请求；留空表示长期有效。</small></label><button className="primary-action" type="submit">{editingRule ? "保存修改" : "保存并启用"}</button></form></div>}
+    {dialogOpen && <div className="modal-backdrop" role="presentation"><form ref={monitorDialogRef} className="modal-card condition-modal" role="dialog" aria-modal="true" aria-labelledby="monitor-dialog-title" onSubmit={saveRule}><div className="modal-heading"><h2 id="monitor-dialog-title">{editingRule ? "编辑盯盘条件" : "新建盯盘条件"}</h2><button type="button" className="icon-button" aria-label="关闭" onClick={() => { setDialogOpen(false); setEditingRule(null); }}><X size={18} /></button></div><p className="modal-help">{editingRule ? "修改后会保留历史检查记录，但清除旧触发边沿；下一次真实数据检查完成后才会重新判断。" : "规则创建分三步：选择范围、组合真实数据条件、设定检查频率。自选组规则会跟随当前自选动态增删标的，并按标的独立去重。"}</p><label>监控范围<select aria-label="监控范围" value={form.scope} onChange={(event) => setForm((value) => ({ ...value, scope: event.target.value }))}><option value="symbol">单个标的</option><option value="watchlist">整个自选</option></select></label>{form.scope === "symbol" ? <label>标的<select aria-label="监控标的" value={form.symbol} onChange={(event) => setForm((value) => ({ ...value, symbol: event.target.value }))}>{watchlist.map((item) => <option key={item.symbol} value={item.symbol}>{item.name}（{item.symbol}{item.market ? ` · ${item.market}` : ""}）</option>)}</select></label> : <p className="monitor-scope-note">将检查当前自选中的 {watchlist.length} 个标的；以后新增或删除自选会自动跟随。</p>}<ConditionBuilder conditions={form.conditions} logic={form.logic} savedTemplates={workspace.savedMonitorTemplates} onLogicChange={(logic) => setForm((value) => ({ ...value, logic }))} onConditionChange={updateCondition} onConditionRemove={removeCondition} onAddCondition={addCondition} onApplyTemplate={applyTemplate} onSaveTemplate={saveTemplate} onDuplicateTemplate={duplicateTemplate} onDeleteTemplate={deleteTemplate} onReset={resetConditions} /><label>检查间隔<select value={form.intervalSeconds} onChange={(event) => setForm((value) => ({ ...value, intervalSeconds: event.target.value }))}><option value="60">每 60 秒</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="1800">每 30 分钟</option></select></label><label>触发方式<select aria-label="触发方式" value={form.triggerMode} onChange={(event) => setForm((value) => ({ ...value, triggerMode: event.target.value }))}>{MONITOR_TRIGGER_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}</select><small className="field-help">{MONITOR_TRIGGER_MODES.find((mode) => mode.id === form.triggerMode)?.description}</small></label><label>有效期（可选）<input aria-label="盯盘有效期" type="date" min={new Date().toISOString().slice(0, 10)} value={form.expiresAt} onChange={(event) => setForm((value) => ({ ...value, expiresAt: event.target.value }))} /><small className="field-help">到期后规则自动停用，不再发起数据请求；留空表示长期有效。</small></label><button className="primary-action" type="submit">{editingRule ? "保存修改" : "保存并启用"}</button></form></div>}
   </div>;
 }
 

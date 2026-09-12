@@ -71,7 +71,7 @@ export function EvidenceDrawer({ open, onClose, quote, symbol, name, market = ""
   return <div className="evidence-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
     <aside ref={drawerRef} className="evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-drawer-title">
       <header className="evidence-drawer-heading">
-        <div><span className="evidence-icon"><ShieldCheck size={20} /></span><div><h2 id="evidence-drawer-title">行情证据</h2><p>{name || symbol} · {symbol}</p></div></div>
+        <div><span className="evidence-icon"><ShieldCheck size={20} /></span><div><h2 id="evidence-drawer-title">行情证据</h2><p>{name || symbol} · {symbol}{market ? ` · ${market}` : ""}</p></div></div>
         <button ref={closeButton} type="button" className="icon-button" aria-label="关闭行情证据" onClick={onClose}><X size={18} /></button>
       </header>
       <section className={`evidence-status evidence-status-${state.id}`}><StateIcon size={19} weight={state.id === "fresh" ? "fill" : "regular"} /><div><strong>{state.label}</strong><small>{quote?.asOf ? formatQuoteFreshness(quote.asOf, Date.now(), market) : "返回真实行情后才会显示时间"}</small></div></section>

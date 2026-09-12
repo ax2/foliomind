@@ -381,8 +381,8 @@ describe("FolioMind core flows", () => {
     expect(table).not.toHaveTextContent("缺失估值");
     fireEvent.change(screen.getByRole("textbox", { name: "筛选名称" }), { target: { value: "低估值观察" } });
     fireEvent.click(screen.getByRole("button", { name: "保存筛选" }));
-    expect(screen.getByRole("status")).toHaveTextContent("已保存“低估值观察”筛选");
-    expect(JSON.parse(window.localStorage.getItem("foliomind.research-screens.v1"))).toHaveLength(1);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("已保存“低估值观察”筛选"));
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1);
     unmount();
     render(<ResearchView />);
     const selector = screen.getByRole("combobox", { name: "已保存研究筛选" });
@@ -394,7 +394,7 @@ describe("FolioMind core flows", () => {
   it("opens a research result with mouse and keyboard", () => {
     useLabStore.setState({ activeView: "research", selectedSymbol: "", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } } });
     const { container } = render(<ResearchView />);
-    const row = container.querySelector(".research-row");
+    const row = container.querySelector(".research-row-main");
     expect(row).toHaveAttribute("role", "button");
     fireEvent.keyDown(row, { key: "Escape" });
     expect(useLabStore.getState()).toMatchObject({ activeView: "research", selectedSymbol: "" });
@@ -406,6 +406,19 @@ describe("FolioMind core flows", () => {
     useLabStore.setState({ activeView: "research", selectedSymbol: "" });
     fireEvent.keyDown(row, { key: " " });
     expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+  });
+
+  it("opens the monitor composer with a research result", async () => {
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } }, rules: [], monitorComposerRequest: null });
+    render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: "为贵州茅台创建盯盘" }));
+    expect(useLabStore.getState()).toMatchObject({ activeView: "monitor", monitorComposerRequest: { symbol: "600519", name: "贵州茅台", market: "沪深" } });
+    render(<MonitorView />);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("新建盯盘条件");
+    expect(screen.getByRole("combobox", { name: "监控标的" })).toHaveValue("600519");
+    expect(screen.getByRole("option", { name: "贵州茅台（600519 · 沪深）" }).selected).toBe(true);
+    expect(useLabStore.getState().rules).toHaveLength(0);
+    expect(useLabStore.getState().monitorComposerRequest).toBeNull();
   });
 
   it("keeps a flat real quote visually neutral in the watchlist", () => {
@@ -728,6 +741,26 @@ describe("FolioMind core flows", () => {
     expect(screen.getAllByText(/最新价/).length).toBeGreaterThan(0);
   });
 
+  it("saves, applies, copies, and deletes a custom monitor template", async () => {
+    const persistUserState = vi.fn().mockResolvedValue(true);
+    useLabStore.setState({ userStateLoaded: true, persistUserState, workspace: { ...initialLabState.workspace, savedMonitorTemplates: [] } });
+    render(<MonitorView />);
+    fireEvent.click(screen.getByRole("button", { name: /新建盯盘/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "条件1类型" }), { target: { value: "core_event" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "盯盘模板名称" }), { target: { value: "财报观察" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存为盯盘模板" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedMonitorTemplates).toHaveLength(1));
+    expect(persistUserState).toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "条件1类型" }), { target: { value: "price_change" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用盯盘模板财报观察" }));
+    expect(screen.getByRole("combobox", { name: "条件1类型" })).toHaveValue("core_event");
+    fireEvent.click(screen.getByRole("button", { name: "复制盯盘模板财报观察" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedMonitorTemplates).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "删除盯盘模板财报观察 副本" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedMonitorTemplates).toHaveLength(1));
+  });
+
   it("creates a dynamic watchlist monitor rule", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /盯盘/ }));
@@ -868,6 +901,40 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
     expect(screen.getByText((content) => content.includes("显示 2/2 个持仓"))).toBeInTheDocument();
     expect(useLabStore.getState().portfolioPositions).toHaveLength(2);
+  });
+
+  it("opens portfolio evidence for a held symbol without mutating the portfolio", async () => {
+    const previousRefreshQuoteDetails = useLabStore.getState().refreshQuoteDetails;
+    const previousRefreshQuoteSeries = useLabStore.getState().refreshQuoteSeries;
+    const refreshQuoteDetails = vi.fn();
+    const refreshQuoteSeries = vi.fn();
+    useLabStore.setState({
+      ...initialLabState,
+      activeView: "portfolio",
+      userStateLoaded: true,
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }],
+      portfolioPositions: [{ id: "p1", symbol: "AAPL", name: "Apple", market: "NASDAQ", quantity: 2, averageCost: 100 }],
+      liveQuotes: { AAPL: { price: 120, change: 1, asOf: "2026-08-31T08:00:00Z", source: "真实 CAP" } },
+      liveDataLastRefreshAt: "2026-08-31T08:01:00Z",
+      refreshQuoteDetails,
+      refreshQuoteSeries,
+      evidenceDrawerRequest: null,
+    });
+    try {
+      render(<PortfolioView />);
+      fireEvent.click(screen.getByRole("button", { name: "查看AAPL行情证据" }));
+      expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "AAPL", evidenceDrawerRequest: { symbol: "AAPL", name: "Apple", market: "NASDAQ" } });
+      render(<StockWorkspace />);
+      expect(await screen.findByRole("dialog", { name: "行情证据" })).toHaveTextContent("Apple · AAPL");
+      expect(screen.getByRole("dialog")).toHaveTextContent("NASDAQ");
+      expect(refreshQuoteDetails).not.toHaveBeenCalled();
+      expect(refreshQuoteSeries).not.toHaveBeenCalled();
+      expect(useLabStore.getState().portfolioPositions).toHaveLength(1);
+      expect(useLabStore.getState().evidenceDrawerRequest).toBeNull();
+    } finally {
+      useLabStore.setState({ refreshQuoteDetails: previousRefreshQuoteDetails, refreshQuoteSeries: previousRefreshQuoteSeries });
+    }
   });
 
   it("keeps allocation and turnover percentages neutral while preserving change signs", () => {
@@ -1174,12 +1241,20 @@ describe("FolioMind core flows", () => {
       demo: false,
       environment: "local-host",
     });
+    const eventDate = new Date();
+    eventDate.setDate(eventDate.getDate() + 1);
+    const eventDateKey = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, "0")}-${String(eventDate.getDate()).padStart(2, "0")}`;
     useLabStore.setState({
       userStateLoaded: true,
+      integrationStatus: {
+        credentialConfigured: true,
+        settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", dataChannel: "qveris-cap", dataProvider: "qveris_finance" },
+        demo: false,
+      },
       eventDataLoaded: true,
       eventDataReceivedCount: 1,
       eventDataTotalCount: 1,
-      events: [{ id: "event-unsafe", date: "2026-09-10", symbol: "600519", name: "贵州茅台", type: "公告", title: "真实事件", detail: "真实事件说明", source: "真实事件源", url: "javascript:alert(1)" }],
+      events: [{ id: "event-unsafe", date: eventDateKey, symbol: "600519", name: "贵州茅台", type: "公告", title: "真实事件", detail: "真实事件说明", source: "真实事件源", url: "javascript:alert(1)" }],
     });
 
     render(<EventsView />);

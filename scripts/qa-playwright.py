@@ -67,7 +67,7 @@ async def main() -> None:
         research_state = page.locator(".research-page .data-state").first
         research_result = page.locator(".research-page .research-table").first
         if await research_state.count():
-            await expect(research_state).to_contain_text(re.compile("连接真实数据后开始|正在获取真实行情|尚无可用行情|暂时无法获取行情|部分行情暂未更新"))
+            await expect(research_state).to_contain_text(re.compile("连接真实数据后开始|正在获取真实行情|尚无可用行情|暂时无法获取行情|部分行情暂未更新|行情可能已延迟"))
         if await research_result.count():
             await expect(research_result).to_be_visible()
         checks.append({"flow": "真实数据筛选状态", "passed": True})
@@ -89,6 +89,13 @@ async def main() -> None:
         # stable action contract rather than a fixture-specific label.
         await expect(portfolio_rows.first.get_by_role("button", name=re.compile(r"^编辑.+持仓$"))).to_be_visible()
         await expect(portfolio_rows.first.get_by_role("button", name=re.compile(r"^删除.+持仓$"))).to_be_visible()
+        await portfolio_rows.first.get_by_role("button", name=re.compile(r"^查看.+行情证据$")).click()
+        evidence_drawer = page.get_by_role("dialog", name="行情证据")
+        await expect(evidence_drawer).to_be_visible()
+        await expect(evidence_drawer).to_contain_text("行情证据")
+        await page.get_by_role("button", name="关闭行情证据").click()
+        await expect(evidence_drawer).not_to_be_visible()
+        checks.append({"flow": "组合持仓证据入口", "passed": True})
         checks.append({"flow": "组合持仓操作闭环", "passed": True})
         checks.append({"flow": "组合工作区可用", "passed": True})
         await click_and_capture("盯盘", "implementation-monitor.png", "个股盯盘")
@@ -101,6 +108,11 @@ async def main() -> None:
             await page.get_by_text("触发条件", exact=True).wait_for()
             await expect(page.get_by_label("触发方式")).to_be_visible()
             await expect(page.get_by_label("盯盘有效期")).to_be_visible()
+            await page.get_by_label("盯盘模板名称").fill("__qa_monitor_template__")
+            await page.get_by_role("button", name="保存为盯盘模板", exact=True).click()
+            await expect(page.get_by_role("button", name="应用盯盘模板__qa_monitor_template__", exact=True)).to_be_visible()
+            await page.screenshot(path=OUTPUT / "implementation-monitor-template.png")
+            checks.append({"flow": "盯盘模板持久化入口", "passed": True})
             # Close the modal before navigating to another workspace so its
             # backdrop cannot intercept the next interaction.
             await page.locator(".condition-modal button[aria-label='关闭']").click()
@@ -186,6 +198,16 @@ async def main() -> None:
         await expect(page.get_by_role("searchbox", name="搜索自选")).to_have_value("")
         await expect(rows.first).to_be_visible()
         checks.append({"flow": "工作区偏好持久化与安全重置", "passed": True})
+        await page.get_by_role("button", name="自选工具", exact=True).click()
+        await page.get_by_role("textbox", name="新视图名称").fill("__qa_copy_source__")
+        await page.get_by_role("button", name="保存", exact=True).click()
+        source_copy_button = page.get_by_role("button", name="复制视图__qa_copy_source__", exact=True)
+        await expect(source_copy_button).to_be_visible()
+        await source_copy_button.click()
+        await expect(page.locator(".sidebar-feedback").filter(has_text="已复制视图")).to_be_visible()
+        await page.reload(wait_until="networkidle")
+        await expect(page.get_by_role("option", name=re.compile(r"__qa_copy_source__ 副本")).last).to_be_attached()
+        checks.append({"flow": "已保存视图复制入口", "passed": True})
         await page.reload(wait_until="networkidle")
         await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
         layout = await page.evaluate("""() => ({

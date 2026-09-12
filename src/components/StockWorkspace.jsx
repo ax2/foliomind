@@ -69,7 +69,10 @@ export function StockWorkspace() {
   const integrationStatus = useLabStore((state) => state.integrationStatus);
   const sendMessage = useLabStore((state) => state.sendMessage);
   const setActiveView = useLabStore((state) => state.setActiveView);
+  const evidenceDrawerRequest = useLabStore((state) => state.evidenceDrawerRequest);
+  const clearEvidenceDrawerRequest = useLabStore((state) => state.clearEvidenceDrawerRequest);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [evidenceContext, setEvidenceContext] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
   const [showGrid, setShowGrid] = useState(workspace.showGrid);
@@ -83,8 +86,15 @@ export function StockWorkspace() {
   const quote = quoteForSymbol(liveQuotes, symbol);
   const realDataMode = hasRealDataAccess(integrationStatus);
   const isWatched = watchlist.some((item) => item.symbol === symbol);
-  useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && !quoteDetailsLoading[symbol] && !quoteDetailsLoaded[symbol]) void refreshQuoteDetails(symbol); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, refreshQuoteDetails, quoteDetailsLoading, quoteDetailsLoaded]);
-  useEffect(() => { if (realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && quoteDetailsLoaded[symbol] && !quoteSeriesLoading[symbol]?.[chartRange] && !quoteSeriesLoaded[symbol]?.[chartRange]) void refreshQuoteSeries(symbol, chartRange); }, [realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, chartRange, refreshQuoteSeries, quoteDetailsLoaded, quoteSeriesLoading, quoteSeriesLoaded]);
+  const evidenceOnly = evidenceDrawerRequest?.symbol === symbol || evidenceContext?.symbol === symbol;
+  useEffect(() => {
+    if (!evidenceDrawerRequest || evidenceDrawerRequest.symbol !== symbol) return;
+    setEvidenceContext(evidenceDrawerRequest);
+    setEvidenceOpen(true);
+    clearEvidenceDrawerRequest();
+  }, [clearEvidenceDrawerRequest, evidenceDrawerRequest, symbol]);
+  useEffect(() => { if (!evidenceOnly && realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && !quoteDetailsLoading[symbol] && !quoteDetailsLoaded[symbol]) void refreshQuoteDetails(symbol); }, [evidenceOnly, realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, refreshQuoteDetails, quoteDetailsLoading, quoteDetailsLoaded]);
+  useEffect(() => { if (!evidenceOnly && realDataMode && userStateLoaded && liveDataLastRefreshAt && !liveDataLoading && quoteDetailsLoaded[symbol] && !quoteSeriesLoading[symbol]?.[chartRange] && !quoteSeriesLoaded[symbol]?.[chartRange]) void refreshQuoteSeries(symbol, chartRange); }, [evidenceOnly, realDataMode, userStateLoaded, liveDataLastRefreshAt, liveDataLoading, symbol, chartRange, refreshQuoteSeries, quoteDetailsLoaded, quoteSeriesLoading, quoteSeriesLoaded]);
   const hasQuote = isValidQuotePrice(quote?.price);
   const price = hasQuote ? quote.price : null;
   const change = hasQuote && Number.isFinite(quote.change) ? quote.change : null;
@@ -93,6 +103,9 @@ export function StockWorkspace() {
   const series = quote?.seriesByRange?.[chartRange] || (chartRange === "分时" ? quote?.series : []) || [];
   const provider = integrationStatus?.settings?.dataProvider || "qveris_finance";
   const channel = integrationStatus?.settings?.dataChannel || "qveris-cap";
+  const evidenceName = evidenceContext?.symbol === symbol ? evidenceContext.name : stock.name;
+  const evidenceMarket = evidenceContext?.symbol === symbol ? evidenceContext.market : stock.market;
+  const closeEvidence = () => { setEvidenceOpen(false); setEvidenceContext(null); };
   useEffect(() => {
     if (!liveDataLoading) return undefined;
     setLoadingNow(Date.now());
@@ -173,7 +186,7 @@ export function StockWorkspace() {
       <section className="fundamentals"><h3>关键指标 <small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "真实财务数据"}</small></h3><div>{[["营业收入", "revenue"], ["净利润", "netProfit"], ["毛利率", "grossMargin"], ["净利率", "netMargin"], ["ROE", "roe"]].map(([label, key]) => <dl key={key}><dt>{label}</dt><dd>{formatQuoteField(key, quote?.fundamentals?.[key] ?? quote?.fundamentals?.[label])}</dd><small>{quote?.reportPeriod ? `报告期 ${quote.reportPeriod}` : "查询详情后显示"}</small></dl>)}</div></section>
       <section className="company-intro"><h3>公司简介</h3><p>{quote?.companyDescription || (quoteDetailsError[symbol] ? "公司资料暂时未返回，系统会稍后自动重试。" : realDataMode ? liveDataLoading || !liveDataLastRefreshAt ? "正在获取公司简介；没有返回时保持空状态。" : "暂无已返回的真实公司简介。" : "配置数据服务后显示真实公司简介。")}</p>{quoteDetailsError[symbol] && <button onClick={() => { void retryQuoteDetails(symbol); }}>重新获取详情</button>}</section>
       <footer className="source-line">{integrationStatusLoading ? "正在确认数据连接；确认前不会显示示例行情。" : integrationStatusError ? "数据连接状态暂不可用；请到设置重试。" : realDataMode ? "仅显示已返回的真实数据；空值不会以示例数据填充。" : "当前为界面预览；保存 API Key 后将只显示真实数据。"}</footer>
-      <EvidenceDrawer open={evidenceOpen} onClose={() => setEvidenceOpen(false)} quote={quote} symbol={symbol} name={stock.name} market={stock.market} provider={realDataMode ? provider : "未配置"} channel={realDataMode ? channel : "未配置"} lastRefreshAt={liveDataLastRefreshAt} loading={Boolean(selectedQuoteLoading?.[symbol])} refreshLabel={realDataMode ? "重新获取当前行情" : "去设置"} onRefresh={() => realDataMode ? refreshSelectedQuote(symbol) : setActiveView("settings")} />
+      <EvidenceDrawer open={evidenceOpen} onClose={closeEvidence} quote={quote} symbol={symbol} name={evidenceName} market={evidenceMarket} provider={realDataMode ? provider : "未配置"} channel={realDataMode ? channel : "未配置"} lastRefreshAt={liveDataLastRefreshAt} loading={Boolean(selectedQuoteLoading?.[symbol])} refreshLabel={realDataMode ? "重新获取当前行情" : "去设置"} onRefresh={() => realDataMode ? refreshSelectedQuote(symbol) : setActiveView("settings")} />
     </main>
   );
 }

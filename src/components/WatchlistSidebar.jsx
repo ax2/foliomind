@@ -1,4 +1,4 @@
-import { ArrowCounterClockwise, CaretDown, CaretUp, DownloadSimple, DotsThree, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CaretDown, CaretUp, Copy, DownloadSimple, DotsThree, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { stocks } from "../data/market.js";
 import { normalizeWatchlistItem, parseWatchlistImport, sortWatchlistItems, watchlistCsv, WATCHLIST_SORT_OPTIONS } from "../lib/watchlist.js";
@@ -9,6 +9,7 @@ import { isDesktopRuntime } from "../lib/piRuntime.js";
 import { changeToneClass, formatCompactQuoteFreshness, formatQuoteFreshness, isValidQuotePrice, quoteForSymbol, quoteFreshness } from "../lib/quoteFormatting.js";
 import { useDialogFocus } from "../lib/useDialogFocus.js";
 import { useLabStore } from "../store/useLabStore.js";
+import { MAX_SAVED_WORKSPACE_VIEWS } from "../lib/workspace.js";
 
 async function readTextFile(file) {
   if (typeof file?.text === "function") return file.text();
@@ -59,6 +60,7 @@ export function WatchlistSidebar() {
   const setWorkspacePreference = useLabStore((state) => state.setWorkspacePreference);
   const resetWorkspacePreferences = useLabStore((state) => state.resetWorkspacePreferences);
   const saveWorkspaceView = useLabStore((state) => state.saveWorkspaceView);
+  const duplicateWorkspaceView = useLabStore((state) => state.duplicateWorkspaceView);
   const applyWorkspaceView = useLabStore((state) => state.applyWorkspaceView);
   const deleteWorkspaceView = useLabStore((state) => state.deleteWorkspaceView);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -166,6 +168,7 @@ export function WatchlistSidebar() {
       const view = await saveWorkspaceView(viewName);
       setViewName("");
       setFeedback(`已保存视图“${view.name}”`);
+      setToolsOpen(false);
     } catch (cause) { setError(friendlyDataMessage(cause, "视图暂时无法保存，请稍后重试")); }
   };
   const applyView = async (event) => {
@@ -178,6 +181,13 @@ export function WatchlistSidebar() {
   const removeView = async (id, name) => {
     try { await deleteWorkspaceView(id); setFeedback(`已删除视图“${name}”`); }
     catch (cause) { setError(friendlyDataMessage(cause, "视图暂时无法删除，请稍后重试")); }
+  };
+  const duplicateView = async (id) => {
+    setError("");
+    try {
+      const view = await duplicateWorkspaceView(id);
+      if (view) setFeedback(`已复制视图“${view.name}”`);
+    } catch (cause) { setError(friendlyDataMessage(cause, "视图暂时无法复制，请稍后重试")); }
   };
   const closeDialog = () => { setDialogOpen(false); setQuery(""); setError(""); setNewGroupMode(false); setNewGroupName(""); };
   const { dialogRef, captureFocus } = useDialogFocus(dialogOpen, closeDialog);
@@ -219,7 +229,7 @@ export function WatchlistSidebar() {
       <label><span>排序</span><select aria-label="自选排序" value={sortKey} onChange={(event) => { setSortKey(event.target.value); setWorkspacePreference("watchlistSort", event.target.value); }}>{WATCHLIST_SORT_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       {sortKey !== "custom" && <button type="button" className="watchlist-sort-direction" aria-label={sortDirection === "asc" ? "切换为降序" : "切换为升序"} onClick={() => { const next = sortDirection === "asc" ? "desc" : "asc"; setSortDirection(next); setWorkspacePreference("watchlistDirection", next); }}>{sortDirection === "asc" ? "升序" : "降序"}</button>}
     </div>
-    {workspace.savedViews.length > 0 && <div className="saved-workspace-views" aria-label="已保存工作区视图"><label><span>保存的视图</span><select aria-label="应用已保存视图" defaultValue="" onChange={applyView}><option value="">选择视图…</option>{workspace.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><div>{workspace.savedViews.map((view) => <button type="button" key={view.id} aria-label={`删除视图${view.name}`} title={`删除${view.name}`} onClick={() => { void removeView(view.id, view.name); }}>×</button>)}</div></div>}
+    {workspace.savedViews.length > 0 && <div className="saved-workspace-views" aria-label="已保存工作区视图"><label><span>保存的视图</span><select aria-label="应用已保存视图" defaultValue="" onChange={applyView}><option value="">选择视图…</option>{workspace.savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><div>{workspace.savedViews.map((view) => <span key={view.id} className="saved-view-actions"><button type="button" className="saved-view-copy" aria-label={`复制视图${view.name}`} title={workspace.savedViews.length >= MAX_SAVED_WORKSPACE_VIEWS ? `已达到 ${MAX_SAVED_WORKSPACE_VIEWS} 个视图上限` : `复制${view.name}`} disabled={workspace.savedViews.length >= MAX_SAVED_WORKSPACE_VIEWS} onClick={() => { void duplicateView(view.id); }}><Copy size={13} /></button><button type="button" className="saved-view-delete" aria-label={`删除视图${view.name}`} title={`删除${view.name}`} onClick={() => { void removeView(view.id, view.name); }}>×</button></span>)}</div></div>}
     {filterQuery && <p className="watchlist-search-result" role="status">已筛选 {groupedItems.reduce((count, [, items]) => count + items.length, 0)}/{normalizedWatchlist.length} 个标的</p>}
     {sortKey === "custom" && normalizedWatchlist.length > 1 && !filterQuery && <p className="watchlist-order-hint">自定义顺序 · 使用每行右侧箭头调整</p>}
     <div className="watch-groups">
