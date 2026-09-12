@@ -616,10 +616,10 @@ impl Default for UserState {
 }
 
 fn first_run_user_state() -> UserState {
-    let mut state = UserState::default();
-    state.onboarding_completed = false;
-    state.watchlist.clear();
-    state
+    UserState {
+        watchlist: Vec::new(),
+        ..UserState::default()
+    }
 }
 
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
