@@ -48,6 +48,7 @@ const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) =
 let persistenceQueue = Promise.resolve();
 let userStateHydrationPromise = null;
 let userStateHydrationGeneration = 0;
+let integrationStatusRequestGeneration = 0;
 let lastPersistedState = null;
 let lastLocalSnapshot = null;
 let liveRequestGeneration = 0;
@@ -70,6 +71,7 @@ const anomalyAttributionGenerations = new Map();
 // persistence cursor between cases. The running app never calls this helper.
 export function resetUserStatePersistence() {
   userStateHydrationGeneration += 1;
+  integrationStatusRequestGeneration += 1;
   persistenceQueue = Promise.resolve();
   userStateHydrationPromise = null;
   lastPersistedState = null;
@@ -698,14 +700,15 @@ export const useLabStore = create((set, get) => ({
     // status request is slow. Each later local save or peer signal wins.
     get().setIntegrationStatus(null, { credentialChanged: true });
     const generation = get().credentialGeneration;
+    const requestGeneration = ++integrationStatusRequestGeneration;
     set({ integrationStatusLoading: true });
     try {
       const status = await loadIntegrationStatus();
-      if (get().credentialGeneration !== generation) return false;
-      get().setIntegrationStatus(status);
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
+      get().setIntegrationStatus(status, { statusRequestGeneration: requestGeneration });
       return true;
     } catch {
-      if (get().credentialGeneration !== generation) return false;
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
       set({ integrationStatusLoading: false, integrationStatusError: "配置已在其他窗口变更，暂时无法读取最新配置，请重试" });
       return false;
     }
@@ -716,28 +719,31 @@ export const useLabStore = create((set, get) => ({
     // normal setIntegrationStatus boundary compares credential revision,
     // provider, endpoints and model settings and invalidates only on change.
     const generation = get().credentialGeneration;
+    const requestGeneration = ++integrationStatusRequestGeneration;
     try {
       const status = await loadIntegrationStatus();
-      if (get().credentialGeneration !== generation) return false;
-      get().setIntegrationStatus(status);
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
+      get().setIntegrationStatus(status, { statusRequestGeneration: requestGeneration });
       return true;
     } catch (error) {
-      if (get().credentialGeneration !== generation) return false;
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
       set({ integrationStatusError: friendlySettingsMessage(error) });
       return false;
     }
   },
   hydrateIntegrationStatus: async () => {
     const generation = get().credentialGeneration;
+    const requestGeneration = ++integrationStatusRequestGeneration;
     set({ integrationStatusLoading: true, integrationStatusError: "" });
     try {
       const status = await loadIntegrationStatus();
-      if (get().credentialGeneration === generation) get().setIntegrationStatus(status);
+      if (get().credentialGeneration === generation && requestGeneration === integrationStatusRequestGeneration) get().setIntegrationStatus(status, { statusRequestGeneration: requestGeneration });
     } catch (error) {
-      if (get().credentialGeneration === generation) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: friendlySettingsMessage(error) });
+      if (get().credentialGeneration === generation && requestGeneration === integrationStatusRequestGeneration) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: friendlySettingsMessage(error) });
     }
   },
-  setIntegrationStatus: (integrationStatus, { credentialChanged = false } = {}) => set((state) => {
+  setIntegrationStatus: (integrationStatus, { credentialChanged = false, statusRequestGeneration } = {}) => set((state) => {
+    if (statusRequestGeneration === undefined) integrationStatusRequestGeneration += 1;
     const changed = credentialChanged || dataChannelChanged(state.integrationStatus, integrationStatus);
     if (changed) {
       abortPendingDataRequests();

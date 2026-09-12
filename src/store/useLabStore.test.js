@@ -249,6 +249,24 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().integrationStatus).toEqual({ credentialConfigured: false });
   });
 
+  it("keeps the newest integration status read when responses arrive out of order", async () => {
+    let releaseOld;
+    let releaseNewest;
+    integration.loadStatus
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseNewest = resolve; }));
+
+    const oldRead = useLabStore.getState().refreshIntegrationStatus();
+    const newestRead = useLabStore.getState().refreshIntegrationStatus();
+    const newest = { credentialConfigured: true, keyPrefix: "new…", credentialRevision: "rev-new", settings: { modelId: "model-new" } };
+    releaseNewest(newest);
+    await expect(newestRead).resolves.toBe(true);
+
+    releaseOld({ credentialConfigured: true, keyPrefix: "old…", credentialRevision: "rev-old", settings: { modelId: "model-old" } });
+    await expect(oldRead).resolves.toBe(false);
+    expect(useLabStore.getState().integrationStatus).toEqual(newest);
+  });
+
   it("reconciles an unchanged Host snapshot without clearing live data", async () => {
     const status = { credentialConfigured: true, keyPrefix: "same…", credentialRevision: "rev-1", settings: { modelId: "model-a" } };
     useLabStore.setState({ integrationStatus: status, liveQuotes: { AAPL: { price: 100 } } });
