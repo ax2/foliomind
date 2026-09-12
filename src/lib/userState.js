@@ -29,7 +29,8 @@ export function parseUserStateBackup(raw) {
   const data = userStateBackupData(value.data);
   const rawInstalledSkillIds = value.data.installedSkillIds ?? value.data.installedSkills;
   const hasInstalledSkills = Array.isArray(rawInstalledSkillIds) && data.installedSkillIds.length > 0;
-  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length && !data.portfolioReviews.length && !data.premarketBriefing && !hasInstalledSkills && !data.briefingSchedule.enabled && !data.briefingSchedule.premarketEnabled) {
+  const hasWorkspaceData = data.workspace.savedViews.length > 0 || data.workspace.savedMonitorTemplates.length > 0 || data.workspace.savedResearchScreens.length > 0;
+  if (!data.watchlist.length && !data.monitorRules.length && !data.notifications.length && !data.portfolioPositions.length && !data.monitorHistory.length && !data.portfolioReviews.length && !data.premarketBriefing && !hasInstalledSkills && !data.briefingSchedule.enabled && !data.briefingSchedule.premarketEnabled && !hasWorkspaceData) {
     throw new Error("备份文件中没有可恢复的数据");
   }
   return data;

@@ -1642,15 +1642,18 @@ mod tests {
                 })],
                 interval_seconds: 300,
             });
-        state.workspace.saved_research_screens.push(SavedResearchScreen {
-            id: "screen-value".into(),
-            name: "低估值观察".into(),
-            filters: ResearchFilterPreferences {
-                max_pe: "24".into(),
-                max_pb: "3".into(),
-                ..ResearchFilterPreferences::default()
-            },
-        });
+        state
+            .workspace
+            .saved_research_screens
+            .push(SavedResearchScreen {
+                id: "screen-value".into(),
+                name: "低估值观察".into(),
+                filters: ResearchFilterPreferences {
+                    max_pe: "24".into(),
+                    max_pb: "3".into(),
+                    ..ResearchFilterPreferences::default()
+                },
+            });
         assert!(validate(&state).is_ok());
         let encoded = serde_json::to_value(&state).expect("workspace view should serialize");
         let restored: UserState =
@@ -1661,9 +1664,7 @@ mod tests {
             "回撤防守"
         );
         assert_eq!(
-            restored.workspace.saved_research_screens[0]
-                .filters
-                .max_pe,
+            restored.workspace.saved_research_screens[0].filters.max_pe,
             "24"
         );
         state.workspace.saved_views[0].preferences.watchlist_sort = "invalid".into();

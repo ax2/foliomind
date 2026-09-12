@@ -38,6 +38,40 @@ export function normalizeResearchFilters(value) {
   }));
 }
 
+function csvCell(value) {
+  let text = value == null ? "" : String(value);
+  if (typeof value === "string" && /^[=+@-]/.test(text)) text = `'${text}`;
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function csvNumber(value, { positive = false } = {}) {
+  if (value == null || String(value).trim() === "") return "";
+  const number = Number(value);
+  return Number.isFinite(number) && (!positive || number > 0) ? number : "";
+}
+
+/** Export only the current research result set; missing real fields remain blank. */
+export function researchResultsCsv(items, quotes = {}) {
+  const columns = ["代码", "名称", "市场", "最新价", "涨跌幅", "市盈率", "市净率", "成交量", "数据时间", "来源"];
+  const lines = [columns.map(csvCell).join(",")];
+  for (const item of Array.isArray(items) ? items : []) {
+    const quote = quoteForSymbol(quotes, item?.symbol);
+    lines.push([
+      item?.symbol || "",
+      item?.name || "",
+      item?.market || item?.category || "",
+      csvNumber(quote?.price, { positive: true }),
+      csvNumber(quote?.change),
+      csvNumber(quote?.pe),
+      csvNumber(quote?.pb),
+      csvNumber(quote?.volume, { positive: true }),
+      quote?.asOf || "",
+      quote?.source || "",
+    ].map(csvCell).join(","));
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
 /** Filter only by real quote fields; a configured bound excludes missing fields. */
 export function filterResearchItems(items, quotes = {}, filters = DEFAULT_RESEARCH_FILTERS) {
   const normalized = normalizeResearchFilters(filters);

@@ -1645,6 +1645,7 @@ textarea:focus-visible {
 .filter-group button + button { border-left: 1px solid #dfe2e7; }
 .filter-group button.active, .filter-toggle.active { background: var(--blue-soft); color: var(--blue); }
 .filter-toggle { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #dfe2e7; border-radius: 8px; }
+.filter-toggle:disabled { opacity: .45; cursor: not-allowed; }
 .research-filter-panel { margin-top: 12px; border: 1px solid #dce8f6; border-radius: 10px; padding: 14px; background: #fbfdff; }
 .research-filter-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .research-filter-heading strong { display: block; color: #2b3a4f; font-size: 12px; }

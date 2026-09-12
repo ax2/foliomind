@@ -110,6 +110,28 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().workspace).toBe(previous);
   });
 
+  it("saves, duplicates, and deletes a bounded research screen", async () => {
+    persistence.saveUserState.mockClear();
+    const saved = await useLabStore.getState().saveResearchScreen({ name: "低估值观察", filters: { maxPe: "15", maxPb: "2" } });
+    expect(saved).toMatchObject({ name: "低估值观察", filters: { maxPe: "15", maxPb: "2" } });
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1);
+
+    const copy = await useLabStore.getState().duplicateResearchScreen(saved.id);
+    expect(copy).toMatchObject({ name: "低估值观察 副本", filters: { maxPe: "15", maxPb: "2" } });
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(2);
+
+    await expect(useLabStore.getState().deleteResearchScreen(copy.id)).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1);
+    expect(persistence.saveUserState).toHaveBeenCalledTimes(3);
+  });
+
+  it("rolls back a research screen save when canonical persistence fails", async () => {
+    const previous = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().saveResearchScreen({ name: "失败筛选", filters: { minChange: "3" } })).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(previous);
+  });
+
   it("keeps user state unloaded and exposes a retry after a Host read failure", async () => {
     const error = new Error("Host unavailable");
     persistence.loadUserState.mockRejectedValueOnce(error).mockResolvedValueOnce({ revision: 8, watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });

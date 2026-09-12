@@ -71,6 +71,16 @@ async def main() -> None:
         if await research_result.count():
             await expect(research_result).to_be_visible()
         checks.append({"flow": "真实数据筛选状态", "passed": True})
+        await expect(page.get_by_role("button", name="导出结果", exact=True)).to_be_disabled()
+        checks.append({"flow": "研究结果导出真实数据门禁", "passed": True})
+        await page.get_by_label("筛选名称").fill("__qa_research_screen__")
+        await page.get_by_role("button", name="保存筛选", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_research_screen__", exact=True)).to_be_attached()
+        await expect(page.get_by_role("button", name="复制当前研究筛选", exact=True)).to_be_visible()
+        await page.screenshot(path=OUTPUT / "implementation-research-screen.png")
+        await page.get_by_role("button", name="复制当前研究筛选", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_research_screen__ 副本", exact=True)).to_be_attached()
+        checks.append({"flow": "研究筛选跨端持久化", "passed": True})
         await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")
         await expect(page.get_by_role("button", name="添加持仓", exact=True)).to_be_visible()
         # Seed one isolated QA position so the responsive portfolio action

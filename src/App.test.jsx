@@ -357,7 +357,6 @@ describe("FolioMind core flows", () => {
   });
 
   it("filters real valuation fields and persists a named research screen", async () => {
-    window.localStorage.removeItem("foliomind.research-screens.v1");
     useLabStore.setState({
       activeView: "research",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
@@ -389,6 +388,61 @@ describe("FolioMind core flows", () => {
     fireEvent.change(selector, { target: { value: selector.options[1].value } });
     fireEvent.click(screen.getByRole("button", { name: /数值条件/ }));
     expect(screen.getByRole("spinbutton", { name: "市盈率上限" })).toHaveValue(15);
+  });
+
+  it("copies and deletes a persisted research screen from the research bar", async () => {
+    const persistUserState = vi.fn().mockResolvedValue(true);
+    useLabStore.setState({
+      activeView: "research",
+      persistUserState,
+      workspace: { ...initialLabState.workspace, savedResearchScreens: [{ id: "screen-core", name: "核心筛选", filters: { maxPe: "15", maxPb: "" } }] },
+    });
+    render(<ResearchView />);
+    const selector = screen.getByRole("combobox", { name: "已保存研究筛选" });
+    fireEvent.change(selector, { target: { value: "screen-core" } });
+    fireEvent.click(screen.getByRole("button", { name: "复制当前研究筛选" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(2));
+    expect(useLabStore.getState().workspace.savedResearchScreens[0]).toMatchObject({ name: "核心筛选 副本", filters: { maxPe: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: "删除当前研究筛选" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1));
+    expect(useLabStore.getState().workspace.savedResearchScreens[0].name).toBe("核心筛选 副本");
+    expect(persistUserState).toHaveBeenCalledTimes(2);
+  });
+
+  it("exports only the current complete real research result set", async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn().mockReturnValue("blob:research");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    let downloadedName = "";
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function click() { downloadedName = this.download; });
+    useLabStore.setState({
+      activeView: "research",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "A", name: "Alpha", market: "沪深" }],
+      liveQuotes: { A: { price: 12.5, change: 2, pe: 10, pb: 1.2, volume: 100, asOf: "2026-09-12T08:00:00Z", source: "真实 CAP" } },
+    });
+    try {
+      render(<ResearchView />);
+      const button = screen.getByRole("button", { name: "导出结果" });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const [blob] = createObjectURL.mock.calls[0];
+      expect(blob).toBeInstanceOf(Blob);
+      expect(blob.size).toBeGreaterThan(0);
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+      expect(downloadedName).toMatch(/^foliomind-research-\d{4}-\d{2}-\d{2}\.csv$/);
+      await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:research"));
+    } finally {
+      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectURL });
+      else delete URL.createObjectURL;
+      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectURL });
+      else delete URL.revokeObjectURL;
+      anchorClick.mockRestore();
+    }
   });
 
   it("opens a research result with mouse and keyboard", () => {

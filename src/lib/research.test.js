@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeResearchFilterCount, filterResearchItems, sortResearchItems } from "./research.js";
+import { activeResearchFilterCount, filterResearchItems, researchResultsCsv, sortResearchItems } from "./research.js";
 
 describe("research sorting", () => {
   it("sorts valuation fields with missing values last and stable ties", () => {
@@ -35,5 +35,20 @@ describe("research numeric filters", () => {
     const crossMarketQuotes = { "600519": { price: 125, change: 2, pe: 20, pb: 3, volume: 10 }, AAPL: { price: 200, change: -1, pe: 30, pb: 5, volume: 20 } };
     expect(filterResearchItems(crossMarketItems, crossMarketQuotes, { minChange: "1" })).toEqual([crossMarketItems[0]]);
     expect(sortResearchItems(crossMarketItems, crossMarketQuotes, "price", "desc")).toEqual([crossMarketItems[1], crossMarketItems[0]]);
+  });
+
+  it("exports filtered research results with blank missing fields and safe cells", () => {
+    const csv = researchResultsCsv([
+      { symbol: "A", name: "=危险名称", market: "沪深" },
+      { symbol: "B", name: "普通标的", market: "港股" },
+    ], {
+      A: { price: 12.5, change: 2, pe: null, pb: 1.4, volume: 100, asOf: "2026-09-12T08:00:00Z", source: "真实 CAP" },
+      B: { price: 0, change: null, pe: "bad", pb: "", volume: -1 },
+    });
+    expect(csv).toContain("代码,名称,市场,最新价,涨跌幅,市盈率,市净率,成交量,数据时间,来源");
+    expect(csv).toContain("A,'=危险名称,沪深,12.5,2,,1.4,100,2026-09-12T08:00:00Z,真实 CAP");
+    const missingRow = csv.split("\r\n").find((line) => line.startsWith("B,"));
+    expect(missingRow?.split(",")).toEqual(["B", "普通标的", "港股", "", "", "", "", "", "", ""]);
+    expect(csv).not.toContain("quote");
   });
 });
