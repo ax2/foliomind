@@ -36,9 +36,11 @@ const stateFile = join(dataDir, "user-state.json");
 const stateBackupFile = join(dataDir, "user-state.json.backup");
 const MAX_USER_STATE_BYTES = 4 * 1024 * 1024;
 const STATE_LOCK_FILE_NAME = ".user-state.json.lock";
+const CREDENTIAL_LOCK_FILE_NAME = ".qveris-credential.lock";
 export const STATE_FILE_LOCK_TIMEOUT_MS = 5_000;
 export const STATE_FILE_LOCK_STALE_MS = 30_000;
 const STATE_FILE_LOCK_RETRY_MS = 25;
+export const CREDENTIAL_FILE_LOCK_TIMEOUT_MS = 5_000;
 const toolCacheFile = join(dataDir, "tool-selection-cache.json");
 const developerLogFile = join(dataDir, "developer-logs.ndjson");
 export const DEVELOPER_LOG_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
@@ -887,6 +889,7 @@ export async function atomicJson(path, value) {
 }
 
 function stateLockPath(path) { return join(dirname(path), STATE_LOCK_FILE_NAME); }
+function credentialLockPath() { return join(dataDir, CREDENTIAL_LOCK_FILE_NAME); }
 
 function stateLockBusyError() {
   const error = new Error("用户状态正在被其它 FolioMind 进程保存，请稍后重试");
@@ -914,8 +917,7 @@ async function removeStaleStateLock(lockPath) {
  * The lock file is deliberately tiny and token-owned so a stale-owner cleanup
  * cannot remove a newer owner's lock during a release race.
  */
-export async function acquireStateFileLock(path = stateFile, { timeoutMs = STATE_FILE_LOCK_TIMEOUT_MS, retryMs = STATE_FILE_LOCK_RETRY_MS } = {}) {
-  const lockPath = stateLockPath(path);
+async function acquireFileLock(lockPath, { timeoutMs = STATE_FILE_LOCK_TIMEOUT_MS, retryMs = STATE_FILE_LOCK_RETRY_MS, busyError = stateLockBusyError } = {}) {
   const token = `${process.pid}:${randomUUID()}`;
   const startedAt = Date.now();
   await mkdir(dirname(lockPath), { recursive: true });
@@ -942,36 +944,73 @@ export async function acquireStateFileLock(path = stateFile, { timeoutMs = STATE
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       if (await removeStaleStateLock(lockPath)) continue;
-      if (Date.now() - startedAt >= timeoutMs) throw stateLockBusyError();
+      if (Date.now() - startedAt >= timeoutMs) throw busyError();
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
   }
 }
-async function readKey() {
+export async function acquireStateFileLock(path = stateFile, options = {}) {
+  return acquireFileLock(stateLockPath(path), options);
+}
+function credentialLockBusyError() {
+  const error = new Error("凭据正在被其它 FolioMind 进程保存，请稍后重试");
+  error.status = 409;
+  error.code = "CREDENTIAL_BUSY";
+  return error;
+}
+export async function acquireCredentialFileLock(options = {}) {
+  return acquireFileLock(credentialLockPath(), { timeoutMs: CREDENTIAL_FILE_LOCK_TIMEOUT_MS, ...options, busyError: credentialLockBusyError });
+}
+async function readKeyUnlocked() {
   try { const value = (await readFile(credentialFile, "utf8")).trim(); if (value) return value; } catch { /* first run */ }
   return String(process.env.QVERIS_API_KEY || "").trim() || null;
 }
-async function readCredentialRevision() {
+async function readCredentialRevisionUnlocked() {
   try {
     const value = (await readFile(credentialRevisionFile, "utf8")).trim();
     if (value) return value;
   } catch { /* legacy installs receive a revision on the next write */ }
   return "legacy";
 }
-async function writeCredentialRevision() {
+async function readCredentialSnapshot() {
+  const release = await acquireCredentialFileLock();
+  try {
+    return { key: await readKeyUnlocked(), credentialRevision: await readCredentialRevisionUnlocked() };
+  } finally {
+    await release();
+  }
+}
+async function writePrivateText(path, value) {
   await mkdir(dataDir, { recursive: true });
-  const value = `${randomUUID()}\n`;
-  await writeFile(credentialRevisionFile, value, { encoding: "utf8", mode: 0o600 });
-  try { await chmod(credentialRevisionFile, 0o600); } catch { /* Windows has no POSIX mode. */ }
-  return value.trim();
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(tmp, value, { encoding: "utf8", mode: 0o600 });
+  await rename(tmp, path);
+  try { await chmod(path, 0o600); } catch { /* Windows has no POSIX mode. */ }
+}
+async function writeCredentialRevisionUnlocked() {
+  const value = `${randomUUID()}`;
+  await writePrivateText(credentialRevisionFile, `${value}\n`);
+  return value;
 }
 async function saveKey(value) {
-  await mkdir(dataDir, { recursive: true });
-  await writeFile(credentialFile, `${value.trim()}\n`, { encoding: "utf8", mode: 0o600 });
-  try { await chmod(credentialFile, 0o600); } catch { /* Windows has no POSIX mode. */ }
-  await writeCredentialRevision();
+  const release = await acquireCredentialFileLock();
+  try {
+    await writePrivateText(credentialFile, `${value.trim()}\n`);
+    return await writeCredentialRevisionUnlocked();
+  } finally {
+    await release();
+  }
 }
-async function deleteKey() { try { await unlink(credentialFile); } catch { /* idempotent */ } await writeCredentialRevision(); }
+async function deleteKey() {
+  const release = await acquireCredentialFileLock();
+  try {
+    try { await unlink(credentialFile); } catch { /* idempotent */ }
+    return await writeCredentialRevisionUnlocked();
+  } finally {
+    await release();
+  }
+}
+async function readKey() { return readKeyUnlocked(); }
 function apiKeyPrefix(value) { const key = String(value || "").trim(); return key ? `${key.slice(0, 8)}${key.length > 8 ? "…" : ""}` : ""; }
 function saveUserStateIfRevision(input) {
   const task = userStateMutationQueue.catch(() => {}).then(async () => {
@@ -1396,9 +1435,9 @@ async function route(req, body, requestSignal) {
   if (method === "GET" && path === "/api/health") return { ok: true, service: "foliomind-dev-host", mode: "standalone" };
   if (method === "GET" && path === "/api/session") return { token, service: "foliomind-dev-host", mode: "standalone" };
   requireSession(req);
-  if (method === "GET" && path === "/api/integration/status") { const key = await readKey(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), credentialRevision: await readCredentialRevision(), settings: await readSettings() }; }
-  if (method === "POST" && path === "/api/integration/credential") { if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) throw new Error("API Key 无效"); await saveKey(body.apiKey); await clearToolCache(); return { configured: true, keyPrefix: apiKeyPrefix(body.apiKey), credentialRevision: await readCredentialRevision() }; }
-  if (method === "DELETE" && path === "/api/integration/credential") { await deleteKey(); await clearToolCache(); return { configured: false, keyPrefix: "", credentialRevision: await readCredentialRevision() }; }
+  if (method === "GET" && path === "/api/integration/status") { const { key, credentialRevision } = await readCredentialSnapshot(); return { credentialConfigured: Boolean(key), keyPrefix: apiKeyPrefix(key), credentialRevision, settings: await readSettings() }; }
+  if (method === "POST" && path === "/api/integration/credential") { if (typeof body.apiKey !== "string" || body.apiKey.trim().length < 8) throw new Error("API Key 无效"); const credentialRevision = await saveKey(body.apiKey); await clearToolCache(); return { configured: true, keyPrefix: apiKeyPrefix(body.apiKey), credentialRevision }; }
+  if (method === "DELETE" && path === "/api/integration/credential") { const credentialRevision = await deleteKey(); await clearToolCache(); return { configured: false, keyPrefix: "", credentialRevision }; }
   if (method === "POST" && path === "/api/integration/models/sync") {
     const input = body.input || {}; const key = await readKey(); if (!key) throw new Error("QVeris credential is not configured");
     const previous = await readSettings();

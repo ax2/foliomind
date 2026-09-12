@@ -145,6 +145,35 @@ test("Local Host accepts an explicitly completed empty workspace", async (contex
   assert.deepEqual(restored.payload.watchlist, []);
 });
 
+test("two Local Hosts serialize credential writes and keep revision pairs consistent", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-lock-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const first = await startHost(dataDir);
+  const second = await startHost(dataDir);
+  context.after(async () => {
+    await stopHost(first.child);
+    await stopHost(second.child);
+  });
+
+  const keys = [
+    "sk_alpha_1234567890",
+    "sk_bravo_1234567890",
+    "sk_charlie_1234567890",
+    "sk_delta_1234567890",
+    "sk_echo_1234567890",
+    "sk_foxtrot_1234567890",
+    "sk_golf_1234567890",
+    "sk_hotel_1234567890",
+  ];
+  const results = await Promise.all(keys.map((apiKey, index) => hostRequest(index % 2 ? second : first, "/api/integration/credential", { method: "POST", body: { apiKey } })));
+  assert.ok(results.every(({ response }) => response.status === 200));
+  const savedPairs = new Set(results.map(({ payload }) => `${payload.keyPrefix}|${payload.credentialRevision}`));
+
+  const finalStatus = await hostRequest(first, "/api/integration/status");
+  assert.equal(finalStatus.response.status, 200);
+  assert.ok(savedPairs.has(`${finalStatus.payload.keyPrefix}|${finalStatus.payload.credentialRevision}`));
+});
+
 test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-lock-"));
   context.after(() => rm(dataDir, { recursive: true, force: true }));
