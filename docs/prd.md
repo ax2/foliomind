@@ -3038,7 +3038,7 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 **范围与边界**：
 
 - Windows/macOS 桌面 CI 显式运行被 `#[ignore]` 保护的 Rust 烟测；测试为每次运行生成随机 service/account，不使用生产 `SERVICE`/`ACCOUNT`，并通过 `FOLIOMIND_KEYRING_SMOKE=1` opt-in，普通 `cargo test` 不接触平台凭据。
-- 烟测写入第一个临时值，从包装后的 `OsCredentialStore` 读取，再用第二个独立 `keyring::Entry` 句柄更新同一条平台凭据，确认包装层读取新值且 `credential_revision` 变化，随后删除并确认不存在；测试输出不得包含凭据内容。
-- 该测试覆盖平台 keyring 的真实写入、读取、更新和删除，以及同进程独立句柄的新鲜读取；不宣称已覆盖用户通过 Keychain/Credential Manager GUI 或其它进程修改、休眠恢复、签名/公证、真实用户凭据和跨版本 schema 迁移，这些仍需对应平台真机验收。
+- 烟测写入第一个临时值，从包装后的 `OsCredentialStore` 读取，再由真正的子进程更新同一条平台凭据，确认包装层读取新值且 `credential_revision` 变化，随后删除并确认不存在；测试输出不得包含凭据内容。
+- 该测试覆盖平台 keyring 的真实写入、读取、独立进程更新和删除，以及新鲜 revision 读取；不宣称已覆盖用户通过 Keychain/Credential Manager GUI 或其它工具修改、休眠恢复、签名/公证、真实用户凭据和跨版本 schema 迁移，这些仍需对应平台真机验收。
 
-**验收标准**：普通桌面 CI 与正式 Release CI 的 Windows/macOS job 均通过原生 keyring 烟测；测试条目随机隔离、清理自身凭据、没有生产账号和密钥日志；架构审查、Rust 格式检查、Node 测试及构建门禁继续通过。
+**验收标准**：普通桌面 CI 与正式 Release CI 的 Windows/macOS job 均通过原生 keyring 烟测；测试条目随机隔离、独立进程成功更新、清理自身凭据、没有生产账号和密钥日志；架构审查、Rust 格式检查、Node 测试及构建门禁继续通过。

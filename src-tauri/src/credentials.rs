@@ -280,14 +280,24 @@ mod tests {
             assert_eq!(store.read_qveris_key()?.as_deref(), Some(first));
             let first_revision = credential_revision(Some(first)).unwrap();
 
-            // A separate Entry handle models another process or desktop
-            // integration writing the same native credential. The wrapper
-            // must read the fresh value and derive a new non-sensitive revision.
-            let external = keyring::Entry::new(&service, &account)
-                .map_err(|error| format!("cannot create external keyring handle: {error}"))?;
-            external
-                .set_password(second)
-                .map_err(|error| format!("cannot update external keyring handle: {error}"))?;
+            // A separate process writes the same native credential. The
+            // wrapper must read the fresh value and derive a new
+            // non-sensitive revision.
+            let writer = std::process::Command::new(std::env::current_exe().map_err(|error| {
+                format!("cannot locate keyring smoke test executable: {error}")
+            })?)
+            .arg("os_keyring_external_writer")
+            .arg("--ignored")
+            .arg("--exact")
+            .env("FOLIOMIND_KEYRING_SMOKE", "1")
+            .env("FOLIOMIND_KEYRING_SMOKE_SERVICE", &service)
+            .env("FOLIOMIND_KEYRING_SMOKE_ACCOUNT", &account)
+            .env("FOLIOMIND_KEYRING_SMOKE_VALUE", second)
+            .status()
+            .map_err(|error| format!("cannot start external keyring writer: {error}"))?;
+            if !writer.success() {
+                return Err(format!("external keyring writer exited with {writer:?}"));
+            }
             assert_eq!(store.read_qveris_key()?.as_deref(), Some(second));
             assert_ne!(Some(first_revision), credential_revision(Some(second)));
 
@@ -298,5 +308,24 @@ mod tests {
 
         let _ = store.delete_qveris_key();
         result.unwrap();
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "invoked by the platform keyring smoke in a child process"]
+    fn os_keyring_external_writer() {
+        assert_eq!(
+            std::env::var("FOLIOMIND_KEYRING_SMOKE").as_deref(),
+            Ok("1"),
+            "set FOLIOMIND_KEYRING_SMOKE=1 to run the platform keyring smoke"
+        );
+        let service = std::env::var("FOLIOMIND_KEYRING_SMOKE_SERVICE")
+            .expect("keyring smoke service is required");
+        let account = std::env::var("FOLIOMIND_KEYRING_SMOKE_ACCOUNT")
+            .expect("keyring smoke account is required");
+        let value = std::env::var("FOLIOMIND_KEYRING_SMOKE_VALUE")
+            .expect("keyring smoke value is required");
+        let entry = keyring::Entry::new(&service, &account).unwrap();
+        entry.set_password(&value).unwrap();
     }
 }

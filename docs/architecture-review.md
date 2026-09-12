@@ -5,9 +5,9 @@
 结论：继续演进。
 
 - 过去的桌面凭据证据主要来自 Rust 代码检查与跨端 revision 契约，无法证明 Windows Credential Manager 或 macOS Keychain 的实际读写链路在 CI runner 上可用。
-- 现在普通桌面 CI 与正式 Release CI 的 Windows/macOS job 均显式运行隔离的原生 keyring 烟测：随机 service/account 通过 `OsCredentialStore` 写入和读取，再由第二个 keyring 句柄更新，确认新值和新的 SHA-256 revision 可被重新读到，最后清理自身条目。
+- 现在普通桌面 CI 与正式 Release CI 的 Windows/macOS job 均显式运行隔离的原生 keyring 烟测：随机 service/account 通过 `OsCredentialStore` 写入和读取，再由真正的子进程更新同一条平台凭据，确认新值和新的 SHA-256 revision 可被重新读到，最后清理自身条目。
 - 烟测受 `FOLIOMIND_KEYRING_SMOKE=1` 和 `#[ignore]` 双重门禁保护，正常 Rust 测试不触碰生产凭据；测试值不进入输出，生产 `SERVICE`/`ACCOUNT` 不会被使用。
-- 该证据覆盖平台 keyring 的基本往返与新鲜读取，不替代 GUI/其它进程外部修改、休眠恢复、签名/公证、真实用户凭据或 schema 迁移验收；这些仍是上市前的平台手工缺口。
+- 该证据覆盖平台 keyring 的基本往返与独立进程新鲜读取，不替代 GUI/其它工具外部修改、休眠恢复、签名/公证、真实用户凭据或 schema 迁移验收；这些仍是上市前的平台手工缺口。
 
 ## 最近一次专项 Review（2026-09-12 · Stage 3GN）
 
