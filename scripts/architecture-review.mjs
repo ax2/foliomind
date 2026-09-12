@@ -13,6 +13,8 @@ const [packageJson, cargoToml, tauriConfig, app, errorBoundary, stockWorkspace, 
 ]);
 const quoteFormatting = await load("src/lib/quoteFormatting.js");
 const desktopWorkflow = await load(".github/workflows/desktop.yml");
+const installerSmokeWindows = await load("scripts/installer-smoke.ps1");
+const installerSmokeMacos = await load("scripts/installer-smoke-macos.sh");
 const dataStateComponent = await load("src/components/DataState.jsx");
 const marketData = await load("src/data/market.js");
 const workspaceModule = await load("src/lib/workspace.js");
@@ -78,6 +80,7 @@ check("离线状态提示", app.includes("navigator.onLine") && app.includes("of
 check("主干版本自动发布", workflow.includes("push:") && workflow.includes("REQUESTED_VERSION") && workflow.includes("should_release=false") && workflow.includes("should_release=$should_release") && prd.includes("Stage 3EX 主干版本自动发布") && readme.includes("版本提交后自动运行"), "版本提交到 main 后应自动发布；同版本已发布时安全跳过，手工触发仍保持可用");
 check("发布前 Web QA 门禁", workflow.includes("web-qa:") && workflow.includes("scripts/qa-playwright.py") && workflow.includes("needs: [prepare, web-qa]"), "桌面安装包构建前必须通过隔离 Web/Local Host Playwright 回归，并保留失败证据");
 check("安装升级路径", tauriConfig.bundle?.windows?.allowDowngrades === false && tauriConfig.bundle?.windows?.nsis?.installMode === "currentUser" && Boolean(tauriConfig.bundle?.windows?.wix?.upgradeCode) && readme.includes("不要求用户先手动卸载"), "Windows 同一产品必须覆盖升级、阻止降级并保留用户配置");
+check("安装包交付烟测", workflow.includes("Smoke test Windows installer") && workflow.includes("Smoke test macOS DMG") && desktopWorkflow.includes("Smoke test Windows installer") && desktopWorkflow.includes("Smoke test macOS DMG") && installerSmokeWindows.includes("msiexec.exe") && installerSmokeWindows.includes("uninstall.exe") && installerSmokeMacos.includes("hdiutil attach") && installerSmokeMacos.includes("hdiutil detach") && prd.includes("Stage 3GM 安装包交付烟测"), "跨平台桌面构建必须在上传资产前完成 Windows 安装/卸载与 macOS DMG 挂载复制烟测，失败时保持失败关闭");
 check("阶段设计", prd.includes("Stage 1E") && prd.includes("异动雷达"), "新功能必须先有可验收的 PRD 阶段设计");
 check("自选迁移边界", watchlist.includes("parseWatchlistImport") && watchlist.includes("watchlistCsv"), "批量自选导入需先解析校验，导出不得包含实时数据或凭证");
 check("复盘证据边界", portfolioReview.includes("createPortfolioReviewSnapshot") && portfolioReview.includes("if (!metrics.pricedCount)") && userState.includes("sanitizePortfolioReviews"), "盘后复盘只能由真实已计价持仓生成，并使用有界脱敏 schema");

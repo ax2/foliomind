@@ -165,16 +165,22 @@ jobs:
         include:
           - os: windows-latest
             bundles: nsis
+            installer_kind: nsis
+            installer_dir: nsis
             artifact: FolioMind-Windows-NSIS
             paths: |
               src-tauri/target/release/bundle/nsis/*.exe
           - os: windows-latest
             bundles: msi
+            installer_kind: msi
+            installer_dir: msi
             artifact: FolioMind-Windows-MSI
             paths: |
               src-tauri/target/release/bundle/msi/*.msi
           - os: macos-14
             bundles: dmg
+            installer_kind: macos-dmg
+            installer_dir: dmg
             artifact: FolioMind-macOS-Apple-Silicon
             paths: src-tauri/target/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
@@ -226,6 +232,17 @@ jobs:
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: npm run desktop:build -- --bundles ${{ matrix.bundles }}
+      - name: Smoke test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $extension = if ('${{ matrix.installer_kind }}' -eq 'nsis') { '*.exe' } else { '*.msi' }
+          $installer = Get-ChildItem -Path 'src-tauri/target/release/bundle/${{ matrix.installer_dir }}' -Filter $extension -File | Select-Object -First 1
+          if (-not $installer) { throw "No $extension installer found" }
+          ./scripts/installer-smoke.ps1 -Kind '${{ matrix.installer_kind }}' -InstallerPath $installer.FullName
+      - name: Smoke test macOS DMG
+        if: runner.os == 'macOS'
+        run: bash scripts/installer-smoke-macos.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
