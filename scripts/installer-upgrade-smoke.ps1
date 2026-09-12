@@ -139,10 +139,12 @@ try {
       throw "Current NSIS installer did not produce an uninstaller"
     }
     Invoke-CheckedProcess -FilePath $currentUninstaller -ArgumentList @("/S")
+    $currentUninstaller = $null
   } else {
     Invoke-CheckedProcess -FilePath "msiexec.exe" -ArgumentList @(
       "/x", ('"' + $currentInstaller.FullName + '"'), "/qn", "/norestart"
     )
+    $activeMsiPath = $null
   }
 
   Start-Sleep -Seconds 2
@@ -156,10 +158,12 @@ try {
 
   Write-Host "Installer upgrade smoke passed: $Kind previous install, current upgrade, config preservation, and uninstall"
 } finally {
-  Invoke-BestEffortUninstall -UninstallerPath $currentUninstaller -MsiPath $currentInstaller.FullName
-  if ($Kind -eq "nsis" -and $oldUninstaller -and $oldUninstaller -ne $currentUninstaller) {
-    Invoke-BestEffortUninstall -UninstallerPath $oldUninstaller -MsiPath $null
-  } elseif ($Kind -eq "msi" -and $activeMsiPath) {
+  if ($Kind -eq "nsis") {
+    Invoke-BestEffortUninstall -UninstallerPath $currentUninstaller -MsiPath $null
+    if ($oldUninstaller -and $oldUninstaller -ne $currentUninstaller) {
+      Invoke-BestEffortUninstall -UninstallerPath $oldUninstaller -MsiPath $null
+    }
+  } elseif ($activeMsiPath) {
     Invoke-BestEffortUninstall -UninstallerPath $null -MsiPath $activeMsiPath
   }
   if (Test-Path -LiteralPath $markerPath -PathType Leaf) {
