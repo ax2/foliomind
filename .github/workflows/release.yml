@@ -300,6 +300,34 @@ jobs:
           fi
           files+=(SHA256SUMS.txt)
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Verify draft Release assets before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets \
+            | node scripts/verify-release-assets.mjs "$VERSION" --allow-draft
+          verify_dir="$(mktemp -d)"
+          cleanup_verify_dir() {
+            rm -f "$verify_dir"/*
+            rmdir "$verify_dir"
+          }
+          trap cleanup_verify_dir EXIT
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "FolioMind_${VERSION}_aarch64.dmg" \
+            --pattern "FolioMind_${VERSION}_x64-setup.exe" \
+            --pattern "FolioMind_${VERSION}_x64_en-US.msi" \
+            --pattern "SHA256SUMS.txt" --dir "$verify_dir"
+          (cd "$verify_dir" && sha256sum --strict --check SHA256SUMS.txt)
+      - name: Publish verified Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
           publish_args=(--draft=false)
           if [ "$PRERELEASE" != "true" ]; then publish_args+=(--latest); fi
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${publish_args[@]}"
