@@ -47,6 +47,7 @@ const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) => normalizeWatchlistItem({ ...item, group: group.label }))).slice(0, 8);
 let persistenceQueue = Promise.resolve();
 let userStateHydrationPromise = null;
+let userStateHydrationGeneration = 0;
 let lastPersistedState = null;
 let lastLocalSnapshot = null;
 let liveRequestGeneration = 0;
@@ -68,6 +69,7 @@ const anomalyAttributionGenerations = new Map();
 // Tests that mount independent store fixtures need to drop the module-level
 // persistence cursor between cases. The running app never calls this helper.
 export function resetUserStatePersistence() {
+  userStateHydrationGeneration += 1;
   persistenceQueue = Promise.resolve();
   userStateHydrationPromise = null;
   lastPersistedState = null;
@@ -1295,10 +1297,13 @@ export const useLabStore = create((set, get) => ({
   },
   hydrateUserState: () => {
     if (userStateHydrationPromise) return userStateHydrationPromise;
-    userStateHydrationPromise = (async () => {
+    const hydrationGeneration = userStateHydrationGeneration;
+    const isCurrentHydration = () => hydrationGeneration === userStateHydrationGeneration;
+    const hydrationPromise = (async () => {
       set({ userStateLoading: true, userStateError: "" });
       try {
         const persisted = await loadUserState();
+        if (!isCurrentHydration()) return false;
         if (persisted && typeof persisted === "object") {
           const remote = normalizeUserState(persisted);
           if (!remote.onboardingCompleted) {
@@ -1348,14 +1353,14 @@ export const useLabStore = create((set, get) => ({
               : nextWatchlist[0]?.symbol || "";
             return { onboardingCompleted: true, userStateNeedsSetup: false, watchlist: nextWatchlist, selectedSymbol, chartRange: hydrated.workspace.chartRange, workspace: normalizeWorkspace(hydrated.workspace), rules: hydrated.monitorRules.map(normalizeRule), notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), premarketBriefing: hydrated.premarketBriefing, monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
           });
-          if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
+          if (localChanged && !samePersistenceState(hydrated, remote) && isCurrentHydration()) void persistSnapshot(get());
         } else {
           const hasExplicitRuntimeState = get().userStateLoaded || get().onboardingCompleted;
           lastPersistedState = null;
           lastLocalSnapshot = null;
           if (hasExplicitRuntimeState) {
             set({ onboardingCompleted: true, userStateNeedsSetup: false, userStateLoaded: true, userStateLoading: false, userStateError: "" });
-            await persistSnapshot(get());
+            if (isCurrentHydration()) await persistSnapshot(get());
           } else {
             // Keep the in-memory fixture behind the onboarding gate so tests
             // and pre-hydration shell logic retain their shape, but never
@@ -1365,13 +1370,18 @@ export const useLabStore = create((set, get) => ({
         }
         return true;
       } catch {
+        if (!isCurrentHydration()) return false;
         const message = "本地数据暂时无法读取；请检查本地 Host 后重试";
         set({ userStateLoading: false, userStateError: message, userStateLoaded: false });
         return false;
       }
     })();
-    userStateHydrationPromise = userStateHydrationPromise.finally(() => { userStateHydrationPromise = null; });
-    return userStateHydrationPromise;
+    let trackedHydrationPromise;
+    trackedHydrationPromise = hydrationPromise.finally(() => {
+      if (userStateHydrationPromise === trackedHydrationPromise) userStateHydrationPromise = null;
+    });
+    userStateHydrationPromise = trackedHydrationPromise;
+    return trackedHydrationPromise;
   },
   initializeEmptyWorkspace: async () => {
     const previous = get();

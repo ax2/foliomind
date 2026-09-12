@@ -9,12 +9,13 @@ vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) 
 vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: persistence.loadUserState, saveUserState: persistence.saveUserState }));
 vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: integration.loadStatus, queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
 
-import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
+import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, resetUserStatePersistence, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
 
 const freshAsOf = () => new Date(Date.now() - 60_000).toISOString();
 
 describe("lab store streaming lifecycle", () => {
   beforeEach(async () => {
+    resetUserStatePersistence();
     integration.loadStatus.mockReset();
     runtime.askPi.mockReset();
     runtime.abortPi.mockReset();
@@ -276,6 +277,25 @@ describe("lab store streaming lifecycle", () => {
 
     await expect(hydration).resolves.toBe(true);
     expect(useLabStore.getState().watchlist.map((item) => item.symbol)).toEqual(expect.arrayContaining(["LOCAL", "REMOTE"]));
+  });
+
+  it("ignores a late hydration after a newer hydration starts", async () => {
+    let releaseOldHydration;
+    persistence.loadUserState.mockImplementationOnce(() => new Promise((resolve) => { releaseOldHydration = resolve; }));
+    const oldHydration = useLabStore.getState().hydrateUserState();
+
+    resetUserStatePersistence();
+    persistence.loadUserState.mockResolvedValueOnce({ revision: 14, onboardingCompleted: true, watchlist: [{ symbol: "NEW", name: "新状态", market: "自定义" }] });
+    const currentHydration = useLabStore.getState().hydrateUserState();
+    await expect(currentHydration).resolves.toBe(true);
+
+    releaseOldHydration({ revision: 15, onboardingCompleted: false, watchlist: [] });
+    await expect(oldHydration).resolves.toBe(false);
+    expect(useLabStore.getState()).toMatchObject({
+      userStateLoaded: true,
+      userStateNeedsSetup: false,
+      watchlist: [{ symbol: "NEW", name: "新状态" }],
+    });
   });
 
   it("persists Skill installation changes and rolls back when saving fails", async () => {
