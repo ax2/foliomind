@@ -204,15 +204,15 @@ export function App() {
     const refreshPriority = () => {
       if (isVisible() && !resumeRecoveryPendingRef.current) void refreshLiveData({ symbols: prioritySymbols });
     };
-    const refreshFull = () => {
-      if (isVisible()) void refreshLiveData();
+    const refreshFull = ({ force = false } = {}) => {
+      if (isVisible() && (force || !resumeRecoveryPendingRef.current)) void refreshLiveData();
     };
     // A channel change invalidates all cached quotes, so warm the complete
     // watchlist. Selection/position/rule changes only need the low-latency
     // priority tier and should not trigger a second full sweep.
     const channelChanged = pollingChannelRef.current !== integrationRefreshKey;
     pollingChannelRef.current = integrationRefreshKey;
-    if (channelChanged) refreshFull();
+    if (channelChanged) refreshFull({ force: true });
     else refreshPriority();
     const priorityTimer = window.setInterval(refreshPriority, policy.priorityIntervalMs || LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS);
     const fullTimer = window.setInterval(refreshFull, policy.fullIntervalMs || LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS);

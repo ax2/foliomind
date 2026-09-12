@@ -6,7 +6,7 @@ import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, 
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { initialLabState, resetUserStatePersistence, useLabStore } from "./store/useLabStore.js";
+import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, resetUserStatePersistence, useLabStore } from "./store/useLabStore.js";
 import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFICATION_MODES } from "./lib/systemNotifications.js";
 import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
 import { serializeUserStateBackup } from "./lib/userState.js";
@@ -440,11 +440,12 @@ describe("FolioMind core flows", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
     let downloadedName = "";
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function click() { downloadedName = this.download; });
+    const asOf = new Date().toISOString();
     useLabStore.setState({
       activeView: "research",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
       watchlist: [{ symbol: "A", name: "Alpha", market: "沪深" }],
-      liveQuotes: { A: { price: 12.5, change: 2, pe: 10, pb: 1.2, volume: 100, asOf: "2026-09-12T08:00:00Z", source: "真实 CAP" } },
+      liveQuotes: { A: { price: 12.5, change: 2, pe: 10, pb: 1.2, volume: 100, asOf, source: "真实 CAP" } },
     });
     try {
       render(<ResearchView />);
@@ -486,8 +487,9 @@ describe("FolioMind core flows", () => {
 
   it("compares selected complete real research results without changing state", () => {
     const watchlist = [{ symbol: "600519", name: "贵州茅台", market: "沪深" }, { symbol: "AAPL", name: "Apple", market: "NASDAQ" }];
-    const liveQuotes = { "600519": { price: 1297.4, change: 1.25, pe: 22, pb: 4, volume: 100, asOf: "2026-09-12T08:00:00Z" }, AAPL: { price: 227.5, change: -0.4, pe: 30, pb: 8, volume: 200, asOf: "2026-09-12T08:00:00Z" } };
-    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: "2026-09-12T08:00:00Z" });
+    const asOf = new Date().toISOString();
+    const liveQuotes = { "600519": { price: 1297.4, change: 1.25, pe: 22, pb: 4, volume: 100, asOf }, AAPL: { price: 227.5, change: -0.4, pe: 30, pb: 8, volume: 200, asOf } };
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: asOf });
     render(<ResearchView />);
     fireEvent.click(screen.getByRole("button", { name: "加入贵州茅台对比" }));
     fireEvent.click(screen.getByRole("button", { name: "加入Apple对比" }));
@@ -501,8 +503,9 @@ describe("FolioMind core flows", () => {
 
   it("disables a fifth research comparison selection", () => {
     const watchlist = ["A", "B", "C", "D", "E"].map((symbol, index) => ({ symbol, name: `标的${index + 1}`, market: "沪深" }));
-    const liveQuotes = Object.fromEntries(watchlist.map((item, index) => [item.symbol, { price: 100 + index, change: index, asOf: "2026-09-12T08:00:00Z" }]));
-    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: "2026-09-12T08:00:00Z" });
+    const asOf = new Date().toISOString();
+    const liveQuotes = Object.fromEntries(watchlist.map((item, index) => [item.symbol, { price: 100 + index, change: index, asOf }]));
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: asOf });
     render(<ResearchView />);
     watchlist.slice(0, 4).forEach((item) => fireEvent.click(screen.getByRole("button", { name: `加入${item.name}对比` })));
     expect(screen.getByText("4/4 个标的")).toBeInTheDocument();
@@ -511,8 +514,9 @@ describe("FolioMind core flows", () => {
 
   it("clears research comparison selection when real data becomes incomplete", async () => {
     const watchlist = [{ symbol: "A", name: "标的A", market: "沪深" }, { symbol: "B", name: "标的B", market: "沪深" }];
-    const liveQuotes = { A: { price: 100, change: 1, asOf: "2026-09-12T08:00:00Z" }, B: { price: 101, change: 1, asOf: "2026-09-12T08:00:00Z" } };
-    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: "2026-09-12T08:00:00Z" });
+    const asOf = new Date().toISOString();
+    const liveQuotes = { A: { price: 100, change: 1, asOf }, B: { price: 101, change: 1, asOf } };
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: asOf });
     render(<ResearchView />);
     fireEvent.click(screen.getByRole("button", { name: "加入标的A对比" }));
     expect(screen.getByRole("region", { name: "研究结果对比" })).toBeInTheDocument();
@@ -1478,6 +1482,12 @@ describe("FolioMind core flows", () => {
     useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData, hydrateUserState: vi.fn().mockResolvedValue(true) });
     const originalNow = Date.now;
     const previousVisibilityState = document.visibilityState;
+    const originalSetInterval = window.setInterval.bind(window);
+    let fullRefreshTick;
+    const setIntervalSpy = vi.spyOn(window, "setInterval").mockImplementation((handler, delay, ...args) => {
+      if (delay === LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS) fullRefreshTick = () => handler(...args);
+      return originalSetInterval(handler, delay, ...args);
+    });
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
     let resolveResumeStatus;
@@ -1497,10 +1507,14 @@ describe("FolioMind core flows", () => {
 
       await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
       expect(refreshLiveData).not.toHaveBeenCalled();
+      expect(fullRefreshTick).toBeTypeOf("function");
+      act(() => fullRefreshTick());
+      expect(refreshLiveData).not.toHaveBeenCalled();
       resolveResumeStatus(status);
       await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
       expect(refreshLiveData).not.toHaveBeenCalledWith({ symbols: expect.any(Array) });
     } finally {
+      setIntervalSpy.mockRestore();
       Date.now = originalNow;
       Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
     }
