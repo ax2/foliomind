@@ -20,7 +20,7 @@ import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTrigge
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
 import { capabilityArray, capabilityData, capabilitySource } from "../lib/capabilityEnvelope.js";
-import { DEFAULT_WORKSPACE, MAX_SAVED_WORKSPACE_VIEWS, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
+import { DEFAULT_WORKSPACE, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeSavedMonitorTemplate, normalizeSavedResearchScreen, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -118,6 +118,18 @@ function persistSnapshot(snapshot) {
 }
 function nowIso() { return new Date().toISOString(); }
 function createId(prefix) { return `${prefix}-${typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`; }
+function duplicateWorkspaceViewName(sourceName, existingNames) {
+  const root = String(sourceName || "工作区视图").trim() || "工作区视图";
+  let suffix = " 副本";
+  let candidate = `${root}${suffix}`.slice(0, 64).trim();
+  let index = 2;
+  while (existingNames.has(candidate)) {
+    suffix = ` 副本 ${index}`;
+    candidate = `${root.slice(0, Math.max(1, 64 - suffix.length)).trimEnd()}${suffix}`;
+    index += 1;
+  }
+  return candidate;
+}
 function skillItemsForIds(items, installedSkillIds) {
   const installed = new Set(Array.isArray(installedSkillIds) ? installedSkillIds : items.filter((item) => item.installed).map((item) => item.id));
   return items.map((item) => ({ ...item, installed: installed.has(item.id) }));
@@ -644,6 +656,7 @@ export const initialLabState = {
   activeView: "watchlist", selectedSymbol: "600519", chartRange: DEFAULT_WORKSPACE.chartRange, workspace: { ...DEFAULT_WORKSPACE }, watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
   rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, liveDataStartedAt: null, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 0, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
+  monitorComposerRequest: null, evidenceDrawerRequest: null,
 };
 
 function dataChannelChanged(previous, next) {
@@ -1068,6 +1081,24 @@ export const useLabStore = create((set, get) => ({
     return delivered.length;
   },
   setActiveView: (activeView) => set({ activeView }),
+  requestMonitorComposer: (input = {}) => {
+    const requested = typeof input === "string" ? { symbol: input } : input;
+    const symbol = String(requested?.symbol || "").trim();
+    if (!symbol) return false;
+    const item = dataItemForSymbol(get(), symbol);
+    set({ activeView: "monitor", monitorComposerRequest: { symbol, name: String(requested?.name || item?.name || symbol), market: String(requested?.market || item?.market || "") } });
+    return true;
+  },
+  clearMonitorComposerRequest: () => set({ monitorComposerRequest: null }),
+  requestEvidenceDrawer: (input = {}) => {
+    const requested = typeof input === "string" ? { symbol: input } : input;
+    const symbol = String(requested?.symbol || "").trim();
+    if (!symbol) return false;
+    const item = dataItemForSymbol(get(), symbol);
+    set({ activeView: "watchlist", selectedSymbol: item?.symbol || symbol, evidenceDrawerRequest: { symbol: item?.symbol || symbol, name: String(requested?.name || item?.name || symbol), market: String(requested?.market || item?.market || "") } });
+    return true;
+  },
+  clearEvidenceDrawerRequest: () => set({ evidenceDrawerRequest: null }),
   selectSymbol: (selectedSymbol) => {
     const requested = String(selectedSymbol ?? "").trim();
     const key = quoteSymbolKey(requested);
@@ -1085,6 +1116,83 @@ export const useLabStore = create((set, get) => ({
     const next = normalizeWorkspace({ ...previous, savedViews });
     set({ workspace: next, chartRange: next.chartRange });
     try { await get().persistUserState(); return next.savedViews.find((view) => view.id === id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  duplicateWorkspaceView: async (id) => {
+    const previous = get().workspace;
+    const source = previous.savedViews.find((candidate) => candidate.id === id);
+    if (!source || previous.savedViews.length >= MAX_SAVED_WORKSPACE_VIEWS) return false;
+    const name = duplicateWorkspaceViewName(source.name, new Set(previous.savedViews.map((view) => view.name)));
+    const copy = { id: createId("view"), name, preferences: { ...source.preferences } };
+    const next = normalizeWorkspace({ ...previous, savedViews: [copy, ...previous.savedViews] });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedViews.find((view) => view.id === copy.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  saveMonitorTemplate: async (input = {}) => {
+    const label = String(input.name ?? "").trim().slice(0, 64);
+    if (!label) throw new Error("请输入模板名称");
+    const previous = get().workspace;
+    const replacing = previous.savedMonitorTemplates.some((template) => template.name === label);
+    if (!replacing && previous.savedMonitorTemplates.length >= MAX_SAVED_MONITOR_TEMPLATES) throw new Error(`最多保存 ${MAX_SAVED_MONITOR_TEMPLATES} 个盯盘模板`);
+    const template = normalizeSavedMonitorTemplate({ id: createId("monitor-template"), name: label, logic: input.logic, conditions: input.conditions, intervalSeconds: input.intervalSeconds });
+    const savedMonitorTemplates = [template, ...previous.savedMonitorTemplates.filter((candidate) => candidate.name !== label)].slice(0, MAX_SAVED_MONITOR_TEMPLATES);
+    const next = normalizeWorkspace({ ...previous, savedMonitorTemplates });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedMonitorTemplates.find((candidate) => candidate.id === template.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  duplicateMonitorTemplate: async (id) => {
+    const previous = get().workspace;
+    const source = previous.savedMonitorTemplates.find((candidate) => candidate.id === id);
+    if (!source || previous.savedMonitorTemplates.length >= MAX_SAVED_MONITOR_TEMPLATES) return false;
+    const name = duplicateWorkspaceViewName(source.name, new Set(previous.savedMonitorTemplates.map((template) => template.name)));
+    const copy = normalizeSavedMonitorTemplate({ id: createId("monitor-template"), name, logic: source.logic, conditions: source.conditions, intervalSeconds: source.intervalSeconds });
+    const next = normalizeWorkspace({ ...previous, savedMonitorTemplates: [copy, ...previous.savedMonitorTemplates] });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedMonitorTemplates.find((template) => template.id === copy.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  deleteMonitorTemplate: async (id) => {
+    const previous = get().workspace;
+    const savedMonitorTemplates = previous.savedMonitorTemplates.filter((template) => template.id !== id);
+    if (savedMonitorTemplates.length === previous.savedMonitorTemplates.length) return false;
+    const next = normalizeWorkspace({ ...previous, savedMonitorTemplates });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  saveResearchScreen: async (input = {}) => {
+    const label = String(input.name ?? "").trim().slice(0, 32);
+    if (!label) throw new Error("请输入筛选名称");
+    const previous = get().workspace;
+    const replacing = previous.savedResearchScreens.some((screen) => screen.name === label);
+    if (!replacing && previous.savedResearchScreens.length >= MAX_SAVED_RESEARCH_SCREENS) throw new Error(`最多保存 ${MAX_SAVED_RESEARCH_SCREENS} 个筛选`);
+    const screen = normalizeSavedResearchScreen({ id: createId("screen"), name: label, filters: input.filters });
+    const savedResearchScreens = [screen, ...previous.savedResearchScreens.filter((candidate) => candidate.name !== label)].slice(0, MAX_SAVED_RESEARCH_SCREENS);
+    const next = normalizeWorkspace({ ...previous, savedResearchScreens });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedResearchScreens.find((candidate) => candidate.id === screen.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  duplicateResearchScreen: async (id) => {
+    const previous = get().workspace;
+    const source = previous.savedResearchScreens.find((candidate) => candidate.id === id);
+    if (!source || previous.savedResearchScreens.length >= MAX_SAVED_RESEARCH_SCREENS) return false;
+    const name = duplicateWorkspaceViewName(source.name, new Set(previous.savedResearchScreens.map((screen) => screen.name)));
+    const copy = normalizeSavedResearchScreen({ id: createId("screen"), name, filters: source.filters });
+    const next = normalizeWorkspace({ ...previous, savedResearchScreens: [copy, ...previous.savedResearchScreens] });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedResearchScreens.find((screen) => screen.id === copy.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  deleteResearchScreen: async (id) => {
+    const previous = get().workspace;
+    const savedResearchScreens = previous.savedResearchScreens.filter((screen) => screen.id !== id);
+    if (savedResearchScreens.length === previous.savedResearchScreens.length) return false;
+    const next = normalizeWorkspace({ ...previous, savedResearchScreens });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
     catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
   },
   applyWorkspaceView: async (id) => {

@@ -29,6 +29,8 @@ const MAX_PORTFOLIO_POSITIONS: usize = 200;
 const MAX_MONITOR_HISTORY: usize = 500;
 const MAX_PORTFOLIO_REVIEWS: usize = 90;
 const MAX_INSTALLED_SKILLS: usize = 100;
+const MAX_SAVED_MONITOR_TEMPLATES: usize = 8;
+const MAX_SAVED_RESEARCH_SCREENS: usize = 10;
 const MAX_PREMARKET_BYTES: usize = 1_000_000;
 const MAX_PREMARKET_ITEMS: usize = 20;
 static STATE_IO_LOCK: Mutex<()> = Mutex::new(());
@@ -149,6 +151,41 @@ pub struct SavedWorkspaceView {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SavedMonitorTemplate {
+    pub id: String,
+    pub name: String,
+    pub logic: String,
+    #[serde(default)]
+    pub conditions: Vec<Value>,
+    pub interval_seconds: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchFilterPreferences {
+    #[serde(default)]
+    pub min_change: String,
+    #[serde(default)]
+    pub max_change: String,
+    #[serde(default)]
+    pub max_pe: String,
+    #[serde(default)]
+    pub max_pb: String,
+    #[serde(default)]
+    pub min_volume: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedResearchScreen {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub filters: ResearchFilterPreferences,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceViewPreferences {
     #[serde(default = "default_workspace_group")]
     pub watchlist_group: String,
@@ -189,6 +226,10 @@ pub struct WorkspacePreferences {
     pub show_moving_average20: bool,
     #[serde(default)]
     pub saved_views: Vec<SavedWorkspaceView>,
+    #[serde(default)]
+    pub saved_monitor_templates: Vec<SavedMonitorTemplate>,
+    #[serde(default)]
+    pub saved_research_screens: Vec<SavedResearchScreen>,
 }
 
 fn default_workspace_group() -> String {
@@ -219,6 +260,8 @@ impl Default for WorkspacePreferences {
             show_moving_average: false,
             show_moving_average20: false,
             saved_views: Vec::new(),
+            saved_monitor_templates: Vec::new(),
+            saved_research_screens: Vec::new(),
         }
     }
 }
@@ -704,6 +747,8 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || state.portfolio_reviews.len() > MAX_PORTFOLIO_REVIEWS
         || state.installed_skill_ids.len() > MAX_INSTALLED_SKILLS
         || state.workspace.saved_views.len() > MAX_SAVED_WORKSPACE_VIEWS
+        || state.workspace.saved_monitor_templates.len() > MAX_SAVED_MONITOR_TEMPLATES
+        || state.workspace.saved_research_screens.len() > MAX_SAVED_RESEARCH_SCREENS
     {
         return Err("user state exceeds size limit".into());
     }
@@ -753,6 +798,49 @@ pub fn validate(state: &UserState) -> Result<(), String> {
             "workspace view query",
             160,
         )?;
+    }
+    for template in &state.workspace.saved_monitor_templates {
+        validate_text(&template.id, "workspace monitor template id", 64)?;
+        validate_text(&template.name, "workspace monitor template name", 64)?;
+        if !matches!(template.logic.as_str(), "AND" | "OR")
+            || template.conditions.is_empty()
+            || template.conditions.len() > 6
+            || !matches!(template.interval_seconds, 60 | 300 | 600 | 1800)
+        {
+            return Err("workspace monitor template is invalid".into());
+        }
+        for condition in &template.conditions {
+            let Some(object) = condition.as_object() else {
+                return Err("workspace monitor template condition is invalid".into());
+            };
+            for key in ["id", "type", "field", "operator"] {
+                if let Some(value) = object.get(key).and_then(Value::as_str) {
+                    validate_text(value, "workspace monitor template condition field", 64)?;
+                }
+            }
+            if let Some(value) = object.get("value") {
+                if let Some(number) = value.as_f64() {
+                    if !number.is_finite() {
+                        return Err("workspace monitor template condition value is invalid".into());
+                    }
+                } else if !value.is_string() {
+                    return Err("workspace monitor template condition value is invalid".into());
+                }
+            }
+        }
+    }
+    for screen in &state.workspace.saved_research_screens {
+        validate_text(&screen.id, "workspace research screen id", 64)?;
+        validate_text(&screen.name, "workspace research screen name", 32)?;
+        for value in [
+            &screen.filters.min_change,
+            &screen.filters.max_change,
+            &screen.filters.max_pe,
+            &screen.filters.max_pb,
+            &screen.filters.min_volume,
+        ] {
+            validate_text_allow_empty(value, "workspace research screen filter", 24)?;
+        }
     }
     let mut installed_skill_ids = HashSet::new();
     for skill_id in &state.installed_skill_ids {
@@ -1513,6 +1601,8 @@ mod tests {
         assert!(state.monitor_rules[0].expires_at.is_none());
         assert!(state.monitor_history.is_empty());
         assert!(state.portfolio_reviews.is_empty());
+        assert!(state.workspace.saved_monitor_templates.is_empty());
+        assert!(state.workspace.saved_research_screens.is_empty());
         assert_eq!(
             state.installed_skill_ids,
             vec!["fundamental".to_string(), "monitor".to_string()]
@@ -1537,11 +1627,46 @@ mod tests {
                 show_moving_average20: false,
             },
         });
+        state
+            .workspace
+            .saved_monitor_templates
+            .push(SavedMonitorTemplate {
+                id: "template-risk".into(),
+                name: "回撤防守".into(),
+                logic: "AND".into(),
+                conditions: vec![serde_json::json!({
+                    "type": "price_change",
+                    "field": "changePercent",
+                    "operator": "lte",
+                    "value": -5.0
+                })],
+                interval_seconds: 300,
+            });
+        state
+            .workspace
+            .saved_research_screens
+            .push(SavedResearchScreen {
+                id: "screen-value".into(),
+                name: "低估值观察".into(),
+                filters: ResearchFilterPreferences {
+                    max_pe: "24".into(),
+                    max_pb: "3".into(),
+                    ..ResearchFilterPreferences::default()
+                },
+            });
         assert!(validate(&state).is_ok());
         let encoded = serde_json::to_value(&state).expect("workspace view should serialize");
         let restored: UserState =
             serde_json::from_value(encoded).expect("workspace view should deserialize");
         assert_eq!(restored.workspace.saved_views[0].name, "核心观察");
+        assert_eq!(
+            restored.workspace.saved_monitor_templates[0].name,
+            "回撤防守"
+        );
+        assert_eq!(
+            restored.workspace.saved_research_screens[0].filters.max_pe,
+            "24"
+        );
         state.workspace.saved_views[0].preferences.watchlist_sort = "invalid".into();
         assert!(validate(&state).is_err());
     }

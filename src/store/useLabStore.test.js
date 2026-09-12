@@ -52,6 +52,64 @@ describe("lab store streaming lifecycle", () => {
     expect(savedState.watchlist).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "TEST" })]));
   });
 
+  it("duplicates a saved workspace view from its snapshot without applying it", async () => {
+    useLabStore.setState({
+      workspace: { ...initialLabState.workspace, watchlistSort: "custom", savedViews: [
+        { id: "view-core", name: "核心观察", preferences: { watchlistSort: "change", chartRange: "日K" } },
+      ] },
+      chartRange: "分时",
+    });
+    persistence.saveUserState.mockClear();
+
+    const copy = await useLabStore.getState().duplicateWorkspaceView("view-core");
+
+    expect(copy).toMatchObject({ name: "核心观察 副本", preferences: { watchlistSort: "change", chartRange: "日K" } });
+    expect(useLabStore.getState().workspace.watchlistSort).toBe("custom");
+    expect(useLabStore.getState().workspace.savedViews).toHaveLength(2);
+    expect(persistence.saveUserState).toHaveBeenCalledTimes(1);
+  });
+
+  it("suffixes repeated workspace view copies and rolls back a failed copy", async () => {
+    useLabStore.setState({
+      workspace: { ...initialLabState.workspace, savedViews: [
+        { id: "view-core", name: "核心观察", preferences: { chartRange: "日K" } },
+        { id: "view-copy", name: "核心观察 副本", preferences: { chartRange: "周K" } },
+      ] },
+    });
+    const copy = await useLabStore.getState().duplicateWorkspaceView("view-core");
+    expect(copy.name).toBe("核心观察 副本 2");
+
+    const beforeFailure = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().duplicateWorkspaceView("view-core")).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(beforeFailure);
+  });
+
+  it("saves, duplicates, and deletes a bounded monitor template", async () => {
+    const saved = await useLabStore.getState().saveMonitorTemplate({
+      name: "财报周观察",
+      logic: "OR",
+      intervalSeconds: "600",
+      conditions: [{ type: "core_event", operator: "gte", value: 1, apiKey: "drop-me" }],
+    });
+    expect(saved).toMatchObject({ name: "财报周观察", logic: "OR", intervalSeconds: 600, conditions: [{ type: "core_event", operator: "gte", value: 1 }] });
+    expect(useLabStore.getState().workspace.savedMonitorTemplates).toHaveLength(1);
+
+    const copy = await useLabStore.getState().duplicateMonitorTemplate(saved.id);
+    expect(copy).toMatchObject({ name: "财报周观察 副本", logic: "OR", intervalSeconds: 600, conditions: [{ type: "core_event", value: 1 }] });
+    expect(useLabStore.getState().workspace.savedMonitorTemplates).toHaveLength(2);
+
+    await expect(useLabStore.getState().deleteMonitorTemplate(copy.id)).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.savedMonitorTemplates).toHaveLength(1);
+  });
+
+  it("rolls back a monitor template save when canonical persistence fails", async () => {
+    const previous = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().saveMonitorTemplate({ name: "失败模板", conditions: [{ type: "price_change", operator: "abs_gte", value: 3 }] })).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(previous);
+  });
+
   it("keeps user state unloaded and exposes a retry after a Host read failure", async () => {
     const error = new Error("Host unavailable");
     persistence.loadUserState.mockRejectedValueOnce(error).mockResolvedValueOnce({ revision: 8, watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });

@@ -155,6 +155,15 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw).workspace.savedViews).toMatchObject([{ id: "view-core", name: "核心观察", preferences: { watchlistSort: "change", chartRange: "日K" } }]);
   });
 
+  it("includes sanitized monitor templates in portable workspace backups", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      workspace: { savedMonitorTemplates: [{ id: "template-risk", name: "回撤防守", logic: "AND", intervalSeconds: 300, conditions: [{ type: "price_change", operator: "lte", value: -5, apiKey: "sk-secret" }] }] },
+    });
+    expect(raw).not.toContain("sk-secret");
+    expect(parseUserStateBackup(raw).workspace.savedMonitorTemplates).toMatchObject([{ id: "template-risk", name: "回撤防守", conditions: [{ type: "price_change", operator: "lte", value: -5 }] }]);
+  });
+
   it("round-trips monitor audit history without prompts or credentials", () => {
     const raw = serializeUserStateBackup({
       watchlist: [{ symbol: "600519", name: "贵州茅台" }],

@@ -114,6 +114,24 @@ describe("WatchlistSidebar custom ordering", () => {
     expect(useLabStore.getState().watchlist).toHaveLength(1);
   });
 
+  it("copies a saved view from its stored preferences without changing the current view", async () => {
+    const persistUserState = vi.fn().mockResolvedValue(true);
+    useLabStore.setState({
+      ...initialLabState,
+      userStateLoaded: true,
+      persistUserState,
+      workspace: { ...initialLabState.workspace, watchlistSort: "custom", savedViews: [{ id: "view-core", name: "核心观察", preferences: { watchlistSort: "change", chartRange: "日K" } }] },
+      watchlist: [{ symbol: "A", name: "第一项", market: "自定义", group: "核心" }],
+    });
+    render(<WatchlistSidebar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制视图核心观察" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedViews).toHaveLength(2));
+    expect(useLabStore.getState().workspace.savedViews[0]).toMatchObject({ name: "核心观察 副本", preferences: { watchlistSort: "change", chartRange: "日K" } });
+    expect(useLabStore.getState().workspace.watchlistSort).toBe("custom");
+    expect(screen.getByRole("status")).toHaveTextContent("已复制视图“核心观察 副本”");
+  });
+
   it("does not update state when a reset resolves after unmount", async () => {
     let release;
     const resetWorkspacePreferences = vi.fn(() => new Promise((resolve) => { release = resolve; }));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_WORKSPACE, MAX_SAVED_WORKSPACE_VIEWS, normalizeWorkspace, workspaceViewPreferences } from "./workspace.js";
+import { DEFAULT_WORKSPACE, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeWorkspace, workspaceViewPreferences } from "./workspace.js";
 
 describe("workspace preferences", () => {
   it("keeps only the supported, bounded view preferences", () => {
@@ -28,5 +28,33 @@ describe("workspace preferences", () => {
     expect(normalized.savedViews[0]).toMatchObject({ id: "v0", name: "视图0", preferences: { watchlistSort: "change", chartRange: "日K" } });
     expect(workspaceViewPreferences(normalized)).toEqual(expect.objectContaining({ watchlistSort: "custom", chartRange: "分时" }));
     expect(workspaceViewPreferences(normalized)).not.toHaveProperty("savedViews");
+  });
+
+  it("normalizes saved monitor templates to bounded conditions and intervals", () => {
+    const templates = Array.from({ length: MAX_SAVED_MONITOR_TEMPLATES + 2 }, (_, index) => ({
+      id: `template-${index}`,
+      name: `模板${index}`,
+      logic: index === 1 ? "OR" : "invalid",
+      intervalSeconds: index === 1 ? 600 : 999,
+      conditions: [{ type: "price_level", operator: "gte", value: 1800, apiKey: "drop-me" }],
+    }));
+    const normalized = normalizeWorkspace({ savedMonitorTemplates: templates });
+    expect(normalized.savedMonitorTemplates).toHaveLength(MAX_SAVED_MONITOR_TEMPLATES);
+    expect(normalized.savedMonitorTemplates[0]).toMatchObject({ logic: "AND", intervalSeconds: 300, conditions: [{ type: "price_level", operator: "gte", value: 1800 }] });
+    expect(normalized.savedMonitorTemplates[0].conditions[0]).not.toHaveProperty("apiKey");
+    expect(normalized.savedMonitorTemplates[1]).toMatchObject({ logic: "OR", intervalSeconds: 600 });
+  });
+
+  it("normalizes saved research screens to bounded filter fields", () => {
+    const screens = Array.from({ length: MAX_SAVED_RESEARCH_SCREENS + 2 }, (_, index) => ({
+      id: `screen-${index}`,
+      name: `筛选${index}`,
+      filters: { minChange: index === 1 ? " 1.5 " : "not-a-number", maxPe: 24.8, ignored: "drop" },
+    }));
+    const normalized = normalizeWorkspace({ savedResearchScreens: screens });
+    expect(normalized.savedResearchScreens).toHaveLength(MAX_SAVED_RESEARCH_SCREENS);
+    expect(normalized.savedResearchScreens[0]).toMatchObject({ name: "筛选0", filters: { minChange: "not-a-number", maxPe: "24.8" } });
+    expect(normalized.savedResearchScreens[1]).toMatchObject({ filters: { minChange: "1.5", maxPe: "24.8" } });
+    expect(normalized.savedResearchScreens[0].filters).not.toHaveProperty("ignored");
   });
 });
