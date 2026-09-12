@@ -70,6 +70,8 @@ afterEach(cleanup);
 
 beforeEach(() => {
   window.localStorage.removeItem(REFRESH_POLICY_STORAGE_KEY);
+  window.localStorage.removeItem("foliomind.market-columns.v1");
+  window.localStorage.removeItem("foliomind.market-views.v1");
   integrationMocks.applyIntegrationSettings.mockReset();
   integrationMocks.queryCapabilityData.mockReset();
   integrationMocks.testModelConnection.mockReset().mockResolvedValue({ text: "模型连接正常", model: "model-a" });
@@ -262,7 +264,6 @@ describe("FolioMind core flows", () => {
   });
 
   it("lets users customize market columns without inventing missing values", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
     useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
     render(<MarketView />);
     expect(screen.getByText("市盈率", { selector: ".table-head span" })).toBeInTheDocument();
@@ -271,11 +272,10 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "市盈率" }));
     expect(screen.queryByText("市盈率", { selector: ".table-head span" })).not.toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-    expect(JSON.parse(window.localStorage.getItem("foliomind.market-columns.v1"))).not.toContain("pe");
+    expect(useLabStore.getState().workspace.marketColumns).not.toContain("pe");
   });
 
   it("renders returned real quotes in the market table", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
     useLabStore.setState({
       activeView: "market",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
@@ -589,36 +589,37 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("option", { name: "全部（200）" })).toBeInTheDocument();
   });
 
-  it("saves and restores named market views without changing the data contract", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
-    window.localStorage.removeItem("foliomind.market-views.v1");
-    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
+  it("saves and restores named market views without changing the data contract", async () => {
+    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true }, workspace: { ...initialLabState.workspace, savedMarketViews: [] } });
     render(<MarketView />);
     fireEvent.click(screen.getByRole("button", { name: "列设置" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "市盈率" }));
     fireEvent.click(screen.getByRole("button", { name: "保存视图" }));
     fireEvent.change(screen.getByRole("textbox", { name: "视图名称" }), { target: { value: "我的交易盘面" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    expect(screen.getByText("已保存“我的交易盘面”视图", { selector: ".market-view-notice" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("已保存“我的交易盘面”视图", { selector: ".market-view-notice" })).toBeInTheDocument());
     const selector = screen.getByRole("combobox", { name: "行情视图" });
-    expect(selector.value).toMatch(/^custom-/);
+    expect(selector.value).toMatch(/^market-view-/);
     fireEvent.change(selector, { target: { value: "valuation" } });
     expect(screen.getByText("市盈率", { selector: ".table-head span" })).toBeInTheDocument();
     fireEvent.change(selector, { target: { value: selector.options[selector.options.length - 1].value } });
     expect(screen.queryByText("市盈率", { selector: ".table-head span" })).not.toBeInTheDocument();
-    expect(JSON.parse(window.localStorage.getItem("foliomind.market-views.v1"))).toHaveLength(1);
+    expect(useLabStore.getState().workspace.savedMarketViews).toMatchObject([{ name: "我的交易盘面", columns: ["price", "change", "pb"] }]);
   });
 
-  it("ignores malformed named market views and keeps built-in presets available", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
+  it("migrates safe legacy market views into canonical workspace state", async () => {
+    window.localStorage.setItem("foliomind.market-columns.v1", JSON.stringify(["price", "asOf", "secret"]));
     window.localStorage.setItem("foliomind.market-views.v1", JSON.stringify([
       { id: "custom-invalid", name: "坏视图", columns: ["unknown-field"] },
       { id: "custom-valid", name: "合法视图", columns: ["price"] },
     ]));
     useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
     render(<MarketView />);
+    await waitFor(() => expect(useLabStore.getState().workspace.savedMarketViews).toMatchObject([{ id: "custom-valid", name: "合法视图", columns: ["price"] }]));
     const options = screen.getByRole("combobox", { name: "行情视图" }).querySelectorAll("option");
-    expect([...options].map((option) => option.textContent)).toEqual(["核心估值", "交易盘面", "完整字段", "合法视图"]);
+    expect([...options].map((option) => option.textContent)).toEqual(["临时视图", "核心估值", "交易盘面", "完整字段", "合法视图"]);
+    expect(window.localStorage.getItem("foliomind.market-columns.v1")).toBeNull();
+    expect(window.localStorage.getItem("foliomind.market-views.v1")).toBeNull();
   });
 
   it("shows a source-backed anomaly explanation without changing the quote card", () => {

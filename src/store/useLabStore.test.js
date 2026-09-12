@@ -52,6 +52,35 @@ describe("lab store streaming lifecycle", () => {
     expect(savedState.watchlist).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "TEST" })]));
   });
 
+  it("persists market columns and rolls back a failed change", async () => {
+    await expect(useLabStore.getState().setMarketColumns(["price", "volume", "unknown"])).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.marketColumns).toEqual(["price", "volume"]);
+    const beforeFailure = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().setMarketColumns(["price", "asOf"])).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(beforeFailure);
+  });
+
+  it("saves and deletes bounded market views through canonical persistence", async () => {
+    const saved = await useLabStore.getState().saveMarketView({ name: "交易盘面", columns: ["price", "volume", "asOf"], apiKey: "sk-secret" });
+    expect(saved).toMatchObject({ name: "交易盘面", columns: ["price", "volume", "asOf"] });
+    expect(saved).not.toHaveProperty("apiKey");
+    const replacement = await useLabStore.getState().saveMarketView({ name: "交易盘面", columns: ["price", "change"] });
+    expect(replacement.id).toBe(saved.id);
+    expect(useLabStore.getState().workspace.savedMarketViews).toHaveLength(1);
+    expect(useLabStore.getState().workspace.savedMarketViews[0].columns).toEqual(["price", "change"]);
+    await expect(useLabStore.getState().deleteMarketView(saved.id, ["price"])).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.savedMarketViews).toHaveLength(0);
+    expect(useLabStore.getState().workspace.marketColumns).toEqual(["price"]);
+  });
+
+  it("rolls back a failed market view save", async () => {
+    const previous = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().saveMarketView({ name: "失败视图", columns: ["price"] })).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(previous);
+  });
+
   it("duplicates a saved workspace view from its snapshot without applying it", async () => {
     useLabStore.setState({
       workspace: { ...initialLabState.workspace, watchlistSort: "custom", savedViews: [

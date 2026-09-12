@@ -63,6 +63,18 @@ async def main() -> None:
             checks.append({"flow": label, "passed": True})
 
         await click_and_capture("行情", "implementation-market.png", "市场行情")
+        await page.get_by_role("button", name="列设置", exact=True).click()
+        pe_column = page.get_by_role("checkbox", name="市盈率", exact=True)
+        if await pe_column.is_checked():
+            await pe_column.click()
+        await page.get_by_role("button", name="保存视图", exact=True).click()
+        await page.get_by_role("textbox", name="视图名称").fill("__qa_market_columns__")
+        await page.get_by_role("button", name="保存", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_market_columns__", exact=True)).to_be_attached()
+        await page.reload(wait_until="networkidle")
+        await page.get_by_role("button", name="行情", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_market_columns__", exact=True)).to_be_attached()
+        checks.append({"flow": "行情列视图跨端持久化", "passed": True})
         await click_and_capture("筛选", "implementation-research.png", "研究筛选")
         research_state = page.locator(".research-page .data-state").first
         research_result = page.locator(".research-page .research-table").first

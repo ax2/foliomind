@@ -174,6 +174,18 @@ describe("user state backups", () => {
     expect(parseUserStateBackup(raw).workspace.savedResearchScreens).toMatchObject([{ id: "screen-value", name: "低估值观察", filters: { maxPe: "15", maxPb: "2", minChange: "", minVolume: "" } }]);
   });
 
+  it("includes market column views without credentials or runtime data", () => {
+    const raw = serializeUserStateBackup({
+      workspace: {
+        marketColumns: ["price", "asOf"],
+        savedMarketViews: [{ id: "market-trading", name: "交易盘面", columns: ["price", "volume", "asOf"], apiKey: "sk-secret", quote: 1234 }],
+      },
+    });
+    expect(raw).not.toContain("sk-secret");
+    expect(raw).not.toContain("quote");
+    expect(parseUserStateBackup(raw).workspace).toMatchObject({ marketColumns: ["price", "asOf"], savedMarketViews: [{ id: "market-trading", name: "交易盘面", columns: ["price", "volume", "asOf"] }] });
+  });
+
   it("accepts a workspace-only backup as recoverable data", () => {
     const raw = serializeUserStateBackup({ workspace: { savedResearchScreens: [{ id: "screen-only", name: "仅筛选", filters: { minChange: "1" } }] } });
     expect(parseUserStateBackup(raw).workspace.savedResearchScreens).toMatchObject([{ id: "screen-only", name: "仅筛选", filters: { minChange: "1" } }]);

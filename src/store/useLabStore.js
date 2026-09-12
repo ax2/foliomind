@@ -20,7 +20,7 @@ import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTrigge
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
 import { capabilityArray, capabilityData, capabilitySource } from "../lib/capabilityEnvelope.js";
-import { DEFAULT_WORKSPACE, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeSavedMonitorTemplate, normalizeSavedResearchScreen, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
+import { DEFAULT_MARKET_COLUMNS, DEFAULT_WORKSPACE, MAX_SAVED_MARKET_VIEWS, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeMarketColumns, normalizeSavedMarketView, normalizeSavedMonitorTemplate, normalizeSavedResearchScreen, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -1107,6 +1107,48 @@ export const useLabStore = create((set, get) => ({
   },
   setChartRange: (chartRange) => { const next = normalizeWorkspace({ ...get().workspace, chartRange }); set({ chartRange: next.chartRange, workspace: next }); void get().persistUserState().catch(() => null); },
   setWorkspacePreference: (key, value) => { const next = normalizeWorkspace({ ...get().workspace, [key]: value }); set({ workspace: next, chartRange: next.chartRange }); void get().persistUserState().catch(() => null); },
+  setMarketColumns: async (columns) => {
+    const previous = get().workspace;
+    const marketColumns = normalizeMarketColumns(columns);
+    if (previous.marketColumns.join() === marketColumns.join()) return true;
+    const next = normalizeWorkspace({ ...previous, marketColumns });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  saveMarketView: async (input = {}) => {
+    const label = String(input.name ?? "").trim().slice(0, 32);
+    if (!label) throw new Error("请输入视图名称");
+    const previous = get().workspace;
+    const existing = previous.savedMarketViews.find((view) => view.name === label);
+    if (!existing && previous.savedMarketViews.length >= MAX_SAVED_MARKET_VIEWS) throw new Error(`最多保存 ${MAX_SAVED_MARKET_VIEWS} 个行情视图`);
+    const view = normalizeSavedMarketView({ id: existing?.id || createId("market-view"), name: label, columns: normalizeMarketColumns(input.columns) });
+    const savedMarketViews = [view, ...previous.savedMarketViews.filter((candidate) => candidate.name !== label)].slice(0, MAX_SAVED_MARKET_VIEWS);
+    const next = normalizeWorkspace({ ...previous, savedMarketViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedMarketViews.find((candidate) => candidate.id === view.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  deleteMarketView: async (id, fallbackColumns = DEFAULT_MARKET_COLUMNS) => {
+    const previous = get().workspace;
+    const savedMarketViews = previous.savedMarketViews.filter((view) => view.id !== id);
+    if (savedMarketViews.length === previous.savedMarketViews.length) return false;
+    const next = normalizeWorkspace({ ...previous, marketColumns: fallbackColumns, savedMarketViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  migrateMarketViewPreferences: async ({ columns, views } = {}) => {
+    const previous = get().workspace;
+    if (previous.savedMarketViews.length || previous.marketColumns.join() !== DEFAULT_MARKET_COLUMNS.join()) return false;
+    const marketColumns = normalizeMarketColumns(columns);
+    const savedMarketViews = (Array.isArray(views) ? views : []).map(normalizeSavedMarketView).filter(Boolean).slice(0, MAX_SAVED_MARKET_VIEWS);
+    if (savedMarketViews.length === 0 && marketColumns.join() === DEFAULT_MARKET_COLUMNS.join()) return false;
+    const next = normalizeWorkspace({ ...previous, marketColumns, savedMarketViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
   saveWorkspaceView: async (name) => {
     const label = String(name ?? "").trim().slice(0, 64);
     if (!label) throw new Error("请输入视图名称");
@@ -1215,7 +1257,7 @@ export const useLabStore = create((set, get) => ({
   },
   resetWorkspacePreferences: async () => {
     const previous = get().workspace;
-    const next = { ...DEFAULT_WORKSPACE, savedViews: previous.savedViews };
+    const next = { ...DEFAULT_WORKSPACE, savedViews: previous.savedViews, savedMonitorTemplates: previous.savedMonitorTemplates, savedResearchScreens: previous.savedResearchScreens, savedMarketViews: previous.savedMarketViews };
     set({ workspace: next, chartRange: next.chartRange });
     try {
       await get().persistUserState();

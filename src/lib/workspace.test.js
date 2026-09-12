@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_WORKSPACE, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeWorkspace, workspaceViewPreferences } from "./workspace.js";
+import { DEFAULT_MARKET_COLUMNS, DEFAULT_WORKSPACE, MAX_SAVED_MARKET_VIEWS, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeWorkspace, workspaceViewPreferences } from "./workspace.js";
 
 describe("workspace preferences", () => {
   it("keeps only the supported, bounded view preferences", () => {
@@ -19,6 +19,21 @@ describe("workspace preferences", () => {
   it("does not coerce truthy values into enabled chart settings", () => {
     expect(normalizeWorkspace({ showGrid: 1, showMovingAverage: "true", showMovingAverage20: {} })).toEqual(DEFAULT_WORKSPACE);
     expect(normalizeWorkspace({ showGrid: true, showMovingAverage: true, showMovingAverage20: true })).toMatchObject({ showGrid: true, showMovingAverage: true, showMovingAverage20: true });
+  });
+
+  it("normalizes bounded market columns and named views", () => {
+    const savedMarketViews = Array.from({ length: MAX_SAVED_MARKET_VIEWS + 2 }, (_, index) => ({
+      id: `market-${index}`,
+      name: `行情视图${index}`,
+      columns: ["price", "price", "unknown", "asOf"],
+      apiKey: "sk-secret",
+    }));
+    const normalized = normalizeWorkspace({ marketColumns: ["pb", "bad", "pb", "price"], savedMarketViews });
+    expect(normalized.marketColumns).toEqual(["pb", "price"]);
+    expect(normalized.savedMarketViews).toHaveLength(MAX_SAVED_MARKET_VIEWS);
+    expect(normalized.savedMarketViews[0]).toMatchObject({ columns: ["price", "asOf"] });
+    expect(normalized.savedMarketViews[0]).not.toHaveProperty("apiKey");
+    expect(normalizeWorkspace({ marketColumns: [] }).marketColumns).toEqual(DEFAULT_MARKET_COLUMNS);
   });
 
   it("keeps saved views bounded and excludes nested saved views from a snapshot", () => {
