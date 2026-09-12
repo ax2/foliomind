@@ -229,10 +229,12 @@ jobs:
       - run: npm run smoke:pi
       - name: Download previous release installer for upgrade smoke
         if: runner.os == 'Windows'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
-          $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'FolioMind-CI' }
+          $headers = @{ Accept = 'application/vnd.github+json'; Authorization = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'FolioMind-CI' }
           $currentText = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
           if ($currentText -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw "Invalid current version: $currentText" }
           $currentVersion = [version]::new([int]$Matches[0].Split('.')[0], [int]$Matches[0].Split('.')[1], [int]($Matches[0].Split('.')[2] -replace '[-+].*$', ''))
