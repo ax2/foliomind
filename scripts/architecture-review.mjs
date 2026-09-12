@@ -38,6 +38,7 @@ const localHostClient = await load("src/lib/localHost.js");
 const integrations = await load("src/lib/integrations.js");
 const integrationChanges = await load("src/lib/integrationChanges.js");
 const integrationChangesTest = await load("src/lib/integrationChanges.test.js");
+const resumeRecovery = await load("src/lib/resumeRecovery.js");
 const nativeCredentials = await load("src-tauri/src/credentials.rs");
 const settingsView = await load("src/components/SecondaryViews.jsx");
 const developerPanelTest = await load("src/components/DeveloperPanel.test.jsx");
@@ -95,6 +96,7 @@ check("首次启动工作区选择", userState.includes("onboardingCompleted") &
 check("凭据写入一致性", localHost.includes("acquireCredentialFileLock") && localHost.includes("readCredentialSnapshot") && localHost.includes("writePrivateText") && hostIntegrationTest.includes("serialize credential writes") && prd.includes("Stage 3GH Local Host 凭据写入一致性") && architectureReview.includes("Stage 3GH"), "Local Host 的 API Key 与 revision 必须在跨进程锁和原子写入边界内保持成对读取，不能返回混合快照");
 check("集成状态读取顺序", labStore.includes("integrationStatusRequestGeneration") && labStore.includes("statusRequestGeneration") && storeTest.includes("responses arrive out of order") && prd.includes("Stage 3GI 集成状态读取顺序") && architectureReview.includes("Stage 3GI"), "并发集成状态读取必须按请求代次提交，旧响应不得覆盖较新的凭据、端点或模型配置");
 check("外部凭据文件变更", localHost.includes("credentialRevision") && hostIntegrationTest.includes("unmanaged same-prefix credential replacement") && prd.includes("Stage 3GJ Local Host 外部凭据变更") && architectureReview.includes("Stage 3GJ"), "Local Host 状态 revision 必须能发现未通过自身写入路径替换的同前缀凭据，不能只信任可变的前缀或本地 sidecar");
+check("休眠恢复行情对账", app.includes("pageshow") && app.includes("resumeRecoveryPendingRef") && app.includes("refreshIntegrationStatus") && app.includes("refreshLiveData()") && resumeRecovery.includes("RESUME_RECOVERY_AFTER_MS") && appTest.includes("waits for Host reconciliation before refreshing after a long hidden resume") && prd.includes("Stage 3GL 休眠/恢复后的 Host 对账与行情刷新") && architectureReview.includes("Stage 3GL"), "页面从长时间后台或休眠恢复时必须先重新读取 Host 状态，再按当前凭据启动一次完整行情刷新，并避免连续恢复事件重复请求");
 check("自选市场宽度", marketViews.includes("marketBreadth") && marketViews.includes("自选市场宽度") && prd.includes("Stage 3AG 自选市场宽度概览") && styles.includes("market-breadth-grid"), "市场页应基于真实 liveQuotes 展示上涨/下跌分布和极值，并在窄屏收敛");
 check("自选汇总统计", marketBreadth.includes("marketWatchlistSummary") && marketViews.includes("marketWatchlistSummary") && marketViews.includes("自选汇总统计") && styles.includes("market-summary-grid") && prd.includes("Stage 3BN 自选汇总统计"), "市场页应按字段展示当前真实行情的最小值、平均值、中位数和最大值，缺失/过期数据不得补值");
 check("异动证据解读", marketViews.includes("AnomalyAttribution") && anomalyAttribution.includes("buildAttributionPrompt") && anomalyAttribution.includes("evidenceIndex") && anomalyAttribution.includes("ANOMALY_ATTRIBUTION_DISCLAIMER") && anomalyAttribution.includes("https?"), "异动解读必须基于真实证据、引用来源、带免责声明并过滤不安全链接");

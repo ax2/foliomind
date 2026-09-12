@@ -1463,6 +1463,49 @@ describe("FolioMind core flows", () => {
     await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
   });
 
+  it("waits for Host reconciliation before refreshing after a long hidden resume", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData, hydrateUserState: vi.fn().mockResolvedValue(true) });
+    const originalNow = Date.now;
+    const previousVisibilityState = document.visibilityState;
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveResumeStatus;
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    try {
+      render(<App />);
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+      refreshLiveData.mockClear();
+      integrationMocks.loadIntegrationStatus.mockClear();
+      integrationMocks.loadIntegrationStatus.mockImplementationOnce(() => new Promise((resolve) => { resolveResumeStatus = resolve; }));
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      now += 60_000;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => window.dispatchEvent(new Event("pageshow")));
+
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+      expect(refreshLiveData).not.toHaveBeenCalled();
+      resolveResumeStatus(status);
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+      expect(refreshLiveData).not.toHaveBeenCalledWith({ symbols: expect.any(Array) });
+    } finally {
+      Date.now = originalNow;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
+    }
+  });
+
   it.each([false, true])("refreshes the full quote set when the saved credential changes (same prefix: %s)", async (samePrefix) => {
     const refreshLiveData = vi.fn().mockResolvedValue(true);
     const integrationStatus = {

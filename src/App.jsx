@@ -13,6 +13,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary.jsx";
 import { friendlyDataMessage } from "./lib/friendlyMessages.js";
 import { loadRefreshPolicy, refreshPolicyConfig, subscribeRefreshPolicy } from "./lib/refreshPolicy.js";
 import { subscribeIntegrationChanges } from "./lib/integrationChanges.js";
+import { shouldRecoverAfterResume } from "./lib/resumeRecovery.js";
 
 // The secondary workspaces are intentionally kept out of the initial route.
 // They share one module so switching views still incurs a single, cacheable
@@ -42,24 +43,6 @@ export function App() {
     window.addEventListener("online", onOnline);
     return () => { window.removeEventListener("offline", onOffline); window.removeEventListener("online", onOnline); };
   }, []);
-  useEffect(() => {
-    // Both the standalone Web Host and the desktop Host can be changed by a
-    // sibling process (for example, a local debug window or an external
-    // credential rotation). Reconcile on focus/visibility for either runtime
-    // so the desktop UI does not retain stale credential or endpoint state.
-    if ((!isLocalWebRuntime() && !isDesktopRuntime()) || typeof window === "undefined" || typeof document === "undefined") return undefined;
-    const reconcile = () => {
-      if (document.visibilityState === "visible") void refreshIntegrationStatus();
-    };
-    const timer = window.setInterval(reconcile, INTEGRATION_STATUS_RECONCILE_INTERVAL_MS);
-    window.addEventListener("focus", reconcile);
-    document.addEventListener("visibilitychange", reconcile);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", reconcile);
-      document.removeEventListener("visibilitychange", reconcile);
-    };
-  }, [refreshIntegrationStatus]);
   const credentialGeneration = useLabStore((state) => state.credentialGeneration);
   const activeView = useLabStore((state) => state.activeView);
   const settingsNotice = useLabStore((state) => state.settingsNotice);
@@ -89,7 +72,63 @@ export function App() {
   const integrationRefreshKey = [credentialGeneration, integrationStatus?.credentialConfigured, integrationStatus?.keyPrefix, integrationStatus?.credentialRevision, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
   const pollingChannelRef = useRef("");
+  const resumeLastActiveAtRef = useRef(Date.now());
+  const resumeRecoveryPendingRef = useRef(false);
+  const resumeRecoveryInFlightRef = useRef(false);
   useEffect(() => subscribeRefreshPolicy(setRefreshPolicy), []);
+  useEffect(() => {
+    // Both the standalone Web Host and the desktop Host can be changed by a
+    // sibling process (for example, a local debug window or an external
+    // credential rotation). Reconcile on focus/visibility for either runtime
+    // so the UI does not retain stale credential or endpoint state.
+    if ((!isLocalWebRuntime() && !isDesktopRuntime()) || typeof window === "undefined" || typeof document === "undefined") return undefined;
+    const isVisible = () => document.visibilityState === "visible";
+    const reconcile = ({ recover = false } = {}) => {
+      if (!isVisible()) return;
+      const generationBeforeStatusRead = useLabStore.getState().credentialGeneration;
+      const statusRead = Promise.resolve().then(() => refreshIntegrationStatus());
+      if (!recover || refreshPolicyConfig(refreshPolicy).id === "manual" || resumeRecoveryInFlightRef.current) return;
+      resumeRecoveryPendingRef.current = true;
+      resumeRecoveryInFlightRef.current = true;
+      void statusRead
+        .then(() => {
+          const current = useLabStore.getState();
+          // A changed status causes integrationRefreshKey to start the normal
+          // full sweep. Only refresh here when the session stayed identical,
+          // so wake-up never sends quotes with a stale credential.
+          if (current.credentialGeneration !== generationBeforeStatusRead || !current.userStateLoaded || !current.integrationStatus?.credentialConfigured) return false;
+          return refreshLiveData();
+        })
+        .catch(() => false)
+        .finally(() => {
+          resumeRecoveryPendingRef.current = false;
+          resumeRecoveryInFlightRef.current = false;
+        });
+    };
+    const markActiveAndReconcile = () => {
+      if (!isVisible()) return;
+      const now = Date.now();
+      const recover = shouldRecoverAfterResume(resumeLastActiveAtRef.current, now);
+      resumeLastActiveAtRef.current = now;
+      reconcile({ recover });
+    };
+    const reconcileOnInterval = () => {
+      const now = Date.now();
+      const recover = isVisible() && shouldRecoverAfterResume(resumeLastActiveAtRef.current, now);
+      if (isVisible()) resumeLastActiveAtRef.current = now;
+      reconcile({ recover });
+    };
+    const timer = window.setInterval(reconcileOnInterval, INTEGRATION_STATUS_RECONCILE_INTERVAL_MS);
+    window.addEventListener("focus", markActiveAndReconcile);
+    window.addEventListener("pageshow", markActiveAndReconcile);
+    document.addEventListener("visibilitychange", markActiveAndReconcile);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", markActiveAndReconcile);
+      window.removeEventListener("pageshow", markActiveAndReconcile);
+      document.removeEventListener("visibilitychange", markActiveAndReconcile);
+    };
+  }, [refreshIntegrationStatus, refreshLiveData, refreshPolicy]);
   useEffect(() => {
     void hydrateUserState();
     void hydrateIntegrationStatus();
@@ -163,7 +202,7 @@ export function App() {
     const isVisible = () => document.visibilityState !== "hidden";
     const prioritySymbols = [...new Set(priorityRefreshKey.split("|").filter(Boolean))];
     const refreshPriority = () => {
-      if (isVisible()) void refreshLiveData({ symbols: prioritySymbols });
+      if (isVisible() && !resumeRecoveryPendingRef.current) void refreshLiveData({ symbols: prioritySymbols });
     };
     const refreshFull = () => {
       if (isVisible()) void refreshLiveData();
