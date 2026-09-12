@@ -73,6 +73,8 @@ async def main() -> None:
         checks.append({"flow": "真实数据筛选状态", "passed": True})
         await expect(page.get_by_role("button", name="导出结果", exact=True)).to_be_disabled()
         checks.append({"flow": "研究结果导出真实数据门禁", "passed": True})
+        await expect(page.get_by_role("region", name="研究结果对比")).to_have_count(0)
+        checks.append({"flow": "研究结果对比真实数据门禁", "passed": True})
         await page.get_by_label("筛选名称").fill("__qa_research_screen__")
         await page.get_by_role("button", name="保存筛选", exact=True).click()
         await expect(page.get_by_role("option", name="__qa_research_screen__", exact=True)).to_be_attached()

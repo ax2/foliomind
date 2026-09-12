@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { activeResearchFilterCount, filterResearchItems, researchResultsCsv, sortResearchItems } from "./research.js";
+import { activeResearchFilterCount, filterResearchItems, MAX_RESEARCH_COMPARISON_ITEMS, researchResultsCsv, sortResearchItems } from "./research.js";
 
 describe("research sorting", () => {
+  it("keeps comparison bounded to four items", () => {
+    expect(MAX_RESEARCH_COMPARISON_ITEMS).toBe(4);
+  });
   it("sorts valuation fields with missing values last and stable ties", () => {
     const items = [{ symbol: "A", name: "Alpha" }, { symbol: "B", name: "Beta" }, { symbol: "C", name: "Gamma" }, { symbol: "D", name: "Delta" }];
     const quotes = { A: { pe: 12 }, B: { pe: 8 }, C: { pe: null }, D: { pe: 8 } };

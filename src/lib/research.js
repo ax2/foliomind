@@ -16,6 +16,8 @@ export const RESEARCH_FILTER_FIELDS = Object.freeze([
   { id: "minVolume", label: "成交量下限", field: "volume", suffix: "", description: "只保留成交量不低于该值的真实报价" },
 ]);
 
+export const MAX_RESEARCH_COMPARISON_ITEMS = 4;
+
 export const DEFAULT_RESEARCH_FILTERS = Object.freeze({
   minChange: "",
   maxChange: "",

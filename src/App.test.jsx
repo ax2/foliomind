@@ -462,6 +462,21 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
   });
 
+  it("compares selected complete real research results without changing state", () => {
+    const watchlist = [{ symbol: "600519", name: "贵州茅台", market: "沪深" }, { symbol: "AAPL", name: "Apple", market: "NASDAQ" }];
+    const liveQuotes = { "600519": { price: 1297.4, change: 1.25, pe: 22, pb: 4, volume: 100, asOf: "2026-09-12T08:00:00Z" }, AAPL: { price: 227.5, change: -0.4, pe: 30, pb: 8, volume: 200, asOf: "2026-09-12T08:00:00Z" } };
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: "2026-09-12T08:00:00Z" });
+    render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: "加入贵州茅台对比" }));
+    fireEvent.click(screen.getByRole("button", { name: "加入Apple对比" }));
+    expect(screen.getByRole("region", { name: "研究结果对比" })).toHaveTextContent("贵州茅台");
+    expect(screen.getByRole("region", { name: "研究结果对比" })).toHaveTextContent("227.50");
+    expect(screen.getByRole("button", { name: "移出贵州茅台对比" })).toHaveTextContent("已对比");
+    fireEvent.click(screen.getByRole("button", { name: "清空对比" }));
+    expect(screen.queryByRole("region", { name: "研究结果对比" })).not.toBeInTheDocument();
+    expect(useLabStore.getState().watchlist).toEqual(watchlist);
+  });
+
   it("opens the monitor composer with a research result", async () => {
     useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } }, rules: [], monitorComposerRequest: null });
     render(<ResearchView />);

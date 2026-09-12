@@ -1666,7 +1666,7 @@ textarea:focus-visible {
 .research-sort-direction { min-height: 32px; border: 1px solid #dfe2e7; border-radius: 8px; padding: 0 10px; background: #fff; color: #526071; cursor: pointer; font-size: 11px; }
 .research-sort-direction:disabled { color: #aab2bc; background: #f7f8fa; cursor: not-allowed; }
 .research-table { margin-top: 22px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
-.research-table-head, .research-row { display: grid; grid-template-columns: minmax(210px, 1.5fr) repeat(5, minmax(110px, 1fr)) minmax(82px, auto); align-items: center; min-width: 900px; padding: 0 15px; }
+.research-table-head, .research-row { display: grid; grid-template-columns: minmax(210px, 1.5fr) repeat(5, minmax(110px, 1fr)) repeat(2, minmax(82px, auto)); align-items: center; min-width: 980px; padding: 0 15px; }
 .research-table-head { height: 38px; background: #f7f8fa; color: #7b8490; font-size: 10px; }
 .research-row { min-height: 64px; border-top: 1px solid var(--line); color: #3f4855; font-size: 11px; font-variant-numeric: tabular-nums; }
 .research-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
@@ -1678,6 +1678,23 @@ textarea:focus-visible {
 .research-row small { color: var(--muted); font-size: 10px; }
 .research-row-monitor { justify-self: end; min-height: 30px; border: 1px solid #cfe0f5; border-radius: 7px; padding: 0 8px; background: #fff; color: var(--blue); cursor: pointer; font-size: 10px; }
 .research-row-monitor:hover, .research-row-monitor:focus-visible { border-color: #8ebbed; background: var(--blue-soft); }
+.research-row-compare { justify-self: end; min-height: 30px; border: 1px solid #dfe5ed; border-radius: 7px; padding: 0 8px; background: #fff; color: #697586; cursor: pointer; font-size: 10px; }
+.research-row-compare[aria-pressed="true"] { border-color: #9bc5f7; background: var(--blue-soft); color: var(--blue); }
+.research-row-compare:hover, .research-row-compare:focus-visible { border-color: #8ebbed; background: var(--blue-soft); color: var(--blue); }
+.research-row-compare:disabled { opacity: .45; cursor: not-allowed; }
+.research-comparison { margin-top: 18px; border: 1px solid #dce8f6; border-radius: 10px; padding: 14px; background: #fbfdff; }
+.research-comparison-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.research-comparison-heading h2 { margin: 0; color: #2b3a4f; font-size: 14px; }
+.research-comparison-heading p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.research-comparison-heading > div:last-child { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.research-comparison-table { margin-top: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.research-comparison-head, .research-comparison-row { display: grid; grid-template-columns: 100px repeat(var(--comparison-columns, 2), minmax(120px, 1fr)); min-width: 340px; align-items: center; }
+.research-comparison-head { min-height: 42px; background: #f7f8fa; color: #687688; font-size: 10px; }
+.research-comparison-head > span, .research-comparison-row > * { min-width: 0; padding: 7px 10px; }
+.research-comparison-head > span:not(:first-child) { display: grid; gap: 2px; color: #2b3a4f; font-weight: 600; overflow: hidden; }
+.research-comparison-head small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.research-comparison-row { min-height: 34px; border-top: 1px solid var(--line); color: #3f4e62; font-size: 10px; font-variant-numeric: tabular-nums; }
+.research-comparison-row strong { color: var(--muted); font-weight: 500; }
 .research-empty { margin-top: 12vh; }
 .risk-overview { margin-top: 24px; border: 1px solid #dfe8f5; border-radius: 10px; padding: 16px; background: #fbfdff; }
 .risk-overview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -2450,6 +2467,8 @@ textarea:focus-visible {
   .research-screen-bar > label, .research-screen-bar form { width: 100%; }
   .research-screen-bar > label select, .research-screen-bar form input { flex: 1; width: auto; }
   .research-screen-bar > .icon-button { align-self: flex-start; }
+  .research-comparison-heading { flex-direction: column; gap: 8px; }
+  .research-comparison-heading > div:last-child { width: 100%; justify-content: space-between; }
   .events-toolbar { align-items: stretch; flex-direction: column; }
   .events-toolbar .search-box { width: 100%; }
   .market-header-actions { width: 100%; justify-content: flex-start; }
