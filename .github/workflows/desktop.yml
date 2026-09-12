@@ -80,6 +80,39 @@ jobs:
       - run: npm run fetch:pi
       - run: npm run fetch:bash
       - run: npm run smoke:pi
+      - name: Download previous release installer for upgrade smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'FolioMind-CI' }
+          $currentText = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($currentText -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw "Invalid current version: $currentText" }
+          $currentVersion = [version]::new([int]$Matches[0].Split('.')[0], [int]$Matches[0].Split('.')[1], [int]($Matches[0].Split('.')[2] -replace '[-+].*$', ''))
+          $releases = Invoke-RestMethod -Uri 'https://api.github.com/repos/${{ github.repository }}/releases?per_page=100' -Headers $headers
+          $previous = $releases | ForEach-Object {
+            $tag = [string]$_.tag_name
+            if ($tag -match '^v?(\d+)\.(\d+)\.(\d+)$' -and -not $_.draft -and -not $_.prerelease) {
+              $version = [version]::new([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+              if ($version -lt $currentVersion) {
+                [pscustomobject]@{ Version = $version; VersionText = $tag.TrimStart('v'); Release = $_ }
+              }
+            }
+          } | Sort-Object Version -Descending | Select-Object -First 1
+          if (-not $previous) { throw "No published release older than $currentText was found" }
+          $assetName = if ('${{ matrix.installer_kind }}' -eq 'nsis') {
+            "FolioMind_$($previous.VersionText)_x64-setup.exe"
+          } else {
+            "FolioMind_$($previous.VersionText)_x64_en-US.msi"
+          }
+          $asset = @($previous.Release.assets) | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+          if (-not $asset) { throw "Release $($previous.Release.tag_name) does not contain $assetName" }
+          $destination = Join-Path $env:RUNNER_TEMP ("foliomind-previous-${{ matrix.installer_kind }}$([IO.Path]::GetExtension($assetName))")
+          Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile $destination
+          if (-not (Test-Path -LiteralPath $destination -PathType Leaf) -or (Get-Item -LiteralPath $destination).Length -lt 100KB) {
+            throw "Previous installer download is missing or unexpectedly small: $destination"
+          }
+          "FOLIOMIND_PREVIOUS_INSTALLER=$destination" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - if: runner.os == 'macOS'
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
@@ -93,6 +126,15 @@ jobs:
             Where-Object { -not $_.PSIsContainer } | Select-Object -First 1
           if (-not $installer) { throw "No $extension installer found" }
           ./scripts/installer-smoke.ps1 -Kind '${{ matrix.installer_kind }}' -InstallerPath $installer.FullName
+      - name: Smoke test Windows upgrade
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $extension = if ('${{ matrix.installer_kind }}' -eq 'nsis') { '*.exe' } else { '*.msi' }
+          $installer = Get-ChildItem -Path 'src-tauri/target/release/bundle/${{ matrix.installer_dir }}' -Filter $extension |
+            Where-Object { -not $_.PSIsContainer } | Select-Object -First 1
+          if (-not $installer) { throw "No $extension installer found" }
+          ./scripts/installer-upgrade-smoke.ps1 -Kind '${{ matrix.installer_kind }}' -PreviousInstallerPath $env:FOLIOMIND_PREVIOUS_INSTALLER -CurrentInstallerPath $installer.FullName
       - name: Smoke test macOS DMG
         if: runner.os == 'macOS'
         run: bash scripts/installer-smoke-macos.sh
