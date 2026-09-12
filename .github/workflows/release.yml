@@ -237,7 +237,8 @@ jobs:
         shell: pwsh
         run: |
           $extension = if ('${{ matrix.installer_kind }}' -eq 'nsis') { '*.exe' } else { '*.msi' }
-          $installer = Get-ChildItem -Path 'src-tauri/target/release/bundle/${{ matrix.installer_dir }}' -Filter $extension -File | Select-Object -First 1
+          $installer = Get-ChildItem -Path 'src-tauri/target/release/bundle/${{ matrix.installer_dir }}' -Filter $extension |
+            Where-Object { -not $_.PSIsContainer } | Select-Object -First 1
           if (-not $installer) { throw "No $extension installer found" }
           ./scripts/installer-smoke.ps1 -Kind '${{ matrix.installer_kind }}' -InstallerPath $installer.FullName
       - name: Smoke test macOS DMG

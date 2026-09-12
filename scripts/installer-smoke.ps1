@@ -17,7 +17,8 @@ function Get-InstalledExecutable {
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
 
   foreach ($root in $roots) {
-    $match = Get-ChildItem -LiteralPath $root -Filter "FolioMind.exe" -File -Recurse -Force -ErrorAction SilentlyContinue |
+    $match = Get-ChildItem -LiteralPath $root -Filter "FolioMind.exe" -Recurse -Force -ErrorAction SilentlyContinue |
+      Where-Object { -not $_.PSIsContainer } |
       Select-Object -First 1
     if ($match) { return $match }
   }
@@ -40,7 +41,10 @@ function Invoke-CheckedProcess {
   }
 }
 
-$installer = Get-Item -LiteralPath $InstallerPath -File
+$installer = Get-Item -LiteralPath $InstallerPath
+if ($installer.PSIsContainer) {
+  throw "Installer path is a directory: $InstallerPath"
+}
 $expectedExtension = if ($Kind -eq "nsis") { ".exe" } else { ".msi" }
 if ($installer.Extension -ine $expectedExtension) {
   throw "Expected a $Kind installer, got $($installer.Name)"
