@@ -174,6 +174,25 @@ test("two Local Hosts serialize credential writes and keep revision pairs consis
   assert.ok(savedPairs.has(`${finalStatus.payload.keyPrefix}|${finalStatus.payload.credentialRevision}`));
 });
 
+test("Local Host detects an unmanaged same-prefix credential replacement", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-external-change-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const saved = await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_same_prefix_original" } });
+  const before = await hostRequest(host, "/api/integration/status");
+  assert.equal(before.payload.credentialRevision, saved.payload.credentialRevision);
+
+  // Simulate an external editor or credential migration that cannot update
+  // the Local Host's random revision sidecar. The replacement deliberately
+  // keeps the visible prefix unchanged.
+  await writeFile(join(dataDir, "qveris-api-key"), "sk_same_prefix_replaced\n", { encoding: "utf8", mode: 0o600 });
+  const after = await hostRequest(host, "/api/integration/status");
+  assert.equal(after.payload.keyPrefix, before.payload.keyPrefix);
+  assert.notEqual(after.payload.credentialRevision, before.payload.credentialRevision);
+});
+
 test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-lock-"));
   context.after(() => rm(dataDir, { recursive: true, force: true }));

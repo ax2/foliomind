@@ -972,10 +972,22 @@ async function readCredentialRevisionUnlocked() {
   } catch { /* legacy installs receive a revision on the next write */ }
   return "legacy";
 }
+async function credentialFileSignatureUnlocked() {
+  try {
+    const metadata = await stat(credentialFile, { bigint: true });
+    // Do not expose the credential or derive a stable public fingerprint from
+    // it. File metadata is only a local invalidation suffix, so an unmanaged
+    // same-prefix replacement still changes the status revision.
+    return `${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
+  } catch { return "missing"; }
+}
+async function credentialRevisionSnapshotUnlocked() {
+  return `${await readCredentialRevisionUnlocked()}:${await credentialFileSignatureUnlocked()}`;
+}
 async function readCredentialSnapshot() {
   const release = await acquireCredentialFileLock();
   try {
-    return { key: await readKeyUnlocked(), credentialRevision: await readCredentialRevisionUnlocked() };
+    return { key: await readKeyUnlocked(), credentialRevision: await credentialRevisionSnapshotUnlocked() };
   } finally {
     await release();
   }
@@ -996,7 +1008,8 @@ async function saveKey(value) {
   const release = await acquireCredentialFileLock();
   try {
     await writePrivateText(credentialFile, `${value.trim()}\n`);
-    return await writeCredentialRevisionUnlocked();
+    await writeCredentialRevisionUnlocked();
+    return await credentialRevisionSnapshotUnlocked();
   } finally {
     await release();
   }
@@ -1005,7 +1018,8 @@ async function deleteKey() {
   const release = await acquireCredentialFileLock();
   try {
     try { await unlink(credentialFile); } catch { /* idempotent */ }
-    return await writeCredentialRevisionUnlocked();
+    await writeCredentialRevisionUnlocked();
+    return await credentialRevisionSnapshotUnlocked();
   } finally {
     await release();
   }
