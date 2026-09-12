@@ -477,6 +477,16 @@ describe("FolioMind core flows", () => {
     expect(useLabStore.getState().watchlist).toEqual(watchlist);
   });
 
+  it("disables a fifth research comparison selection", () => {
+    const watchlist = ["A", "B", "C", "D", "E"].map((symbol, index) => ({ symbol, name: `标的${index + 1}`, market: "沪深" }));
+    const liveQuotes = Object.fromEntries(watchlist.map((item, index) => [item.symbol, { price: 100 + index, change: index, asOf: "2026-09-12T08:00:00Z" }]));
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: "2026-09-12T08:00:00Z" });
+    render(<ResearchView />);
+    watchlist.slice(0, 4).forEach((item) => fireEvent.click(screen.getByRole("button", { name: `加入${item.name}对比` })));
+    expect(screen.getByText("4/4 个标的")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "加入标的5对比" })).toBeDisabled();
+  });
+
   it("opens the monitor composer with a research result", async () => {
     useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } }, rules: [], monitorComposerRequest: null });
     render(<ResearchView />);
