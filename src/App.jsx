@@ -30,6 +30,10 @@ const DeveloperPanel = lazy(() => import("./components/DeveloperPanel.jsx").then
 
 const secondaryViewLoading = <div className="secondary-view-loading" role="status" aria-live="polite">正在打开工作台…</div>;
 
+function integrationSessionKey({ credentialGeneration, integrationStatus } = {}) {
+  return [credentialGeneration, integrationStatus?.credentialConfigured, integrationStatus?.keyPrefix, integrationStatus?.credentialRevision, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
+}
+
 export function App() {
   const reconcileIntegrationChange = useLabStore((state) => state.reconcileIntegrationChange);
   const refreshIntegrationStatus = useLabStore((state) => state.refreshIntegrationStatus);
@@ -69,7 +73,7 @@ export function App() {
   // A credential replacement must invalidate the current data session even
   // when settings and the displayed prefix stay the same. Successful writes
   // explicitly advance the local generation without retaining the key.
-  const integrationRefreshKey = [credentialGeneration, integrationStatus?.credentialConfigured, integrationStatus?.keyPrefix, integrationStatus?.credentialRevision, integrationStatus?.settings?.modelId, integrationStatus?.settings?.modelGatewayBaseUrl, integrationStatus?.settings?.capabilityBaseUrl, integrationStatus?.settings?.dataChannel, integrationStatus?.settings?.dataProvider].join("|");
+  const integrationRefreshKey = integrationSessionKey({ credentialGeneration, integrationStatus });
   const priorityRefreshKey = [selectedSymbol, ...portfolioPositions.map((position) => position.symbol), ...rules.filter((rule) => rule.enabled && rule.scope !== "watchlist").map((rule) => rule.symbol)].filter(Boolean).join("|");
   const pollingChannelRef = useRef("");
   const resumeLastActiveAtRef = useRef(Date.now());
@@ -85,18 +89,21 @@ export function App() {
     const isVisible = () => document.visibilityState === "visible";
     const reconcile = ({ recover = false } = {}) => {
       if (!isVisible()) return;
-      const generationBeforeStatusRead = useLabStore.getState().credentialGeneration;
+      const stateBeforeStatusRead = useLabStore.getState();
+      const generationBeforeStatusRead = stateBeforeStatusRead.credentialGeneration;
+      const integrationRefreshKeyBeforeStatusRead = integrationSessionKey(stateBeforeStatusRead);
       const statusRead = Promise.resolve().then(() => refreshIntegrationStatus());
       if (!recover || refreshPolicyConfig(refreshPolicy).id === "manual" || resumeRecoveryInFlightRef.current) return;
       resumeRecoveryPendingRef.current = true;
       resumeRecoveryInFlightRef.current = true;
       void statusRead
-        .then(() => {
+        .then((statusReadSucceeded) => {
+          if (!statusReadSucceeded) return false;
           const current = useLabStore.getState();
           // A changed status causes integrationRefreshKey to start the normal
           // full sweep. Only refresh here when the session stayed identical,
           // so wake-up never sends quotes with a stale credential.
-          if (current.credentialGeneration !== generationBeforeStatusRead || !current.userStateLoaded || !current.integrationStatus?.credentialConfigured) return false;
+          if (current.credentialGeneration !== generationBeforeStatusRead || integrationSessionKey(current) !== integrationRefreshKeyBeforeStatusRead || !current.userStateLoaded || !current.integrationStatus?.credentialConfigured) return false;
           return refreshLiveData();
         })
         .catch(() => false)

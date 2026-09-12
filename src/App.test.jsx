@@ -1510,11 +1510,49 @@ describe("FolioMind core flows", () => {
       expect(fullRefreshTick).toBeTypeOf("function");
       act(() => fullRefreshTick());
       expect(refreshLiveData).not.toHaveBeenCalled();
-      resolveResumeStatus(status);
+      resolveResumeStatus({ ...status, credentialRevision: "rev-2" });
       await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+      expect(refreshLiveData).toHaveBeenCalledTimes(1);
       expect(refreshLiveData).not.toHaveBeenCalledWith({ symbols: expect.any(Array) });
     } finally {
       setIntervalSpy.mockRestore();
+      Date.now = originalNow;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
+    }
+  });
+
+  it("does not refresh after Host reconciliation fails during a long hidden resume", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData, hydrateUserState: vi.fn().mockResolvedValue(true) });
+    const originalNow = Date.now;
+    const previousVisibilityState = document.visibilityState;
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      render(<App />);
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+      refreshLiveData.mockClear();
+      integrationMocks.loadIntegrationStatus.mockReset().mockRejectedValueOnce(new Error("Host unavailable"));
+
+      now += 60_000;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => window.dispatchEvent(new Event("pageshow")));
+
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(refreshLiveData).not.toHaveBeenCalled();
+    } finally {
       Date.now = originalNow;
       Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
     }
