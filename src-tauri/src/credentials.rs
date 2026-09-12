@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
 };
 
+use sha2::{Digest, Sha256};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
@@ -22,13 +23,11 @@ pub fn credential_revision(value: Option<&str>) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    // FNV-1a is intentionally used here instead of a process-randomized
-    // hasher: revisions must compare equal across independently running
-    // desktop/Web Host processes while remaining credential-free.
-    let hash = value.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3_u64)
-    });
-    Some(format!("{hash:016x}"))
+    // SHA-256 is deterministic across Local Host and native desktop Host
+    // processes while avoiding a short, collision-prone revision token. The
+    // digest is only used for local invalidation and never used as a key.
+    let digest = Sha256::digest(value.as_bytes());
+    Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 pub trait CredentialStore: Send + Sync {
@@ -37,11 +36,32 @@ pub trait CredentialStore: Send + Sync {
     fn delete_qveris_key(&self) -> Result<(), String>;
 }
 
-pub struct OsCredentialStore;
+pub struct OsCredentialStore {
+    service: String,
+    account: String,
+}
+
+impl Default for OsCredentialStore {
+    fn default() -> Self {
+        Self::new(SERVICE, ACCOUNT)
+    }
+}
 
 impl OsCredentialStore {
+    fn new(service: impl Into<String>, account: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            account: account.into(),
+        }
+    }
+
+    #[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
+    fn for_test_entry(service: impl Into<String>, account: impl Into<String>) -> Self {
+        Self::new(service, account)
+    }
+
     fn entry(&self) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(SERVICE, ACCOUNT)
+        keyring::Entry::new(&self.service, &self.account)
             .map_err(|error| format!("credential store unavailable: {error}"))
     }
 
@@ -208,6 +228,7 @@ impl CredentialStore for InMemoryCredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn in_memory_store_round_trips_without_environment_variables() {
         let store = InMemoryCredentialStore::new();
@@ -225,11 +246,86 @@ mod tests {
     fn credential_revision_is_stable_but_changes_for_different_keys() {
         let first = credential_revision(Some("key-one")).unwrap();
         assert_eq!(
+            first,
+            "9b346041bc9a49574eb2665b2ad2a0a3f9f9cce4e42f5d1f26deb8a256b5966a"
+        );
+        assert_eq!(
             credential_revision(Some(" key-one ")).as_deref(),
             Some(first.as_str())
         );
         assert_ne!(Some(first), credential_revision(Some("key-two")));
         assert_eq!(credential_revision(None), None);
         assert_eq!(credential_revision(Some("  ")), None);
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires an explicit platform keyring smoke opt-in"]
+    fn os_keyring_round_trips() {
+        assert_eq!(
+            std::env::var("FOLIOMIND_KEYRING_SMOKE").as_deref(),
+            Ok("1"),
+            "set FOLIOMIND_KEYRING_SMOKE=1 to run the platform keyring smoke"
+        );
+
+        let service = format!("app.foliomind.desktop.smoke.{}", uuid::Uuid::new_v4());
+        let account = format!("qveris-api-key-{}", uuid::Uuid::new_v4());
+        let store = OsCredentialStore::for_test_entry(&service, &account);
+        let first = "foliomind-keyring-smoke-first";
+        let second = "foliomind-keyring-smoke-second";
+
+        let result = (|| {
+            assert_eq!(store.read_qveris_key()?, None);
+            store.write_qveris_key(first)?;
+            assert_eq!(store.read_qveris_key()?.as_deref(), Some(first));
+            let first_revision = credential_revision(Some(first)).unwrap();
+
+            // A separate process writes the same native credential. The
+            // wrapper must read the fresh value and derive a new
+            // non-sensitive revision.
+            let writer = std::process::Command::new(std::env::current_exe().map_err(|error| {
+                format!("cannot locate keyring smoke test executable: {error}")
+            })?)
+            .arg("os_keyring_external_writer")
+            .arg("--ignored")
+            .arg("--exact")
+            .env("FOLIOMIND_KEYRING_SMOKE", "1")
+            .env("FOLIOMIND_KEYRING_SMOKE_SERVICE", &service)
+            .env("FOLIOMIND_KEYRING_SMOKE_ACCOUNT", &account)
+            .env("FOLIOMIND_KEYRING_SMOKE_VALUE", second)
+            .status()
+            .map_err(|error| format!("cannot start external keyring writer: {error}"))?;
+            if !writer.success() {
+                return Err(format!("external keyring writer exited with {writer:?}"));
+            }
+            assert_eq!(store.read_qveris_key()?.as_deref(), Some(second));
+            assert_ne!(Some(first_revision), credential_revision(Some(second)));
+
+            store.delete_qveris_key()?;
+            assert_eq!(store.read_qveris_key()?, None);
+            Ok::<(), String>(())
+        })();
+
+        let _ = store.delete_qveris_key();
+        result.unwrap();
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "invoked by the platform keyring smoke in a child process"]
+    fn os_keyring_external_writer() {
+        assert_eq!(
+            std::env::var("FOLIOMIND_KEYRING_SMOKE").as_deref(),
+            Ok("1"),
+            "set FOLIOMIND_KEYRING_SMOKE=1 to run the platform keyring smoke"
+        );
+        let service = std::env::var("FOLIOMIND_KEYRING_SMOKE_SERVICE")
+            .expect("keyring smoke service is required");
+        let account = std::env::var("FOLIOMIND_KEYRING_SMOKE_ACCOUNT")
+            .expect("keyring smoke account is required");
+        let value = std::env::var("FOLIOMIND_KEYRING_SMOKE_VALUE")
+            .expect("keyring smoke value is required");
+        let entry = keyring::Entry::new(&service, &account).unwrap();
+        entry.set_password(&value).unwrap();
     }
 }

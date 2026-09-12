@@ -17,10 +17,12 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function startHost(dataDir) {
+async function startHost(dataDir, { clearEnvCredential = false } = {}) {
+  const env = { ...process.env, FOLIOMIND_HOST_PORT: "0", FOLIOMIND_DEV_DATA_DIR: dataDir };
+  if (clearEnvCredential) delete env.QVERIS_API_KEY;
   const child = spawn(process.execPath, ["scripts/local-host.mjs"], {
     cwd: projectRoot,
-    env: { ...process.env, FOLIOMIND_HOST_PORT: "0", FOLIOMIND_DEV_DATA_DIR: dataDir },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -72,6 +74,11 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(unauthenticated.response.status, 401);
   assert.equal(unauthenticated.payload.error, "invalid local host session");
 
+  const firstRun = await hostRequest(host, "/api/user-state");
+  assert.equal(firstRun.response.status, 200);
+  assert.equal(firstRun.payload.onboardingCompleted, false);
+  assert.deepEqual(firstRun.payload.watchlist, []);
+
   const credential = await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_contract_test_123456" } });
   assert.equal(credential.response.status, 200);
   assert.equal(credential.payload.configured, true);
@@ -120,6 +127,92 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(cleared.payload.cleared, true);
   const emptyOverview = await hostRequest(host, "/api/dev/overview");
   assert.equal(emptyOverview.payload.logs.length, 0);
+});
+
+test("Local Host accepts an explicitly completed empty workspace", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-empty-workspace-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const state = { revision: 0, onboardingCompleted: true, watchlist: [], monitorRules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [] };
+  const saved = await hostRequest(host, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } });
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.payload.onboardingCompleted, true);
+  assert.deepEqual(saved.payload.watchlist, []);
+
+  const restored = await hostRequest(host, "/api/user-state");
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.payload.onboardingCompleted, true);
+  assert.deepEqual(restored.payload.watchlist, []);
+});
+
+test("two Local Hosts serialize credential writes and keep revision pairs consistent", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-lock-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const first = await startHost(dataDir, { clearEnvCredential: true });
+  const second = await startHost(dataDir, { clearEnvCredential: true });
+  context.after(async () => {
+    await stopHost(first.child);
+    await stopHost(second.child);
+  });
+
+  const keys = [
+    "sk_alpha_1234567890",
+    "sk_bravo_1234567890",
+    "sk_charlie_1234567890",
+    "sk_delta_1234567890",
+    "sk_echo_1234567890",
+    "sk_foxtrot_1234567890",
+    "sk_golf_1234567890",
+    "sk_hotel_1234567890",
+  ];
+  const results = await Promise.all(keys.map((apiKey, index) => hostRequest(index % 2 ? second : first, "/api/integration/credential", { method: "POST", body: { apiKey } })));
+  assert.ok(results.every(({ response }) => response.status === 200));
+  const savedPairs = new Set(results.map(({ payload }) => `${payload.keyPrefix}|${payload.credentialRevision}`));
+
+  const finalStatus = await hostRequest(first, "/api/integration/status");
+  assert.equal(finalStatus.response.status, 200);
+  assert.ok(savedPairs.has(`${finalStatus.payload.keyPrefix}|${finalStatus.payload.credentialRevision}`));
+});
+
+test("Local Host detects an unmanaged same-prefix credential replacement", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-external-change-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const host = await startHost(dataDir);
+  context.after(() => stopHost(host.child));
+
+  const saved = await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_same_prefix_original" } });
+  const before = await hostRequest(host, "/api/integration/status");
+  assert.equal(before.payload.credentialRevision, saved.payload.credentialRevision);
+
+  // Simulate an external editor or credential migration. The replacement
+  // deliberately keeps the visible prefix unchanged.
+  await writeFile(join(dataDir, "qveris-api-key"), "sk_same_prefix_replaced\n", { encoding: "utf8", mode: 0o600 });
+  const after = await hostRequest(host, "/api/integration/status");
+  assert.equal(after.payload.keyPrefix, before.payload.keyPrefix);
+  assert.notEqual(after.payload.credentialRevision, before.payload.credentialRevision);
+});
+
+test("Local Host returns one deterministic revision for every process", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-revision-contract-"));
+  context.after(() => rm(dataDir, { recursive: true, force: true }));
+  const first = await startHost(dataDir, { clearEnvCredential: true });
+  const second = await startHost(dataDir, { clearEnvCredential: true });
+  context.after(async () => {
+    await stopHost(first.child);
+    await stopHost(second.child);
+  });
+
+  const saved = await hostRequest(first, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_cross_process_contract" } });
+  const status = await hostRequest(second, "/api/integration/status");
+  assert.equal(status.payload.credentialRevision, saved.payload.credentialRevision);
+  assert.match(status.payload.credentialRevision, /^[0-9a-f]{64}$/);
+
+  const cleared = await hostRequest(second, "/api/integration/credential", { method: "DELETE" });
+  assert.equal(cleared.payload.credentialRevision, null);
+  const empty = await hostRequest(first, "/api/integration/status");
+  assert.equal(empty.payload.credentialRevision, null);
 });
 
 test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {

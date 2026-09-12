@@ -111,7 +111,7 @@ impl Default for PiHost {
                 staged_model_catalog: None,
             })),
             next_id: Arc::new(AtomicU64::new(1)),
-            credentials: Arc::new(OsCredentialStore),
+            credentials: Arc::new(OsCredentialStore::default()),
             web_events: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -1475,6 +1475,9 @@ fn main() {
             }
         };
     app.run(move |app_handle, event| {
+        if matches!(&event, tauri::RunEvent::Resumed) {
+            let _ = app_handle.emit(desktop_lifecycle::RESUMED_EVENT, ());
+        }
         if matches!(
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit

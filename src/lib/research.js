@@ -16,6 +16,8 @@ export const RESEARCH_FILTER_FIELDS = Object.freeze([
   { id: "minVolume", label: "成交量下限", field: "volume", suffix: "", description: "只保留成交量不低于该值的真实报价" },
 ]);
 
+export const MAX_RESEARCH_COMPARISON_ITEMS = 4;
+
 export const DEFAULT_RESEARCH_FILTERS = Object.freeze({
   minChange: "",
   maxChange: "",
@@ -36,6 +38,40 @@ export function normalizeResearchFilters(value) {
     const raw = filters[key];
     return [key, raw == null ? "" : String(raw).trim().slice(0, 24)];
   }));
+}
+
+function csvCell(value) {
+  let text = value == null ? "" : String(value);
+  if (typeof value === "string" && /^[=+@-]/.test(text)) text = `'${text}`;
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function csvNumber(value, { positive = false } = {}) {
+  if (value == null || String(value).trim() === "") return "";
+  const number = Number(value);
+  return Number.isFinite(number) && (!positive || number > 0) ? number : "";
+}
+
+/** Export only the current research result set; missing real fields remain blank. */
+export function researchResultsCsv(items, quotes = {}) {
+  const columns = ["代码", "名称", "市场", "最新价", "涨跌幅", "市盈率", "市净率", "成交量", "数据时间", "来源"];
+  const lines = [columns.map(csvCell).join(",")];
+  for (const item of Array.isArray(items) ? items : []) {
+    const quote = quoteForSymbol(quotes, item?.symbol);
+    lines.push([
+      item?.symbol || "",
+      item?.name || "",
+      item?.market || "",
+      csvNumber(quote?.price, { positive: true }),
+      csvNumber(quote?.change),
+      csvNumber(quote?.pe),
+      csvNumber(quote?.pb),
+      csvNumber(quote?.volume, { positive: true }),
+      quote?.asOf || "",
+      quote?.source || "",
+    ].map(csvCell).join(","));
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
 }
 
 /** Filter only by real quote fields; a configured bound excludes missing fields. */

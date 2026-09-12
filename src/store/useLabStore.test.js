@@ -9,12 +9,13 @@ vi.mock("../lib/localHost.js", () => ({ getDeveloperVariable: (_name, fallback) 
 vi.mock("../lib/userState.js", async (importOriginal) => ({ ...(await importOriginal()), loadUserState: persistence.loadUserState, saveUserState: persistence.saveUserState }));
 vi.mock("../lib/integrations.js", () => ({ loadIntegrationStatus: integration.loadStatus, queryCapabilityData: runtime.queryCachedData, queryTradingCalendar: runtime.queryTradingCalendar }));
 
-import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
+import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, LIVE_QUOTE_PRIORITY_REFRESH_INTERVAL_MS, resetUserStatePersistence, shouldFallbackToAgent, useLabStore } from "./useLabStore.js";
 
 const freshAsOf = () => new Date(Date.now() - 60_000).toISOString();
 
 describe("lab store streaming lifecycle", () => {
   beforeEach(async () => {
+    resetUserStatePersistence();
     integration.loadStatus.mockReset();
     runtime.askPi.mockReset();
     runtime.abortPi.mockReset();
@@ -50,6 +51,35 @@ describe("lab store streaming lifecycle", () => {
     const [savedState] = persistence.saveUserState.mock.calls.at(-1);
     expect(savedState).toMatchObject({ workspace: initialLabState.workspace });
     expect(savedState.watchlist).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "TEST" })]));
+  });
+
+  it("persists market columns and rolls back a failed change", async () => {
+    await expect(useLabStore.getState().setMarketColumns(["price", "volume", "unknown"])).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.marketColumns).toEqual(["price", "volume"]);
+    const beforeFailure = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().setMarketColumns(["price", "asOf"])).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(beforeFailure);
+  });
+
+  it("saves and deletes bounded market views through canonical persistence", async () => {
+    const saved = await useLabStore.getState().saveMarketView({ name: "交易盘面", columns: ["price", "volume", "asOf"], apiKey: "sk-secret" });
+    expect(saved).toMatchObject({ name: "交易盘面", columns: ["price", "volume", "asOf"] });
+    expect(saved).not.toHaveProperty("apiKey");
+    const replacement = await useLabStore.getState().saveMarketView({ name: "交易盘面", columns: ["price", "change"] });
+    expect(replacement.id).toBe(saved.id);
+    expect(useLabStore.getState().workspace.savedMarketViews).toHaveLength(1);
+    expect(useLabStore.getState().workspace.savedMarketViews[0].columns).toEqual(["price", "change"]);
+    await expect(useLabStore.getState().deleteMarketView(saved.id, ["price"])).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.savedMarketViews).toHaveLength(0);
+    expect(useLabStore.getState().workspace.marketColumns).toEqual(["price"]);
+  });
+
+  it("rolls back a failed market view save", async () => {
+    const previous = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().saveMarketView({ name: "失败视图", columns: ["price"] })).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(previous);
   });
 
   it("duplicates a saved workspace view from its snapshot without applying it", async () => {
@@ -110,6 +140,28 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().workspace).toBe(previous);
   });
 
+  it("saves, duplicates, and deletes a bounded research screen", async () => {
+    persistence.saveUserState.mockClear();
+    const saved = await useLabStore.getState().saveResearchScreen({ name: "低估值观察", filters: { maxPe: "15", maxPb: "2" } });
+    expect(saved).toMatchObject({ name: "低估值观察", filters: { maxPe: "15", maxPb: "2" } });
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1);
+
+    const copy = await useLabStore.getState().duplicateResearchScreen(saved.id);
+    expect(copy).toMatchObject({ name: "低估值观察 副本", filters: { maxPe: "15", maxPb: "2" } });
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(2);
+
+    await expect(useLabStore.getState().deleteResearchScreen(copy.id)).resolves.toBe(true);
+    expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1);
+    expect(persistence.saveUserState).toHaveBeenCalledTimes(3);
+  });
+
+  it("rolls back a research screen save when canonical persistence fails", async () => {
+    const previous = useLabStore.getState().workspace;
+    persistence.saveUserState.mockRejectedValueOnce(new Error("disk full"));
+    await expect(useLabStore.getState().saveResearchScreen({ name: "失败筛选", filters: { minChange: "3" } })).rejects.toThrow("disk full");
+    expect(useLabStore.getState().workspace).toBe(previous);
+  });
+
   it("keeps user state unloaded and exposes a retry after a Host read failure", async () => {
     const error = new Error("Host unavailable");
     persistence.loadUserState.mockRejectedValueOnce(error).mockResolvedValueOnce({ revision: 8, watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
@@ -119,6 +171,17 @@ describe("lab store streaming lifecycle", () => {
 
     await expect(useLabStore.getState().hydrateUserState()).resolves.toBe(true);
     expect(useLabStore.getState()).toMatchObject({ userStateLoaded: true, userStateLoading: false, userStateError: "", watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }] });
+  });
+
+  it("holds a first-run workspace behind an explicit empty-state choice", async () => {
+    expect(useLabStore.getState()).toMatchObject({ userStateNeedsSetup: true, userStateLoaded: false, onboardingCompleted: false });
+    expect(persistence.saveUserState).not.toHaveBeenCalled();
+
+    await expect(useLabStore.getState().initializeEmptyWorkspace()).resolves.toBe(true);
+
+    expect(useLabStore.getState()).toMatchObject({ userStateNeedsSetup: false, userStateLoaded: true, onboardingCompleted: true, watchlist: [], selectedSymbol: "", rules: [] });
+    const [savedState] = persistence.saveUserState.mock.calls.at(-1);
+    expect(savedState).toMatchObject({ onboardingCompleted: true, watchlist: [] });
   });
 
   it("anchors the selected workspace to the hydrated watchlist", async () => {
@@ -186,6 +249,24 @@ describe("lab store streaming lifecycle", () => {
     expect(useLabStore.getState().integrationStatus).toEqual({ credentialConfigured: false });
   });
 
+  it("keeps the newest integration status read when responses arrive out of order", async () => {
+    let releaseOld;
+    let releaseNewest;
+    integration.loadStatus
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseNewest = resolve; }));
+
+    const oldRead = useLabStore.getState().refreshIntegrationStatus();
+    const newestRead = useLabStore.getState().refreshIntegrationStatus();
+    const newest = { credentialConfigured: true, keyPrefix: "new…", credentialRevision: "rev-new", settings: { modelId: "model-new" } };
+    releaseNewest(newest);
+    await expect(newestRead).resolves.toBe(true);
+
+    releaseOld({ credentialConfigured: true, keyPrefix: "old…", credentialRevision: "rev-old", settings: { modelId: "model-old" } });
+    await expect(oldRead).resolves.toBe(false);
+    expect(useLabStore.getState().integrationStatus).toEqual(newest);
+  });
+
   it("reconciles an unchanged Host snapshot without clearing live data", async () => {
     const status = { credentialConfigured: true, keyPrefix: "same…", credentialRevision: "rev-1", settings: { modelId: "model-a" } };
     useLabStore.setState({ integrationStatus: status, liveQuotes: { AAPL: { price: 100 } } });
@@ -214,6 +295,25 @@ describe("lab store streaming lifecycle", () => {
 
     await expect(hydration).resolves.toBe(true);
     expect(useLabStore.getState().watchlist.map((item) => item.symbol)).toEqual(expect.arrayContaining(["LOCAL", "REMOTE"]));
+  });
+
+  it("ignores a late hydration after a newer hydration starts", async () => {
+    let releaseOldHydration;
+    persistence.loadUserState.mockImplementationOnce(() => new Promise((resolve) => { releaseOldHydration = resolve; }));
+    const oldHydration = useLabStore.getState().hydrateUserState();
+
+    resetUserStatePersistence();
+    persistence.loadUserState.mockResolvedValueOnce({ revision: 14, onboardingCompleted: true, watchlist: [{ symbol: "NEW", name: "新状态", market: "自定义" }] });
+    const currentHydration = useLabStore.getState().hydrateUserState();
+    await expect(currentHydration).resolves.toBe(true);
+
+    releaseOldHydration({ revision: 15, onboardingCompleted: false, watchlist: [] });
+    await expect(oldHydration).resolves.toBe(false);
+    expect(useLabStore.getState()).toMatchObject({
+      userStateLoaded: true,
+      userStateNeedsSetup: false,
+      watchlist: [{ symbol: "NEW", name: "新状态" }],
+    });
   });
 
   it("persists Skill installation changes and rolls back when saving fails", async () => {
@@ -1002,8 +1102,9 @@ describe("lab store streaming lifecycle", () => {
       monitorRules: [{ id: "r1", symbol: "AAPL", strategyId: "price_change", threshold: 5, intervalSeconds: 300, enabled: true }],
       notifications: [],
       portfolioPositions: [],
+      workspace: { watchlistSort: "change", chartRange: "日K", savedViews: [{ id: "view-imported", name: "导入视图", preferences: { watchlistSort: "change", chartRange: "日K" } }] },
     })).resolves.toBe(true);
-    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "AAPL", liveQuotes: {}, watchlist: [{ symbol: "AAPL" }] });
+    expect(useLabStore.getState()).toMatchObject({ selectedSymbol: "AAPL", liveQuotes: {}, watchlist: [{ symbol: "AAPL" }], onboardingCompleted: true, userStateNeedsSetup: false, chartRange: "日K", workspace: { watchlistSort: "change", chartRange: "日K", savedViews: [{ id: "view-imported", name: "导入视图" }] } });
     expect(useLabStore.getState().rules[0]).toMatchObject({ symbol: "AAPL", strategyId: "price_change" });
   });
 

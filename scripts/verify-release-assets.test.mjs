@@ -20,3 +20,7 @@ test("rejects a draft, missing installer, duplicate, or empty asset", () => {
   assert.throws(() => verifyReleaseAssets(payload([...valid, valid[0]]), "0.1.224"), /资产不完整/);
   assert.throws(() => verifyReleaseAssets(payload(valid.map((asset) => asset.name === "SHA256SUMS.txt" ? { ...asset, size: 0 } : asset)), "0.1.224"), /大小无效/);
 });
+
+test("allows a draft only for pre-publication verification", () => {
+  assert.equal(verifyReleaseAssets({ isDraft: true, assets: valid }, "0.1.224", { allowDraft: true }).assets.length, 4);
+});

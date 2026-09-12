@@ -20,7 +20,7 @@ import { isMonitorRuleExpired, normalizeMonitorExpiresAt, normalizeMonitorTrigge
 import { safeExternalUrl } from "../lib/urlSafety.js";
 import { buildPremarketBriefing, normalizePremarketCommodities, normalizePremarketEvents, normalizePremarketIndices, normalizePremarketMarketNews, normalizePremarketNews } from "../lib/premarketBriefing.js";
 import { capabilityArray, capabilityData, capabilitySource } from "../lib/capabilityEnvelope.js";
-import { DEFAULT_WORKSPACE, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeSavedMonitorTemplate, normalizeSavedResearchScreen, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
+import { DEFAULT_MARKET_COLUMNS, DEFAULT_WORKSPACE, MAX_SAVED_MARKET_VIEWS, MAX_SAVED_MONITOR_TEMPLATES, MAX_SAVED_RESEARCH_SCREENS, MAX_SAVED_WORKSPACE_VIEWS, normalizeMarketColumns, normalizeSavedMarketView, normalizeSavedMonitorTemplate, normalizeSavedResearchScreen, normalizeWorkspace, workspaceViewPreferences } from "../lib/workspace.js";
 
 const RUNNING_REPLY = "Pi 正在分析…";
 export const MONITOR_INTERVAL_MS = 30_000;
@@ -47,6 +47,8 @@ const MAX_MONITOR_HISTORY = 500;
 const defaultWatchlist = watchGroups.flatMap((group) => group.items.map((item) => normalizeWatchlistItem({ ...item, group: group.label }))).slice(0, 8);
 let persistenceQueue = Promise.resolve();
 let userStateHydrationPromise = null;
+let userStateHydrationGeneration = 0;
+let integrationStatusRequestGeneration = 0;
 let lastPersistedState = null;
 let lastLocalSnapshot = null;
 let liveRequestGeneration = 0;
@@ -64,6 +66,17 @@ let eventsRequestController = null;
 let premarketRequestGeneration = 0;
 let premarketRequestController = null;
 const anomalyAttributionGenerations = new Map();
+
+// Tests that mount independent store fixtures need to drop the module-level
+// persistence cursor between cases. The running app never calls this helper.
+export function resetUserStatePersistence() {
+  userStateHydrationGeneration += 1;
+  integrationStatusRequestGeneration += 1;
+  persistenceQueue = Promise.resolve();
+  userStateHydrationPromise = null;
+  lastPersistedState = null;
+  lastLocalSnapshot = null;
+}
 
 function abortController(controller) {
   if (!controller || controller.signal.aborted) return;
@@ -88,7 +101,7 @@ function abortPendingDataRequests() {
 }
 
 function persistenceState(snapshot) {
-  return normalizeUserState({ revision: lastPersistedState?.revision || 0, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, premarketBriefing: snapshot.premarketBriefing, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id), workspace: snapshot.workspace });
+  return normalizeUserState({ revision: lastPersistedState?.revision || 0, onboardingCompleted: snapshot.onboardingCompleted, watchlist: snapshot.watchlist, monitorRules: snapshot.rules, notifications: snapshot.notifications, portfolioPositions: snapshot.portfolioPositions, monitorHistory: snapshot.monitorHistory, portfolioReviews: snapshot.portfolioReviews, briefingSchedule: snapshot.briefingSchedule, premarketBriefing: snapshot.premarketBriefing, installedSkillIds: (snapshot.skillItems || []).filter((item) => item?.installed === true).map((item) => item.id), workspace: snapshot.workspace });
 }
 const samePersistenceState = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 function persistSnapshot(snapshot) {
@@ -652,11 +665,11 @@ async function executeMonitorForItem(rule, item) {
 }
 
 export const initialLabState = {
-  credentialGeneration: 0,
+  credentialGeneration: 0, onboardingCompleted: false,
   activeView: "watchlist", selectedSymbol: "600519", chartRange: DEFAULT_WORKSPACE.chartRange, workspace: { ...DEFAULT_WORKSPACE }, watchlist: defaultWatchlist, liveQuotes: {}, skillItems: skills.map((item) => ({ ...item })),
   messages: [{ id: "a1", role: "assistant", text: "选择标的后点击“获取实时数据”，或直接告诉我需要的市场、指标和时间范围。我会通过已配置的数据工具查询，并返回来源与截至时间。", mode: "onboarding", audits: [] }],
   rules: defaultMonitorRules.map(normalizeRule), notifications: [], portfolioPositions: [], portfolioReviews: [], briefingSchedule: { ...DEFAULT_BRIEFING_SCHEDULE }, briefingScheduleBusy: false, premarketBriefing: null, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", monitorHistory: [], anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, userStateLoaded: false, userStateLoading: false, userStateError: "", integrationStatus: null, integrationStatusLoading: true, integrationStatusError: "", liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: null, liveDataStartedAt: null, liveDataCompletedCount: 0, liveDataReceivedCount: 0, liveDataTotalCount: 0, selectedQuoteLoading: {}, quoteDetailsLoading: {}, quoteDetailsLoaded: {}, quoteDetailsError: {}, quoteSeriesLoading: {}, quoteSeriesLoaded: {}, quoteSeriesError: {}, monitorBusy: false, monitorLastRunAt: null, runtimeMode: "ready", runtimeConfiguring: false, runtimeCancelPending: false, persistenceRetrying: false, settingsNotice: null,
-  monitorComposerRequest: null, evidenceDrawerRequest: null,
+  monitorComposerRequest: null, evidenceDrawerRequest: null, userStateNeedsSetup: false,
 };
 
 function dataChannelChanged(previous, next) {
@@ -687,14 +700,15 @@ export const useLabStore = create((set, get) => ({
     // status request is slow. Each later local save or peer signal wins.
     get().setIntegrationStatus(null, { credentialChanged: true });
     const generation = get().credentialGeneration;
+    const requestGeneration = ++integrationStatusRequestGeneration;
     set({ integrationStatusLoading: true });
     try {
       const status = await loadIntegrationStatus();
-      if (get().credentialGeneration !== generation) return false;
-      get().setIntegrationStatus(status);
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
+      get().setIntegrationStatus(status, { statusRequestGeneration: requestGeneration });
       return true;
     } catch {
-      if (get().credentialGeneration !== generation) return false;
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
       set({ integrationStatusLoading: false, integrationStatusError: "配置已在其他窗口变更，暂时无法读取最新配置，请重试" });
       return false;
     }
@@ -705,28 +719,31 @@ export const useLabStore = create((set, get) => ({
     // normal setIntegrationStatus boundary compares credential revision,
     // provider, endpoints and model settings and invalidates only on change.
     const generation = get().credentialGeneration;
+    const requestGeneration = ++integrationStatusRequestGeneration;
     try {
       const status = await loadIntegrationStatus();
-      if (get().credentialGeneration !== generation) return false;
-      get().setIntegrationStatus(status);
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
+      get().setIntegrationStatus(status, { statusRequestGeneration: requestGeneration });
       return true;
     } catch (error) {
-      if (get().credentialGeneration !== generation) return false;
+      if (get().credentialGeneration !== generation || requestGeneration !== integrationStatusRequestGeneration) return false;
       set({ integrationStatusError: friendlySettingsMessage(error) });
       return false;
     }
   },
   hydrateIntegrationStatus: async () => {
     const generation = get().credentialGeneration;
+    const requestGeneration = ++integrationStatusRequestGeneration;
     set({ integrationStatusLoading: true, integrationStatusError: "" });
     try {
       const status = await loadIntegrationStatus();
-      if (get().credentialGeneration === generation) get().setIntegrationStatus(status);
+      if (get().credentialGeneration === generation && requestGeneration === integrationStatusRequestGeneration) get().setIntegrationStatus(status, { statusRequestGeneration: requestGeneration });
     } catch (error) {
-      if (get().credentialGeneration === generation) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: friendlySettingsMessage(error) });
+      if (get().credentialGeneration === generation && requestGeneration === integrationStatusRequestGeneration) set({ integrationStatus: null, integrationStatusLoading: false, integrationStatusError: friendlySettingsMessage(error) });
     }
   },
-  setIntegrationStatus: (integrationStatus, { credentialChanged = false } = {}) => set((state) => {
+  setIntegrationStatus: (integrationStatus, { credentialChanged = false, statusRequestGeneration } = {}) => set((state) => {
+    if (statusRequestGeneration === undefined) integrationStatusRequestGeneration += 1;
     const changed = credentialChanged || dataChannelChanged(state.integrationStatus, integrationStatus);
     if (changed) {
       abortPendingDataRequests();
@@ -1107,6 +1124,48 @@ export const useLabStore = create((set, get) => ({
   },
   setChartRange: (chartRange) => { const next = normalizeWorkspace({ ...get().workspace, chartRange }); set({ chartRange: next.chartRange, workspace: next }); void get().persistUserState().catch(() => null); },
   setWorkspacePreference: (key, value) => { const next = normalizeWorkspace({ ...get().workspace, [key]: value }); set({ workspace: next, chartRange: next.chartRange }); void get().persistUserState().catch(() => null); },
+  setMarketColumns: async (columns) => {
+    const previous = get().workspace;
+    const marketColumns = normalizeMarketColumns(columns);
+    if (previous.marketColumns.join() === marketColumns.join()) return true;
+    const next = normalizeWorkspace({ ...previous, marketColumns });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  saveMarketView: async (input = {}) => {
+    const label = String(input.name ?? "").trim().slice(0, 32);
+    if (!label) throw new Error("请输入视图名称");
+    const previous = get().workspace;
+    const existing = previous.savedMarketViews.find((view) => view.name === label);
+    if (!existing && previous.savedMarketViews.length >= MAX_SAVED_MARKET_VIEWS) throw new Error(`最多保存 ${MAX_SAVED_MARKET_VIEWS} 个行情视图`);
+    const view = normalizeSavedMarketView({ id: existing?.id || createId("market-view"), name: label, columns: normalizeMarketColumns(input.columns) });
+    const savedMarketViews = [view, ...previous.savedMarketViews.filter((candidate) => candidate.name !== label)].slice(0, MAX_SAVED_MARKET_VIEWS);
+    const next = normalizeWorkspace({ ...previous, savedMarketViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return next.savedMarketViews.find((candidate) => candidate.id === view.id); }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  deleteMarketView: async (id, fallbackColumns = DEFAULT_MARKET_COLUMNS) => {
+    const previous = get().workspace;
+    const savedMarketViews = previous.savedMarketViews.filter((view) => view.id !== id);
+    if (savedMarketViews.length === previous.savedMarketViews.length) return false;
+    const next = normalizeWorkspace({ ...previous, marketColumns: fallbackColumns, savedMarketViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
+  migrateMarketViewPreferences: async ({ columns, views } = {}) => {
+    const previous = get().workspace;
+    if (previous.savedMarketViews.length || previous.marketColumns.join() !== DEFAULT_MARKET_COLUMNS.join()) return false;
+    const marketColumns = normalizeMarketColumns(columns);
+    const savedMarketViews = (Array.isArray(views) ? views : []).map(normalizeSavedMarketView).filter(Boolean).slice(0, MAX_SAVED_MARKET_VIEWS);
+    if (savedMarketViews.length === 0 && marketColumns.join() === DEFAULT_MARKET_COLUMNS.join()) return false;
+    const next = normalizeWorkspace({ ...previous, marketColumns, savedMarketViews });
+    set({ workspace: next, chartRange: next.chartRange });
+    try { await get().persistUserState(); return true; }
+    catch (error) { set((state) => state.workspace === next ? { workspace: previous, chartRange: previous.chartRange } : state); throw error; }
+  },
   saveWorkspaceView: async (name) => {
     const label = String(name ?? "").trim().slice(0, 64);
     if (!label) throw new Error("请输入视图名称");
@@ -1215,7 +1274,7 @@ export const useLabStore = create((set, get) => ({
   },
   resetWorkspacePreferences: async () => {
     const previous = get().workspace;
-    const next = { ...DEFAULT_WORKSPACE, savedViews: previous.savedViews };
+    const next = { ...DEFAULT_WORKSPACE, savedViews: previous.savedViews, savedMonitorTemplates: previous.savedMonitorTemplates, savedResearchScreens: previous.savedResearchScreens, savedMarketViews: previous.savedMarketViews };
     set({ workspace: next, chartRange: next.chartRange });
     try {
       await get().persistUserState();
@@ -1244,45 +1303,104 @@ export const useLabStore = create((set, get) => ({
   },
   hydrateUserState: () => {
     if (userStateHydrationPromise) return userStateHydrationPromise;
-    userStateHydrationPromise = (async () => {
+    const hydrationGeneration = userStateHydrationGeneration;
+    const isCurrentHydration = () => hydrationGeneration === userStateHydrationGeneration;
+    const hydrationPromise = (async () => {
       set({ userStateLoading: true, userStateError: "" });
       try {
         const persisted = await loadUserState();
+        if (!isCurrentHydration()) return false;
         if (persisted && typeof persisted === "object") {
           const remote = normalizeUserState(persisted);
+          if (!remote.onboardingCompleted) {
+            // A native Host returns an explicit first-run snapshot when no
+            // state file exists. Keep it uncommitted until the user chooses
+            // an empty workspace or imports a portable backup.
+            lastPersistedState = remote;
+            lastLocalSnapshot = remote;
+            set({
+              onboardingCompleted: false,
+              watchlist: remote.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name),
+              selectedSymbol: remote.watchlist[0]?.symbol || "",
+              chartRange: remote.workspace.chartRange,
+              workspace: normalizeWorkspace(remote.workspace),
+              rules: remote.monitorRules.map(normalizeRule),
+              notifications: remote.notifications,
+              portfolioPositions: remote.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean),
+              portfolioReviews: remote.portfolioReviews.slice(0, 90),
+              briefingSchedule: normalizeBriefingSchedule(remote.briefingSchedule),
+              premarketBriefing: remote.premarketBriefing,
+              skillItems: skillItemsForIds(get().skillItems, remote.installedSkillIds),
+              userStateNeedsSetup: true,
+              userStateLoaded: false,
+              userStateLoading: false,
+              userStateError: "",
+            });
+            return true;
+          }
           // A user can interact with the shell before a slow Host responds. Treat
           // the built-in state as the three-way merge base so those early edits
           // are not silently replaced by the remote snapshot.
           const base = persistenceState(initialLabState);
           const local = persistenceState(get());
-          const localChanged = !samePersistenceState(local, base);
+          const pendingOnboardingFixture = get().userStateNeedsSetup && samePersistenceState(local, base);
+          const localChanged = !pendingOnboardingFixture && !samePersistenceState(local, base);
           const hydrated = localChanged ? mergeUserStateChanges(base, local, remote) : remote;
           lastPersistedState = remote;
           lastLocalSnapshot = localChanged ? base : remote;
           set((state) => {
-            const nextWatchlist = hydrated.watchlist.length
-              ? hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name)
-              : state.watchlist;
+            const nextWatchlist = hydrated.watchlist.map(normalizeWatchlistItem).filter((item) => item.symbol && item.name);
             // A persisted watchlist can legitimately change outside the current
             // WebView (another window, import, or a desktop session). Keep the
             // selected workspace anchored to a real row after hydration instead
             // of rendering a stale default/removed symbol in the detail pane.
             const selectedSymbol = nextWatchlist.some((item) => item.symbol === state.selectedSymbol)
               ? state.selectedSymbol
-              : nextWatchlist[0]?.symbol || state.selectedSymbol;
-            return { watchlist: nextWatchlist, selectedSymbol, chartRange: hydrated.workspace.chartRange, workspace: normalizeWorkspace(hydrated.workspace), rules: hydrated.monitorRules.length ? hydrated.monitorRules.map(normalizeRule) : state.rules, notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), premarketBriefing: hydrated.premarketBriefing, monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
+              : nextWatchlist[0]?.symbol || "";
+            return { onboardingCompleted: true, userStateNeedsSetup: false, watchlist: nextWatchlist, selectedSymbol, chartRange: hydrated.workspace.chartRange, workspace: normalizeWorkspace(hydrated.workspace), rules: hydrated.monitorRules.map(normalizeRule), notifications: hydrated.notifications, portfolioPositions: hydrated.portfolioPositions.map(normalizePortfolioPosition).filter(Boolean), portfolioReviews: hydrated.portfolioReviews.slice(0, 90), briefingSchedule: normalizeBriefingSchedule(hydrated.briefingSchedule), premarketBriefing: hydrated.premarketBriefing, monitorHistory: hydrated.monitorHistory.slice(0, MAX_MONITOR_HISTORY), skillItems: skillItemsForIds(state.skillItems, hydrated.installedSkillIds), userStateLoaded: true, userStateLoading: false, userStateError: "" };
           });
-          if (localChanged && !samePersistenceState(hydrated, remote)) void persistSnapshot(get());
-        } else { lastPersistedState = null; lastLocalSnapshot = null; set({ userStateLoaded: true, userStateLoading: false, userStateError: "" }); await persistSnapshot(get()); }
+          if (localChanged && !samePersistenceState(hydrated, remote) && isCurrentHydration()) void persistSnapshot(get());
+        } else {
+          const hasExplicitRuntimeState = get().userStateLoaded || get().onboardingCompleted;
+          lastPersistedState = null;
+          lastLocalSnapshot = null;
+          if (hasExplicitRuntimeState) {
+            set({ onboardingCompleted: true, userStateNeedsSetup: false, userStateLoaded: true, userStateLoading: false, userStateError: "" });
+            if (isCurrentHydration()) await persistSnapshot(get());
+          } else {
+            // Keep the in-memory fixture behind the onboarding gate so tests
+            // and pre-hydration shell logic retain their shape, but never
+            // render it or persist it before the user chooses a path.
+            set({ onboardingCompleted: false, userStateNeedsSetup: true, userStateLoaded: false, userStateLoading: false, userStateError: "" });
+          }
+        }
         return true;
       } catch {
+        if (!isCurrentHydration()) return false;
         const message = "本地数据暂时无法读取；请检查本地 Host 后重试";
         set({ userStateLoading: false, userStateError: message, userStateLoaded: false });
         return false;
       }
     })();
-    userStateHydrationPromise = userStateHydrationPromise.finally(() => { userStateHydrationPromise = null; });
-    return userStateHydrationPromise;
+    let trackedHydrationPromise;
+    trackedHydrationPromise = hydrationPromise.finally(() => {
+      if (userStateHydrationPromise === trackedHydrationPromise) userStateHydrationPromise = null;
+    });
+    userStateHydrationPromise = trackedHydrationPromise;
+    return trackedHydrationPromise;
+  },
+  initializeEmptyWorkspace: async () => {
+    const previous = get();
+    if (!previous.userStateNeedsSetup) return false;
+    const nextWorkspace = { ...DEFAULT_WORKSPACE };
+    set({ onboardingCompleted: true, userStateNeedsSetup: false, userStateLoaded: true, userStateError: "", watchlist: [], selectedSymbol: "", rules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], premarketBriefing: null, monitorHistory: [], workspace: nextWorkspace, chartRange: nextWorkspace.chartRange, ...quoteRefreshReset });
+    try {
+      await get().persistUserState();
+      return true;
+    } catch (error) {
+      set((state) => state.userStateNeedsSetup ? state : { onboardingCompleted: previous.onboardingCompleted, userStateNeedsSetup: true, userStateLoaded: false, watchlist: previous.watchlist, selectedSymbol: previous.selectedSymbol, rules: previous.rules, notifications: previous.notifications, portfolioPositions: previous.portfolioPositions, portfolioReviews: previous.portfolioReviews, premarketBriefing: previous.premarketBriefing, monitorHistory: previous.monitorHistory, workspace: previous.workspace, chartRange: previous.chartRange, ...quoteRefreshReset });
+      throw error;
+    }
   },
   replaceUserState: async (snapshot) => {
     const current = get();
@@ -1296,6 +1414,7 @@ export const useLabStore = create((set, get) => ({
     const briefingSchedule = normalizeBriefingSchedule(snapshot.briefingSchedule);
     const premarketBriefing = normalizeUserState(snapshot).premarketBriefing;
     const monitorHistory = Array.isArray(snapshot.monitorHistory) ? snapshot.monitorHistory.slice(0, MAX_MONITOR_HISTORY) : [];
+    const workspace = normalizeWorkspace(snapshot.workspace);
     liveRequestGeneration += 1;
     detailsRequestGeneration += 1;
     seriesRequestGeneration += 1;
@@ -1305,7 +1424,7 @@ export const useLabStore = create((set, get) => ({
     anomalyAttributionGenerations.clear();
     const previous = get();
     const nextSkillItems = skillItemsForIds(previous.skillItems, snapshot.installedSkillIds);
-    const optimistic = { watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, premarketBriefing, monitorHistory, skillItems: nextSkillItems, selectedSymbol };
+    const optimistic = { onboardingCompleted: true, userStateNeedsSetup: false, watchlist, rules, notifications, portfolioPositions, portfolioReviews, briefingSchedule, premarketBriefing, monitorHistory, skillItems: nextSkillItems, selectedSymbol, workspace, chartRange: workspace.chartRange };
     set((state) => ({ ...optimistic, premarketBriefingLoading: false, premarketBriefingScheduleBusy: false, premarketBriefingError: "", anomalyAttributions: {}, anomalyAttributionLoading: {}, anomalyAttributionError: {}, events: [], eventDataLoading: false, eventDataError: "", eventDataLastRefreshAt: null, eventDataLoaded: false, eventDataReceivedCount: 0, eventDataTotalCount: 0, ...quoteRefreshReset, userStateLoaded: true }));
     try {
       await get().persistUserState();
@@ -1322,6 +1441,10 @@ export const useLabStore = create((set, get) => ({
         monitorHistory: JSON.stringify(state.monitorHistory) === JSON.stringify(optimistic.monitorHistory) ? previous.monitorHistory : state.monitorHistory,
         skillItems: JSON.stringify(state.skillItems) === JSON.stringify(optimistic.skillItems) ? previous.skillItems : state.skillItems,
         selectedSymbol: state.selectedSymbol === optimistic.selectedSymbol ? previous.selectedSymbol : state.selectedSymbol,
+        onboardingCompleted: state.onboardingCompleted === optimistic.onboardingCompleted ? previous.onboardingCompleted : state.onboardingCompleted,
+        userStateNeedsSetup: previous.userStateNeedsSetup,
+        workspace: JSON.stringify(state.workspace) === JSON.stringify(optimistic.workspace) ? previous.workspace : state.workspace,
+        chartRange: state.chartRange === optimistic.chartRange ? previous.chartRange : state.chartRange,
         userStateLoaded: previous.userStateLoaded,
         ...quoteRefreshReset,
       }));

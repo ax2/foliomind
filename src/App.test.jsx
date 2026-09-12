@@ -6,9 +6,10 @@ import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, 
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { initialLabState, useLabStore } from "./store/useLabStore.js";
+import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, resetUserStatePersistence, useLabStore } from "./store/useLabStore.js";
 import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFICATION_MODES } from "./lib/systemNotifications.js";
 import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
+import { serializeUserStateBackup } from "./lib/userState.js";
 
 const originalCancelMessage = useLabStore.getState().cancelMessage;
 const originalNavigatorOnline = navigator.onLine;
@@ -27,6 +28,7 @@ const desktopLifecycleMocks = vi.hoisted(() => ({
   loadDesktopLifecycleStatus: vi.fn(),
   reconcileDesktopNow: vi.fn(),
   listenForDesktopReconcile: vi.fn().mockResolvedValue(() => {}),
+  listenForDesktopResume: vi.fn().mockResolvedValue(() => {}),
   listenForBackgroundReviewStatus: vi.fn().mockResolvedValue(() => {}),
   listenForBackgroundPremarket: vi.fn().mockResolvedValue(() => {}),
 }));
@@ -69,7 +71,10 @@ vi.mock("./lib/localHost.js", async (importOriginal) => ({
 afterEach(cleanup);
 
 beforeEach(() => {
+  resetUserStatePersistence();
   window.localStorage.removeItem(REFRESH_POLICY_STORAGE_KEY);
+  window.localStorage.removeItem("foliomind.market-columns.v1");
+  window.localStorage.removeItem("foliomind.market-views.v1");
   integrationMocks.applyIntegrationSettings.mockReset();
   integrationMocks.queryCapabilityData.mockReset();
   integrationMocks.testModelConnection.mockReset().mockResolvedValue({ text: "模型连接正常", model: "model-a" });
@@ -78,6 +83,7 @@ beforeEach(() => {
   desktopLifecycleMocks.loadDesktopLifecycleStatus.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
   desktopLifecycleMocks.reconcileDesktopNow.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
   desktopLifecycleMocks.listenForDesktopReconcile.mockReset().mockResolvedValue(() => {});
+  desktopLifecycleMocks.listenForDesktopResume.mockReset().mockResolvedValue(() => {});
   desktopLifecycleMocks.listenForBackgroundReviewStatus.mockReset().mockResolvedValue(() => {});
   integrationMocks.loadIntegrationStatus.mockReset().mockResolvedValue({
     credentialConfigured: false,
@@ -93,6 +99,7 @@ beforeEach(() => {
     ...initialLabState,
     // Component-focused tests start with a canonical snapshot; loading/error
     // behavior is covered by the explicit hydration tests below.
+    onboardingCompleted: true,
     userStateLoaded: true,
     skillItems: initialLabState.skillItems.map((item) => ({ ...item })),
     messages: initialLabState.messages.map((message) => ({ ...message })),
@@ -114,6 +121,25 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("本地数据暂时无法读取");
     fireEvent.click(screen.getByRole("button", { name: "重新读取本地数据" }));
     expect(retryHydration).toHaveBeenCalled();
+  });
+
+  it("requires an explicit first-run workspace choice and can import a portable state", async () => {
+    window.localStorage.removeItem("foliomind.user-state.v1");
+    useLabStore.setState({ ...initialLabState, userStateLoaded: false, userStateNeedsSetup: false, persistUserState: vi.fn().mockResolvedValue(true) });
+    render(<App />);
+
+    const dialog = await screen.findByRole("dialog", { name: "先建立你的工作区" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "从空工作区开始" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "导入已有状态" })).toBeEnabled();
+
+    const backup = serializeUserStateBackup({ watchlist: [{ symbol: "AAPL", name: "Apple", market: "NASDAQ" }], workspace: { chartRange: "日K" } });
+    const input = screen.getByLabelText("导入 FolioMind JSON 备份");
+    fireEvent.change(input, { target: { files: [new File([backup], "foliomind-backup.json", { type: "application/json" })] } });
+    await waitFor(() => expect(useLabStore.getState()).toMatchObject({ userStateNeedsSetup: false, userStateLoaded: true, onboardingCompleted: true, watchlist: [{ symbol: "AAPL" }], chartRange: "日K" }));
+    expect(screen.queryByRole("dialog", { name: "先建立你的工作区" })).not.toBeInTheDocument();
+    window.localStorage.removeItem("foliomind.user-state.v1");
   });
 
   it("shows a recoverable desktop lifecycle error and handles retry failures", async () => {
@@ -262,7 +288,6 @@ describe("FolioMind core flows", () => {
   });
 
   it("lets users customize market columns without inventing missing values", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
     useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
     render(<MarketView />);
     expect(screen.getByText("市盈率", { selector: ".table-head span" })).toBeInTheDocument();
@@ -271,11 +296,10 @@ describe("FolioMind core flows", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "市盈率" }));
     expect(screen.queryByText("市盈率", { selector: ".table-head span" })).not.toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-    expect(JSON.parse(window.localStorage.getItem("foliomind.market-columns.v1"))).not.toContain("pe");
+    expect(useLabStore.getState().workspace.marketColumns).not.toContain("pe");
   });
 
   it("renders returned real quotes in the market table", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
     useLabStore.setState({
       activeView: "market",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
@@ -357,7 +381,6 @@ describe("FolioMind core flows", () => {
   });
 
   it("filters real valuation fields and persists a named research screen", async () => {
-    window.localStorage.removeItem("foliomind.research-screens.v1");
     useLabStore.setState({
       activeView: "research",
       integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
@@ -391,6 +414,62 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("spinbutton", { name: "市盈率上限" })).toHaveValue(15);
   });
 
+  it("copies and deletes a persisted research screen from the research bar", async () => {
+    const persistUserState = vi.fn().mockResolvedValue(true);
+    useLabStore.setState({
+      activeView: "research",
+      persistUserState,
+      workspace: { ...initialLabState.workspace, savedResearchScreens: [{ id: "screen-core", name: "核心筛选", filters: { maxPe: "15", maxPb: "" } }] },
+    });
+    render(<ResearchView />);
+    const selector = screen.getByRole("combobox", { name: "已保存研究筛选" });
+    fireEvent.change(selector, { target: { value: "screen-core" } });
+    fireEvent.click(screen.getByRole("button", { name: "复制当前研究筛选" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(2));
+    expect(useLabStore.getState().workspace.savedResearchScreens[0]).toMatchObject({ name: "核心筛选 副本", filters: { maxPe: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: "删除当前研究筛选" }));
+    await waitFor(() => expect(useLabStore.getState().workspace.savedResearchScreens).toHaveLength(1));
+    expect(useLabStore.getState().workspace.savedResearchScreens[0].name).toBe("核心筛选 副本");
+    expect(persistUserState).toHaveBeenCalledTimes(2);
+  });
+
+  it("exports only the current complete real research result set", async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn().mockReturnValue("blob:research");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    let downloadedName = "";
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function click() { downloadedName = this.download; });
+    const asOf = new Date().toISOString();
+    useLabStore.setState({
+      activeView: "research",
+      integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false },
+      watchlist: [{ symbol: "A", name: "Alpha", market: "沪深" }],
+      liveQuotes: { A: { price: 12.5, change: 2, pe: 10, pb: 1.2, volume: 100, asOf, source: "真实 CAP" } },
+    });
+    try {
+      render(<ResearchView />);
+      const button = screen.getByRole("button", { name: "导出结果" });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const [blob] = createObjectURL.mock.calls[0];
+      expect(blob).toBeInstanceOf(Blob);
+      expect(blob.size).toBeGreaterThan(0);
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+      expect(downloadedName).toMatch(/^foliomind-research-\d{4}-\d{2}-\d{2}\.csv$/);
+      await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:research"));
+    } finally {
+      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectURL });
+      else delete URL.createObjectURL;
+      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectURL });
+      else delete URL.revokeObjectURL;
+      anchorClick.mockRestore();
+    }
+  });
+
   it("opens a research result with mouse and keyboard", () => {
     useLabStore.setState({ activeView: "research", selectedSymbol: "", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深" }], liveQuotes: { "600519": { price: 1297.4, change: 1.25 } } });
     const { container } = render(<ResearchView />);
@@ -406,6 +485,47 @@ describe("FolioMind core flows", () => {
     useLabStore.setState({ activeView: "research", selectedSymbol: "" });
     fireEvent.keyDown(row, { key: " " });
     expect(useLabStore.getState()).toMatchObject({ activeView: "watchlist", selectedSymbol: "600519" });
+  });
+
+  it("compares selected complete real research results without changing state", () => {
+    const watchlist = [{ symbol: "600519", name: "贵州茅台", market: "沪深" }, { symbol: "AAPL", name: "Apple", market: "NASDAQ" }];
+    const asOf = new Date().toISOString();
+    const liveQuotes = { "600519": { price: 1297.4, change: 1.25, pe: 22, pb: 4, volume: 100, asOf }, AAPL: { price: 227.5, change: -0.4, pe: 30, pb: 8, volume: 200, asOf } };
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: asOf });
+    render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: "加入贵州茅台对比" }));
+    fireEvent.click(screen.getByRole("button", { name: "加入Apple对比" }));
+    expect(screen.getByRole("region", { name: "研究结果对比" })).toHaveTextContent("贵州茅台");
+    expect(screen.getByRole("region", { name: "研究结果对比" })).toHaveTextContent("227.50");
+    expect(screen.getByRole("button", { name: "移出贵州茅台对比" })).toHaveTextContent("已对比");
+    fireEvent.click(screen.getByRole("button", { name: "清空对比" }));
+    expect(screen.queryByRole("region", { name: "研究结果对比" })).not.toBeInTheDocument();
+    expect(useLabStore.getState().watchlist).toEqual(watchlist);
+  });
+
+  it("disables a fifth research comparison selection", () => {
+    const watchlist = ["A", "B", "C", "D", "E"].map((symbol, index) => ({ symbol, name: `标的${index + 1}`, market: "沪深" }));
+    const asOf = new Date().toISOString();
+    const liveQuotes = Object.fromEntries(watchlist.map((item, index) => [item.symbol, { price: 100 + index, change: index, asOf }]));
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: asOf });
+    render(<ResearchView />);
+    watchlist.slice(0, 4).forEach((item) => fireEvent.click(screen.getByRole("button", { name: `加入${item.name}对比` })));
+    expect(screen.getByText("4/4 个标的")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "加入标的5对比" })).toBeDisabled();
+  });
+
+  it("clears research comparison selection when real data becomes incomplete", async () => {
+    const watchlist = [{ symbol: "A", name: "标的A", market: "沪深" }, { symbol: "B", name: "标的B", market: "沪深" }];
+    const asOf = new Date().toISOString();
+    const liveQuotes = { A: { price: 100, change: 1, asOf }, B: { price: 101, change: 1, asOf } };
+    useLabStore.setState({ activeView: "research", integrationStatus: { credentialConfigured: true, settings: { modelId: "" }, demo: false }, watchlist, liveQuotes, liveDataLoading: false, liveDataError: "", liveDataLastRefreshAt: asOf });
+    render(<ResearchView />);
+    fireEvent.click(screen.getByRole("button", { name: "加入标的A对比" }));
+    expect(screen.getByRole("region", { name: "研究结果对比" })).toBeInTheDocument();
+    act(() => useLabStore.setState({ liveDataLoading: true }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "研究结果对比" })).not.toBeInTheDocument());
+    act(() => useLabStore.setState({ liveDataLoading: false }));
+    expect(screen.queryByRole("region", { name: "研究结果对比" })).not.toBeInTheDocument();
   });
 
   it("opens the monitor composer with a research result", async () => {
@@ -497,36 +617,37 @@ describe("FolioMind core flows", () => {
     expect(screen.getByRole("option", { name: "全部（200）" })).toBeInTheDocument();
   });
 
-  it("saves and restores named market views without changing the data contract", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
-    window.localStorage.removeItem("foliomind.market-views.v1");
-    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
+  it("saves and restores named market views without changing the data contract", async () => {
+    useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true }, workspace: { ...initialLabState.workspace, savedMarketViews: [] } });
     render(<MarketView />);
     fireEvent.click(screen.getByRole("button", { name: "列设置" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "市盈率" }));
     fireEvent.click(screen.getByRole("button", { name: "保存视图" }));
     fireEvent.change(screen.getByRole("textbox", { name: "视图名称" }), { target: { value: "我的交易盘面" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
-    expect(screen.getByText("已保存“我的交易盘面”视图", { selector: ".market-view-notice" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("已保存“我的交易盘面”视图", { selector: ".market-view-notice" })).toBeInTheDocument());
     const selector = screen.getByRole("combobox", { name: "行情视图" });
-    expect(selector.value).toMatch(/^custom-/);
+    expect(selector.value).toMatch(/^market-view-/);
     fireEvent.change(selector, { target: { value: "valuation" } });
     expect(screen.getByText("市盈率", { selector: ".table-head span" })).toBeInTheDocument();
     fireEvent.change(selector, { target: { value: selector.options[selector.options.length - 1].value } });
     expect(screen.queryByText("市盈率", { selector: ".table-head span" })).not.toBeInTheDocument();
-    expect(JSON.parse(window.localStorage.getItem("foliomind.market-views.v1"))).toHaveLength(1);
+    expect(useLabStore.getState().workspace.savedMarketViews).toMatchObject([{ name: "我的交易盘面", columns: ["price", "change", "pb"] }]);
   });
 
-  it("ignores malformed named market views and keeps built-in presets available", () => {
-    window.localStorage.removeItem("foliomind.market-columns.v1");
+  it("migrates safe legacy market views into canonical workspace state", async () => {
+    window.localStorage.setItem("foliomind.market-columns.v1", JSON.stringify(["price", "asOf", "secret"]));
     window.localStorage.setItem("foliomind.market-views.v1", JSON.stringify([
       { id: "custom-invalid", name: "坏视图", columns: ["unknown-field"] },
       { id: "custom-valid", name: "合法视图", columns: ["price"] },
     ]));
     useLabStore.setState({ activeView: "market", integrationStatus: { credentialConfigured: false, settings: { modelId: "" }, demo: true } });
     render(<MarketView />);
+    await waitFor(() => expect(useLabStore.getState().workspace.savedMarketViews).toMatchObject([{ id: "custom-valid", name: "合法视图", columns: ["price"] }]));
     const options = screen.getByRole("combobox", { name: "行情视图" }).querySelectorAll("option");
-    expect([...options].map((option) => option.textContent)).toEqual(["核心估值", "交易盘面", "完整字段", "合法视图"]);
+    expect([...options].map((option) => option.textContent)).toEqual(["临时视图", "核心估值", "交易盘面", "完整字段", "合法视图"]);
+    expect(window.localStorage.getItem("foliomind.market-columns.v1")).toBeNull();
+    expect(window.localStorage.getItem("foliomind.market-views.v1")).toBeNull();
   });
 
   it("shows a source-backed anomaly explanation without changing the quote card", () => {
@@ -1346,6 +1467,122 @@ describe("FolioMind core flows", () => {
 
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it("reconciles integration status on a native operating-system resume", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    let resumeHandler;
+    desktopLifecycleMocks.listenForDesktopResume.mockImplementationOnce(async (handler) => {
+      resumeHandler = handler;
+      return vi.fn();
+    });
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    render(<App />);
+    await waitFor(() => expect(resumeHandler).toBeTypeOf("function"));
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+    integrationMocks.loadIntegrationStatus.mockClear();
+
+    act(() => resumeHandler());
+    await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it("waits for Host reconciliation before refreshing after a long hidden resume", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData, hydrateUserState: vi.fn().mockResolvedValue(true) });
+    const originalNow = Date.now;
+    const previousVisibilityState = document.visibilityState;
+    const originalSetInterval = window.setInterval.bind(window);
+    let fullRefreshTick;
+    const setIntervalSpy = vi.spyOn(window, "setInterval").mockImplementation((handler, delay, ...args) => {
+      if (delay === LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS) fullRefreshTick = () => handler(...args);
+      return originalSetInterval(handler, delay, ...args);
+    });
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveResumeStatus;
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    try {
+      render(<App />);
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+      refreshLiveData.mockClear();
+      integrationMocks.loadIntegrationStatus.mockClear();
+      integrationMocks.loadIntegrationStatus.mockImplementationOnce(() => new Promise((resolve) => { resolveResumeStatus = resolve; }));
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      now += 60_000;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => window.dispatchEvent(new Event("pageshow")));
+
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+      expect(refreshLiveData).not.toHaveBeenCalled();
+      expect(fullRefreshTick).toBeTypeOf("function");
+      act(() => fullRefreshTick());
+      expect(refreshLiveData).not.toHaveBeenCalled();
+      resolveResumeStatus({ ...status, credentialRevision: "rev-2" });
+      await waitFor(() => expect(refreshLiveData).toHaveBeenCalledWith());
+      expect(refreshLiveData).toHaveBeenCalledTimes(1);
+      expect(refreshLiveData).not.toHaveBeenCalledWith({ symbols: expect.any(Array) });
+    } finally {
+      setIntervalSpy.mockRestore();
+      Date.now = originalNow;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
+    }
+  });
+
+  it("does not refresh after Host reconciliation fails during a long hidden resume", async () => {
+    runtimeMocks.desktopRuntime = true;
+    const refreshLiveData = vi.fn().mockResolvedValue(true);
+    const status = {
+      credentialConfigured: true,
+      keyPrefix: "desktop…",
+      credentialRevision: "rev-1",
+      settings: { capabilityBaseUrl: "https://qveris.ai/api/v1", modelGatewayBaseUrl: "https://aigateway.qveris.ai/v1", modelId: "model-a", models: [{ id: "model-a", name: "Model A" }] },
+      demo: false,
+      environment: "desktop",
+    };
+    integrationMocks.loadIntegrationStatus.mockResolvedValue(status);
+    useLabStore.setState({ userStateLoaded: true, selectedSymbol: "600519", portfolioPositions: [], rules: [], refreshLiveData, hydrateUserState: vi.fn().mockResolvedValue(true) });
+    const originalNow = Date.now;
+    const previousVisibilityState = document.visibilityState;
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      render(<App />);
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+      refreshLiveData.mockClear();
+      integrationMocks.loadIntegrationStatus.mockReset().mockRejectedValueOnce(new Error("Host unavailable"));
+
+      now += 60_000;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => window.dispatchEvent(new Event("pageshow")));
+
+      await waitFor(() => expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledTimes(1));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(refreshLiveData).not.toHaveBeenCalled();
+    } finally {
+      Date.now = originalNow;
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: previousVisibilityState });
+    }
   });
 
   it.each([false, true])("refreshes the full quote set when the saved credential changes (same prefix: %s)", async (samePrefix) => {

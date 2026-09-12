@@ -135,11 +135,20 @@ fn default_installed_skill_ids() -> Vec<String> {
     vec!["fundamental".into(), "monitor".into()]
 }
 
+// Existing state files predate first-run onboarding, so a missing field means
+// the user has already used the app. Only a brand-new default state opts into
+// the onboarding screen.
+fn default_onboarding_completed() -> bool {
+    true
+}
+
 fn default_workspace() -> WorkspacePreferences {
     WorkspacePreferences::default()
 }
 
 const MAX_SAVED_WORKSPACE_VIEWS: usize = 12;
+const MAX_MARKET_COLUMNS: usize = 8;
+const MAX_SAVED_MARKET_VIEWS: usize = 10;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -186,6 +195,15 @@ pub struct SavedResearchScreen {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SavedMarketView {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub columns: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceViewPreferences {
     #[serde(default = "default_workspace_group")]
     pub watchlist_group: String,
@@ -224,12 +242,16 @@ pub struct WorkspacePreferences {
     pub show_moving_average: bool,
     #[serde(default)]
     pub show_moving_average20: bool,
+    #[serde(default = "default_market_columns")]
+    pub market_columns: Vec<String>,
     #[serde(default)]
     pub saved_views: Vec<SavedWorkspaceView>,
     #[serde(default)]
     pub saved_monitor_templates: Vec<SavedMonitorTemplate>,
     #[serde(default)]
     pub saved_research_screens: Vec<SavedResearchScreen>,
+    #[serde(default)]
+    pub saved_market_views: Vec<SavedMarketView>,
 }
 
 fn default_workspace_group() -> String {
@@ -247,6 +269,9 @@ fn default_workspace_range() -> String {
 fn default_true() -> bool {
     true
 }
+fn default_market_columns() -> Vec<String> {
+    vec!["price".into(), "change".into(), "pe".into(), "pb".into()]
+}
 
 impl Default for WorkspacePreferences {
     fn default() -> Self {
@@ -259,9 +284,11 @@ impl Default for WorkspacePreferences {
             show_grid: true,
             show_moving_average: false,
             show_moving_average20: false,
+            market_columns: default_market_columns(),
             saved_views: Vec::new(),
             saved_monitor_templates: Vec::new(),
             saved_research_screens: Vec::new(),
+            saved_market_views: Vec::new(),
         }
     }
 }
@@ -530,6 +557,8 @@ impl Default for BriefingSchedule {
 pub struct UserState {
     #[serde(default)]
     pub revision: u64,
+    #[serde(default = "default_onboarding_completed")]
+    pub onboarding_completed: bool,
     pub watchlist: Vec<WatchItem>,
     pub monitor_rules: Vec<MonitorRule>,
     pub notifications: Vec<Notification>,
@@ -553,6 +582,7 @@ impl Default for UserState {
     fn default() -> Self {
         Self {
             revision: 0,
+            onboarding_completed: false,
             watchlist: vec![
                 WatchItem {
                     symbol: "600519".into(),
@@ -582,6 +612,13 @@ impl Default for UserState {
             installed_skill_ids: default_installed_skill_ids(),
             workspace: WorkspacePreferences::default(),
         }
+    }
+}
+
+fn first_run_user_state() -> UserState {
+    UserState {
+        watchlist: Vec::new(),
+        ..UserState::default()
     }
 }
 
@@ -749,6 +786,7 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         || state.workspace.saved_views.len() > MAX_SAVED_WORKSPACE_VIEWS
         || state.workspace.saved_monitor_templates.len() > MAX_SAVED_MONITOR_TEMPLATES
         || state.workspace.saved_research_screens.len() > MAX_SAVED_RESEARCH_SCREENS
+        || state.workspace.saved_market_views.len() > MAX_SAVED_MARKET_VIEWS
     {
         return Err("user state exceeds size limit".into());
     }
@@ -772,6 +810,21 @@ pub fn validate(state: &UserState) -> Result<(), String> {
         )
     {
         return Err("workspace preference is invalid".into());
+    }
+    if state.workspace.market_columns.is_empty()
+        || state.workspace.market_columns.len() > MAX_MARKET_COLUMNS
+        || state.workspace.market_columns.iter().any(|column| {
+            !matches!(
+                column.as_str(),
+                "price" | "change" | "volume" | "turnover" | "turnoverRate" | "pe" | "pb" | "asOf"
+            )
+        })
+        || {
+            let unique: HashSet<&String> = state.workspace.market_columns.iter().collect();
+            unique.len() != state.workspace.market_columns.len()
+        }
+    {
+        return Err("workspace market columns are invalid".into());
     }
     for view in &state.workspace.saved_views {
         validate_text(&view.id, "workspace view id", 64)?;
@@ -840,6 +893,24 @@ pub fn validate(state: &UserState) -> Result<(), String> {
             &screen.filters.min_volume,
         ] {
             validate_text_allow_empty(value, "workspace research screen filter", 24)?;
+        }
+    }
+    for view in &state.workspace.saved_market_views {
+        validate_text(&view.id, "workspace market view id", 64)?;
+        validate_text(&view.name, "workspace market view name", 32)?;
+        if view.columns.is_empty() || view.columns.len() > MAX_MARKET_COLUMNS {
+            return Err("workspace market view columns are invalid".into());
+        }
+        let mut columns = HashSet::new();
+        for column in &view.columns {
+            validate_text(column, "workspace market view column", 32)?;
+            if !matches!(
+                column.as_str(),
+                "price" | "change" | "volume" | "turnover" | "turnoverRate" | "pe" | "pb" | "asOf"
+            ) || !columns.insert(column)
+            {
+                return Err("workspace market view column is invalid".into());
+            }
         }
     }
     let mut installed_skill_ids = HashSet::new();
@@ -1187,7 +1258,7 @@ fn load_unlocked(app: &AppHandle) -> Result<UserState, String> {
         write_private_atomic(&file, &bytes, "user state recovery")?;
         return Ok(state);
     }
-    Ok(UserState::default())
+    Ok(first_run_user_state())
 }
 
 fn legacy_seed_rule(
@@ -1592,6 +1663,7 @@ mod tests {
         let state: UserState =
             serde_json::from_value(legacy).expect("legacy state should deserialize");
         assert!(validate(&state).is_ok());
+        assert!(state.onboarding_completed);
         assert_eq!(state.watchlist[0].group, "A股");
         assert!(state.monitor_rules[0].conditions.is_empty());
         assert_eq!(state.monitor_rules[0].logic, "AND");
@@ -1604,10 +1676,24 @@ mod tests {
         assert!(state.workspace.saved_monitor_templates.is_empty());
         assert!(state.workspace.saved_research_screens.is_empty());
         assert_eq!(
+            state.workspace.market_columns,
+            vec!["price", "change", "pe", "pb"]
+        );
+        assert!(state.workspace.saved_market_views.is_empty());
+        assert_eq!(
             state.installed_skill_ids,
             vec!["fundamental".to_string(), "monitor".to_string()]
         );
         assert!(state.workspace.saved_views.is_empty());
+    }
+
+    #[test]
+    fn missing_state_starts_empty_until_onboarding_is_completed() {
+        let state = first_run_user_state();
+        assert!(!state.onboarding_completed);
+        assert!(state.watchlist.is_empty());
+        assert!(state.monitor_rules.is_empty());
+        assert!(validate(&state).is_ok());
     }
 
     #[test]
@@ -1654,6 +1740,12 @@ mod tests {
                     ..ResearchFilterPreferences::default()
                 },
             });
+        state.workspace.market_columns = vec!["price".into(), "volume".into(), "asOf".into()];
+        state.workspace.saved_market_views.push(SavedMarketView {
+            id: "market-trading".into(),
+            name: "交易盘面".into(),
+            columns: vec!["price".into(), "volume".into(), "asOf".into()],
+        });
         assert!(validate(&state).is_ok());
         let encoded = serde_json::to_value(&state).expect("workspace view should serialize");
         let restored: UserState =
@@ -1667,7 +1759,27 @@ mod tests {
             restored.workspace.saved_research_screens[0].filters.max_pe,
             "24"
         );
+        assert_eq!(
+            restored.workspace.saved_market_views[0].columns,
+            vec!["price", "volume", "asOf"]
+        );
         state.workspace.saved_views[0].preferences.watchlist_sort = "invalid".into();
+        assert!(validate(&state).is_err());
+    }
+
+    #[test]
+    fn invalid_market_columns_are_rejected() {
+        let mut state = UserState::default();
+        state.workspace.market_columns = vec!["price".into(), "price".into()];
+        assert!(validate(&state).is_err());
+        state.workspace.market_columns = vec!["not-a-column".into()];
+        assert!(validate(&state).is_err());
+        state.workspace.market_columns = vec!["price".into()];
+        state.workspace.saved_market_views.push(SavedMarketView {
+            id: "market-invalid".into(),
+            name: "非法".into(),
+            columns: vec!["turnover".into(), "turnover".into()],
+        });
         assert!(validate(&state).is_err());
     }
 
