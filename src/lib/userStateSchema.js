@@ -20,6 +20,10 @@ const LEGACY_SEED_RULES = Object.freeze([
 // the persisted, portable state. Keep legacy defaults so older state files do
 // not uninstall the two built-in skills on their first reload.
 export const DEFAULT_INSTALLED_SKILL_IDS = Object.freeze(["fundamental", "monitor"]);
+// Keep collection limits aligned with the desktop Rust Host so a state that
+// passes Web normalization cannot later be rejected by native persistence.
+export const MAX_USER_STATE_RULES = 200;
+export const MAX_USER_STATE_POSITIONS = 200;
 
 function sanitizeInstalledSkillIds(value) {
   const source = Array.isArray(value) ? value : DEFAULT_INSTALLED_SKILL_IDS;
@@ -59,7 +63,7 @@ function isLegacySeedRule(rule, seed) {
 }
 
 function sanitizeRules(items) {
-  const normalized = (Array.isArray(items) ? items : []).slice(0, 500).map((rule) => {
+  const normalized = (Array.isArray(items) ? items : []).slice(0, MAX_USER_STATE_RULES).map((rule) => {
     const scope = rule?.scope === "watchlist" ? "watchlist" : "symbol";
     const symbol = scope === "watchlist" ? "*" : text(rule?.symbol, 64).toUpperCase();
     const lastSignalBySymbol = Object.fromEntries(Object.entries(rule?.lastSignalBySymbol || {})
@@ -90,7 +94,7 @@ function sanitizeNotifications(items) {
 }
 
 function sanitizePositions(items) {
-  return (Array.isArray(items) ? items : []).slice(0, 500).map((item) => ({
+  return (Array.isArray(items) ? items : []).slice(0, MAX_USER_STATE_POSITIONS).map((item) => ({
     id: text(item?.id, 128), symbol: text(item?.symbol, 64).toUpperCase(), name: text(item?.name, 128), market: text(item?.market, 64), quantity: finiteNumber(item?.quantity), averageCost: finiteNumber(item?.averageCost), takeProfitPrice: finiteNumber(item?.takeProfitPrice ?? item?.take_profit_price), stopLossPrice: finiteNumber(item?.stopLossPrice ?? item?.stop_loss_price), takeProfitTriggered: item?.takeProfitTriggered === true, stopLossTriggered: item?.stopLossTriggered === true, planThesis: text(item?.planThesis ?? item?.plan_thesis, 2_000), planHorizon: PLAN_HORIZONS.has(String(item?.planHorizon ?? item?.plan_horizon ?? "")) ? String(item?.planHorizon ?? item?.plan_horizon) : null, planStatus: PLAN_STATUSES.has(String(item?.planStatus ?? item?.plan_status ?? "")) ? String(item?.planStatus ?? item?.plan_status) : null, planCreatedAt: item?.planCreatedAt ? text(item.planCreatedAt, 64) : null, planUpdatedAt: item?.planUpdatedAt ? text(item.planUpdatedAt, 64) : null,
     planActions: (Array.isArray(item?.planActions ?? item?.plan_actions) ? (item.planActions ?? item.plan_actions) : []).slice(0, 20).map((action) => ({ id: text(action?.id, 128), type: text(action?.type, 32), at: text(action?.at, 64), note: text(action?.note, 512) })).filter((action) => action.id && action.type && action.at),
   })).filter((item) => item.id && item.symbol && item.name && item.quantity !== null && item.averageCost !== null && item.quantity > 0 && item.averageCost >= 0);

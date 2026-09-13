@@ -81,6 +81,14 @@ describe("user state backups", () => {
     expect(data.portfolioPositions).toEqual([]);
   });
 
+  it("keeps rule and position limits compatible with the desktop Host", () => {
+    const monitorRules = Array.from({ length: 201 }, (_, index) => ({ id: `rule-${index}`, symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300 }));
+    const portfolioPositions = Array.from({ length: 201 }, (_, index) => ({ id: `position-${index}`, symbol: "600519", name: "贵州茅台", quantity: 1, averageCost: 100 }));
+    const normalized = normalizeUserState({ monitorRules, portfolioPositions });
+    expect(normalized.monitorRules).toHaveLength(200);
+    expect(normalized.portfolioPositions).toHaveLength(200);
+  });
+
   it("preserves installed Skill IDs without accepting path-like values", () => {
     const normalized = normalizeUserState({ installedSkillIds: ["fundamental", "news", "news", "../escape", "bad id"] });
     expect(normalized.installedSkillIds).toEqual(["fundamental", "news"]);

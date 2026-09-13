@@ -3052,6 +3052,7 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 - 在 `tests/fixtures/legacy-user-state.json` 固化一份不含新字段的旧版脱敏用户状态，包含自选、旧式盯盘规则和必要的基础字段；fixture 不包含 API Key、行情快照、费用或运行时日志。
 - Node smoke test 使用当前 Web `normalizeUserState` 读取 fixture，验证已有用户默认为已完成 onboarding、自选市场映射、旧规则条件/生命周期、工作区偏好、内置 Skill 和空组合等安全默认值。
 - Rust `UserState` 单测使用同一 fixture 反序列化并执行 `validate`，验证桌面 Host 对相同旧状态保留字段、默认值和安全边界；普通 `npm test` 与桌面/Release `cargo test` 都必须执行该回归。
+- Web schema 与 Rust Host 对盯盘规则、持仓等大集合使用相同数量上限；超出上限时在归一化阶段有界截断，避免 Web 可以保存而桌面拒绝同一份状态。
 - 该 fixture 只证明当前 schema 对已选历史形态的兼容，不替代真实旧版安装包在干净系统上的覆盖升级、升级中断、真实用户状态迁移或平台签名验收；新增字段或历史格式变化必须同步扩展 fixture 与两端断言。
 
 **验收标准**：共享旧版 fixture 同时通过 Web schema smoke 与 Rust Host 反序列化/验证；普通测试、架构审查、桌面 CI 和 Release CI 均执行且失败关闭；fixture 不携带凭据或运行时数据，真实跨版本安装迁移缺口仍被明确记录。
