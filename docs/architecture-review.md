@@ -1,5 +1,13 @@
 # FolioMind 架构与整体实现 Review
 
+## 最近一次专项 Review（2026-09-13 · Stage 3GP）
+
+结论：继续演进。
+
+- 安装升级烟测此前只验证当前状态 fixture 被安装器保留，无法证明新版本的 Web schema 与 Rust Host 对同一历史状态形态使用一致的安全默认值。
+- 现在新增 `tests/fixtures/legacy-user-state.json`，Node smoke test 与 Rust `include_str!` 单测共同读取；两端分别验证 onboarding、自选分组、旧盯盘规则、工作区默认值、内置 Skill 和空组合等兼容边界。
+- 该 fixture 已随 `npm test` 和桌面/Release 的 `cargo test` 执行，并纳入架构审查；它不宣称替代干净系统真实旧版升级、升级中断、真实用户状态迁移或签名/公证验收。
+
 ## 最近一次专项 Review（2026-09-12 · Stage 3GO）
 
 结论：继续演进。

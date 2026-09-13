@@ -1688,6 +1688,32 @@ mod tests {
     }
 
     #[test]
+    fn shared_legacy_fixture_gets_safe_defaults() {
+        let state: UserState =
+            serde_json::from_str(include_str!("../../tests/fixtures/legacy-user-state.json"))
+                .expect("shared legacy user-state fixture should deserialize");
+        assert!(validate(&state).is_ok());
+        assert_eq!(state.revision, 12);
+        assert!(state.onboarding_completed);
+        assert_eq!(state.watchlist[0].group, "A股");
+        assert_eq!(state.monitor_rules[0].scope, "symbol");
+        assert!(state.monitor_rules[0].conditions.is_empty());
+        assert_eq!(state.monitor_rules[0].logic, "AND");
+        assert_eq!(state.monitor_rules[0].trigger_mode, "edge");
+        assert!(state.monitor_rules[0].expires_at.is_none());
+        assert_eq!(state.workspace.watchlist_sort, "custom");
+        assert_eq!(
+            state.workspace.market_columns,
+            vec!["price", "change", "pe", "pb"]
+        );
+        assert_eq!(
+            state.installed_skill_ids,
+            vec!["fundamental".to_string(), "monitor".to_string()]
+        );
+        assert!(state.portfolio_positions.is_empty());
+    }
+
+    #[test]
     fn missing_state_starts_empty_until_onboarding_is_completed() {
         let state = first_run_user_state();
         assert!(!state.onboarding_completed);

@@ -3042,3 +3042,16 @@ Web 本地 Host、浏览器回退和桌面 Host 必须在同一个脱敏状态�
 - 该测试覆盖平台 keyring 的真实写入、读取、独立进程更新和删除，以及新鲜 revision 读取；不宣称已覆盖用户通过 Keychain/Credential Manager GUI 或其它工具修改、休眠恢复、签名/公证、真实用户凭据和跨版本 schema 迁移，这些仍需对应平台真机验收。
 
 **验收标准**：普通桌面 CI 与正式 Release CI 的 Windows/macOS job 均通过原生 keyring 烟测；测试条目随机隔离、独立进程成功更新、清理自身凭据、没有生产账号和密钥日志；架构审查、Rust 格式检查、Node 测试及构建门禁继续通过。
+
+### Stage 3GP 跨端 schema 迁移 fixture（本轮增量）
+
+**目标**：把“旧版用户状态可被新版本安全读取”从分散的单端单测推进到 Web schema 与 Rust Host 共用同一份历史 fixture 的回归门禁，尽早发现跨端默认值漂移。
+
+**范围与边界**：
+
+- 在 `tests/fixtures/legacy-user-state.json` 固化一份不含新字段的旧版脱敏用户状态，包含自选、旧式盯盘规则和必要的基础字段；fixture 不包含 API Key、行情快照、费用或运行时日志。
+- Node smoke test 使用当前 Web `normalizeUserState` 读取 fixture，验证已有用户默认为已完成 onboarding、自选市场映射、旧规则条件/生命周期、工作区偏好、内置 Skill 和空组合等安全默认值。
+- Rust `UserState` 单测使用同一 fixture 反序列化并执行 `validate`，验证桌面 Host 对相同旧状态保留字段、默认值和安全边界；普通 `npm test` 与桌面/Release `cargo test` 都必须执行该回归。
+- 该 fixture 只证明当前 schema 对已选历史形态的兼容，不替代真实旧版安装包在干净系统上的覆盖升级、升级中断、真实用户状态迁移或平台签名验收；新增字段或历史格式变化必须同步扩展 fixture 与两端断言。
+
+**验收标准**：共享旧版 fixture 同时通过 Web schema smoke 与 Rust Host 反序列化/验证；普通测试、架构审查、桌面 CI 和 Release CI 均执行且失败关闭；fixture 不携带凭据或运行时数据，真实跨版本安装迁移缺口仍被明确记录。
