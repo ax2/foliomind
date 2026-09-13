@@ -8,6 +8,8 @@
 
 0.1.235 在 0.1.234 基础上增加启动工作区恢复门禁：Local Web/桌面 Host 状态尚未完成读取前不渲染默认自选行，避免初始化阶段把内置元数据误认为用户数据；并保留桌面 Host 集成状态对账、可复用工作区视图、凭据对账、错误脱敏、Release 远端资产校验、窄屏行情和离线提示。消息不携带凭据或配置。正式发布已由 GitHub Actions run `34017177415` 完成：Web QA、全量测试、架构审查、安全审计及 Windows MSI/NSIS、macOS DMG 构建全部成功；正式 Release `v0.1.235` 为非草稿、非预发布，包含 3 个安装包和 `SHA256SUMS.txt`，远端下载复核通过。构建后的生成目录按白名单清理，工作区保持干净。待审候选 PR #88 又补充了 Local Host 乱序状态保护、外部同前缀凭据替换检测、Web/桌面统一的固定长度 SHA-256 `credentialRevision`，以及长时间后台恢复后的 Host 先对账再全量刷新；桌面端现已将 Tauri `RunEvent::Resumed` 接入同一恢复对账入口，并增加 Windows MSI/NSIS 安装—卸载与 macOS DMG 挂载复制烟测、从上一正式版覆盖升级的配置保留烟测，以及 Windows Credential Manager/macOS Keychain 原生 keyring 独立进程往返烟测。本轮候选还将 Rust registry/git/target 按 runner OS 与 `src-tauri/Cargo.lock` 隔离缓存，减少后续跨平台构建的重复下载和编译等待；新增共享旧版状态 fixture，由 Web schema 与 Rust Host 同时验证安全默认值，并收紧 Local Host 集成测试清理顺序，避免 CI 遗留进程造成测试挂起。候选 CI run `34739187018` 的 456 个 Vitest、60 个 Node tests、架构审查、构建、Rust 缓存命中和三平台桌面烟测全部通过，尚未合入正式版本。
 
+最新候选提交为 `ff36000`，在原生 `BackgroundScheduler` 启动后立即执行首轮 reconcile，随后按 60 秒周期检查；该提交的 CI run `34741682717` 已通过 456 个 Vitest、60 个 Node tests、架构审查、Rust 格式/跨平台编译、Windows NSIS/MSI 安装升级烟测与 macOS DMG 烟测，尚未合入正式版本。
+
 ## 必须继续验证的验收项
 
 | 项目 | 当前证据 | 结论与下一步 |
