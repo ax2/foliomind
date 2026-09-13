@@ -117,8 +117,9 @@ describe("FolioMind core flows", () => {
   it("reconciles a separate Local Host on a bounded interval", async () => {
     runtimeMocks.localWebRuntime = true;
     vi.useFakeTimers();
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
     try {
-      render(<App />);
+      const { unmount } = render(<App />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -133,7 +134,10 @@ describe("FolioMind core flows", () => {
       });
 
       expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledOnce();
+      unmount();
+      expect(clearIntervalSpy).toHaveBeenCalled();
     } finally {
+      clearIntervalSpy.mockRestore();
       vi.useRealTimers();
     }
   });
