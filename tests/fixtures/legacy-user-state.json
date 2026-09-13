@@ -1,0 +1,25 @@
+{
+  "revision": 12,
+  "watchlist": [
+    {
+      "symbol": "600519",
+      "name": "贵州茅台",
+      "market": "沪深",
+      "category": "白酒"
+    }
+  ],
+  "monitorRules": [
+    {
+      "id": "legacy-r1",
+      "symbol": "600519",
+      "strategyId": "price_change",
+      "threshold": 3,
+      "intervalSeconds": 300,
+      "enabled": true,
+      "lastCheckedAt": null,
+      "lastTriggeredAt": null
+    }
+  ],
+  "notifications": [],
+  "portfolioPositions": []
+}

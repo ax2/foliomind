@@ -20,7 +20,7 @@
     "audit:security": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
     "review:architecture": "node scripts/architecture-review.mjs",
     "verify:release-assets": "node scripts/verify-release-assets.mjs",
-    "test": "vitest run && node --test packages/qveris-bridge/index.test.mjs scripts/local-host.test.mjs scripts/local-host.integration.test.mjs scripts/verify-release-assets.test.mjs scripts/clean-generated.test.mjs",
+    "test": "vitest run && node --test packages/qveris-bridge/index.test.mjs scripts/local-host.test.mjs scripts/local-host.integration.test.mjs scripts/verify-release-assets.test.mjs scripts/clean-generated.test.mjs scripts/schema-migration-smoke.test.mjs",
     "test:watch": "vitest",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },

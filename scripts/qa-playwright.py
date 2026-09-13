@@ -53,7 +53,26 @@ async def main() -> None:
         page.on("console", capture_console)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         await page.goto(TARGET_URL, wait_until="networkidle")
+        onboarding = page.get_by_role("dialog", name="先建立你的工作区")
+        await page.wait_for_function(
+            """() => document.querySelector('[role="dialog"][aria-labelledby="workspace-onboarding-title"]') || document.querySelector('.app-shell[data-user-state-loaded="true"]')""",
+            timeout=15_000,
+        )
+        if await onboarding.count():
+            await expect(onboarding).to_be_visible()
+            await expect(onboarding).to_contain_text("从空工作区开始")
+            await expect(onboarding).to_contain_text("导入已有状态")
+            await page.get_by_role("button", name="从空工作区开始", exact=True).click()
+            await expect(onboarding).to_have_count(0)
+            checks.append({"flow": "首次启动空工作区选择", "passed": True})
         await expect(page.locator('.app-shell[data-user-state-loaded="true"]')).to_be_visible(timeout=15_000)
+        if await page.get_by_role("button", name="自选", exact=True).count():
+            await page.get_by_role("button", name="自选", exact=True).click()
+        if not await page.locator(".watch-row-main").count():
+            await page.get_by_role("button", name="添加自选", exact=True).click()
+            await page.get_by_label("搜索名称或代码").fill("600519")
+            await page.get_by_role("button", name=re.compile("贵州茅台.*600519")).click()
+            await expect(page.locator(".watch-row-main").first).to_be_visible()
         await page.screenshot(path=OUTPUT / "implementation-primary-final.png")
 
         async def click_and_capture(label: str, filename: str, expected: str) -> None:
@@ -63,6 +82,18 @@ async def main() -> None:
             checks.append({"flow": label, "passed": True})
 
         await click_and_capture("行情", "implementation-market.png", "市场行情")
+        await page.get_by_role("button", name="列设置", exact=True).click()
+        pe_column = page.get_by_role("checkbox", name="市盈率", exact=True)
+        if await pe_column.is_checked():
+            await pe_column.click()
+        await page.get_by_role("button", name="保存视图", exact=True).click()
+        await page.get_by_role("textbox", name="视图名称").fill("__qa_market_columns__")
+        await page.get_by_role("button", name="保存", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_market_columns__", exact=True)).to_be_attached()
+        await page.reload(wait_until="networkidle")
+        await page.get_by_role("button", name="行情", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_market_columns__", exact=True)).to_be_attached()
+        checks.append({"flow": "行情列视图跨端持久化", "passed": True})
         await click_and_capture("筛选", "implementation-research.png", "研究筛选")
         research_state = page.locator(".research-page .data-state").first
         research_result = page.locator(".research-page .research-table").first
@@ -71,6 +102,18 @@ async def main() -> None:
         if await research_result.count():
             await expect(research_result).to_be_visible()
         checks.append({"flow": "真实数据筛选状态", "passed": True})
+        await expect(page.get_by_role("button", name="导出结果", exact=True)).to_be_disabled()
+        checks.append({"flow": "研究结果导出真实数据门禁", "passed": True})
+        await expect(page.get_by_role("region", name="研究结果对比")).to_have_count(0)
+        checks.append({"flow": "研究结果对比真实数据门禁", "passed": True})
+        await page.get_by_label("筛选名称").fill("__qa_research_screen__")
+        await page.get_by_role("button", name="保存筛选", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_research_screen__", exact=True)).to_be_attached()
+        await expect(page.get_by_role("button", name="复制当前研究筛选", exact=True)).to_be_visible()
+        await page.screenshot(path=OUTPUT / "implementation-research-screen.png")
+        await page.get_by_role("button", name="复制当前研究筛选", exact=True).click()
+        await expect(page.get_by_role("option", name="__qa_research_screen__ 副本", exact=True)).to_be_attached()
+        checks.append({"flow": "研究筛选跨端持久化", "passed": True})
         await click_and_capture("组合", "implementation-portfolio.png", "风险洞察")
         await expect(page.get_by_role("button", name="添加持仓", exact=True)).to_be_visible()
         # Seed one isolated QA position so the responsive portfolio action

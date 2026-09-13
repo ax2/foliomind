@@ -11,6 +11,12 @@ export const showDesktopWindow = () => invokeDesktop("desktop_window_show");
 export const reconcileDesktopNow = () => invokeDesktop("desktop_reconcile_now");
 export const quitDesktop = () => invokeDesktop("desktop_quit");
 
+export async function listenForDesktopResume(handler) {
+  if (!isDesktopRuntime()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("foliomind://desktop-resumed", () => handler());
+}
+
 export async function listenForDesktopReconcile(handler) {
   if (!isDesktopRuntime()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");

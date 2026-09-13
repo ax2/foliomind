@@ -9,9 +9,9 @@ const installerNames = (version) => [
   "SHA256SUMS.txt",
 ];
 
-export function verifyReleaseAssets(payload, version) {
+export function verifyReleaseAssets(payload, version, { allowDraft = false } = {}) {
   const release = payload && typeof payload === "object" ? payload : {};
-  if (release.isDraft === true) throw new Error("Release 仍为 draft，不能作为正式交付");
+  if (release.isDraft === true && !allowDraft) throw new Error("Release 仍为 draft，不能作为正式交付");
   if (!Array.isArray(release.assets)) throw new Error("Release 缺少资产列表");
   const expected = installerNames(String(version || "").trim());
   const assets = release.assets.map((asset) => ({ name: String(asset?.name || ""), size: Number(asset?.size) }));
@@ -28,7 +28,8 @@ export function verifyReleaseAssets(payload, version) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const version = process.argv[2];
   if (!version) throw new Error("用法：verify-release-assets.mjs <version>");
+  const allowDraft = process.argv.includes("--allow-draft");
   const input = await readFile("/dev/stdin", "utf8");
-  const result = verifyReleaseAssets(JSON.parse(input), version);
+  const result = verifyReleaseAssets(JSON.parse(input), version, { allowDraft });
   console.log(`Release asset verification passed: v${result.version} (${result.assets.length} assets)`);
 }

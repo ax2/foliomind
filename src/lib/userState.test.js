@@ -81,6 +81,14 @@ describe("user state backups", () => {
     expect(data.portfolioPositions).toEqual([]);
   });
 
+  it("keeps rule and position limits compatible with the desktop Host", () => {
+    const monitorRules = Array.from({ length: 201 }, (_, index) => ({ id: `rule-${index}`, symbol: "600519", strategyId: "price_change", threshold: 3, intervalSeconds: 300 }));
+    const portfolioPositions = Array.from({ length: 201 }, (_, index) => ({ id: `position-${index}`, symbol: "600519", name: "贵州茅台", quantity: 1, averageCost: 100 }));
+    const normalized = normalizeUserState({ monitorRules, portfolioPositions });
+    expect(normalized.monitorRules).toHaveLength(200);
+    expect(normalized.portfolioPositions).toHaveLength(200);
+  });
+
   it("preserves installed Skill IDs without accepting path-like values", () => {
     const normalized = normalizeUserState({ installedSkillIds: ["fundamental", "news", "news", "../escape", "bad id"] });
     expect(normalized.installedSkillIds).toEqual(["fundamental", "news"]);
@@ -162,6 +170,33 @@ describe("user state backups", () => {
     });
     expect(raw).not.toContain("sk-secret");
     expect(parseUserStateBackup(raw).workspace.savedMonitorTemplates).toMatchObject([{ id: "template-risk", name: "回撤防守", conditions: [{ type: "price_change", operator: "lte", value: -5 }] }]);
+  });
+
+  it("includes sanitized research screens without runtime fields", () => {
+    const raw = serializeUserStateBackup({
+      watchlist: [{ symbol: "600519", name: "贵州茅台" }],
+      workspace: { savedResearchScreens: [{ id: "screen-value", name: "低估值观察", filters: { maxPe: "15", maxPb: "2" }, quote: 1234, apiKey: "sk-secret" }] },
+    });
+    expect(raw).not.toContain("sk-secret");
+    expect(raw).not.toContain("quote");
+    expect(parseUserStateBackup(raw).workspace.savedResearchScreens).toMatchObject([{ id: "screen-value", name: "低估值观察", filters: { maxPe: "15", maxPb: "2", minChange: "", minVolume: "" } }]);
+  });
+
+  it("includes market column views without credentials or runtime data", () => {
+    const raw = serializeUserStateBackup({
+      workspace: {
+        marketColumns: ["price", "asOf"],
+        savedMarketViews: [{ id: "market-trading", name: "交易盘面", columns: ["price", "volume", "asOf"], apiKey: "sk-secret", quote: 1234 }],
+      },
+    });
+    expect(raw).not.toContain("sk-secret");
+    expect(raw).not.toContain("quote");
+    expect(parseUserStateBackup(raw).workspace).toMatchObject({ marketColumns: ["price", "asOf"], savedMarketViews: [{ id: "market-trading", name: "交易盘面", columns: ["price", "volume", "asOf"] }] });
+  });
+
+  it("accepts a workspace-only backup as recoverable data", () => {
+    const raw = serializeUserStateBackup({ workspace: { savedResearchScreens: [{ id: "screen-only", name: "仅筛选", filters: { minChange: "1" } }] } });
+    expect(parseUserStateBackup(raw).workspace.savedResearchScreens).toMatchObject([{ id: "screen-only", name: "仅筛选", filters: { minChange: "1" } }]);
   });
 
   it("round-trips monitor audit history without prompts or credentials", () => {

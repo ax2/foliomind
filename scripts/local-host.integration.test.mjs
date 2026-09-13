@@ -17,10 +17,12 @@ async function listen(server) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function startHost(dataDir) {
+async function startHost(dataDir, { clearEnvCredential = false } = {}) {
+  const env = { ...process.env, FOLIOMIND_HOST_PORT: "0", FOLIOMIND_DEV_DATA_DIR: dataDir };
+  if (clearEnvCredential) delete env.QVERIS_API_KEY;
   const child = spawn(process.execPath, ["scripts/local-host.mjs"], {
     cwd: projectRoot,
-    env: { ...process.env, FOLIOMIND_HOST_PORT: "0", FOLIOMIND_DEV_DATA_DIR: dataDir },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -49,6 +51,28 @@ async function stopHost(child) {
   });
 }
 
+async function removeTestDataDir(dataDir) {
+  let lastError;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await rm(dataDir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!['ENOTEMPTY', 'EBUSY', 'EPERM'].includes(error?.code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw lastError;
+}
+
+function registerHostCleanup(context, dataDir, getHosts) {
+  context.after(async () => {
+    for (const host of getHosts()) await stopHost(host?.child);
+    await removeTestDataDir(dataDir);
+  });
+}
+
 async function hostRequest(host, path, { method = "GET", body, authenticated = true } = {}) {
   const response = await fetch(`${host.baseUrl}${path}`, {
     method,
@@ -64,13 +88,17 @@ async function hostRequest(host, path, { method = "GET", body, authenticated = t
 
 test("Local Host enforces session auth and persists credential status and user state", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-contract-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   let host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   const unauthenticated = await hostRequest(host, "/api/integration/status", { authenticated: false });
   assert.equal(unauthenticated.response.status, 401);
   assert.equal(unauthenticated.payload.error, "invalid local host session");
+
+  const firstRun = await hostRequest(host, "/api/user-state");
+  assert.equal(firstRun.response.status, 200);
+  assert.equal(firstRun.payload.onboardingCompleted, false);
+  assert.deepEqual(firstRun.payload.watchlist, []);
 
   const credential = await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_contract_test_123456" } });
   assert.equal(credential.response.status, 200);
@@ -122,15 +150,87 @@ test("Local Host enforces session auth and persists credential status and user s
   assert.equal(emptyOverview.payload.logs.length, 0);
 });
 
+test("Local Host accepts an explicitly completed empty workspace", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-empty-workspace-"));
+  const host = await startHost(dataDir);
+  registerHostCleanup(context, dataDir, () => [host]);
+
+  const state = { revision: 0, onboardingCompleted: true, watchlist: [], monitorRules: [], notifications: [], portfolioPositions: [], portfolioReviews: [], monitorHistory: [] };
+  const saved = await hostRequest(host, "/api/user-state", { method: "POST", body: { state, expectedRevision: 0 } });
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.payload.onboardingCompleted, true);
+  assert.deepEqual(saved.payload.watchlist, []);
+
+  const restored = await hostRequest(host, "/api/user-state");
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.payload.onboardingCompleted, true);
+  assert.deepEqual(restored.payload.watchlist, []);
+});
+
+test("two Local Hosts serialize credential writes and keep revision pairs consistent", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-lock-"));
+  const first = await startHost(dataDir, { clearEnvCredential: true });
+  const second = await startHost(dataDir, { clearEnvCredential: true });
+  registerHostCleanup(context, dataDir, () => [first, second]);
+
+  const keys = [
+    "sk_alpha_1234567890",
+    "sk_bravo_1234567890",
+    "sk_charlie_1234567890",
+    "sk_delta_1234567890",
+    "sk_echo_1234567890",
+    "sk_foxtrot_1234567890",
+    "sk_golf_1234567890",
+    "sk_hotel_1234567890",
+  ];
+  const results = await Promise.all(keys.map((apiKey, index) => hostRequest(index % 2 ? second : first, "/api/integration/credential", { method: "POST", body: { apiKey } })));
+  assert.ok(results.every(({ response }) => response.status === 200));
+  const savedPairs = new Set(results.map(({ payload }) => `${payload.keyPrefix}|${payload.credentialRevision}`));
+
+  const finalStatus = await hostRequest(first, "/api/integration/status");
+  assert.equal(finalStatus.response.status, 200);
+  assert.ok(savedPairs.has(`${finalStatus.payload.keyPrefix}|${finalStatus.payload.credentialRevision}`));
+});
+
+test("Local Host detects an unmanaged same-prefix credential replacement", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-external-change-"));
+  const host = await startHost(dataDir);
+  registerHostCleanup(context, dataDir, () => [host]);
+
+  const saved = await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_same_prefix_original" } });
+  const before = await hostRequest(host, "/api/integration/status");
+  assert.equal(before.payload.credentialRevision, saved.payload.credentialRevision);
+
+  // Simulate an external editor or credential migration. The replacement
+  // deliberately keeps the visible prefix unchanged.
+  await writeFile(join(dataDir, "qveris-api-key"), "sk_same_prefix_replaced\n", { encoding: "utf8", mode: 0o600 });
+  const after = await hostRequest(host, "/api/integration/status");
+  assert.equal(after.payload.keyPrefix, before.payload.keyPrefix);
+  assert.notEqual(after.payload.credentialRevision, before.payload.credentialRevision);
+});
+
+test("Local Host returns one deterministic revision for every process", async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-credential-revision-contract-"));
+  const first = await startHost(dataDir, { clearEnvCredential: true });
+  const second = await startHost(dataDir, { clearEnvCredential: true });
+  registerHostCleanup(context, dataDir, () => [first, second]);
+
+  const saved = await hostRequest(first, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_cross_process_contract" } });
+  const status = await hostRequest(second, "/api/integration/status");
+  assert.equal(status.payload.credentialRevision, saved.payload.credentialRevision);
+  assert.match(status.payload.credentialRevision, /^[0-9a-f]{64}$/);
+
+  const cleared = await hostRequest(second, "/api/integration/credential", { method: "DELETE" });
+  assert.equal(cleared.payload.credentialRevision, null);
+  const empty = await hostRequest(first, "/api/integration/status");
+  assert.equal(empty.payload.credentialRevision, null);
+});
+
 test("two Local Hosts sharing a data directory serialize user-state CAS writes", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-lock-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const first = await startHost(dataDir);
   const second = await startHost(dataDir);
-  context.after(async () => {
-    await stopHost(first.child);
-    await stopHost(second.child);
-  });
+  registerHostCleanup(context, dataDir, () => [first, second]);
   const state = {
     revision: 0,
     watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
@@ -149,7 +249,6 @@ test("two Local Hosts sharing a data directory serialize user-state CAS writes",
 
 test("Local Host recovers user state from the last valid backup", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-recovery-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const backup = {
     revision: 7,
     watchlist: [{ symbol: "600519", name: "贵州茅台", market: "沪深", category: "白酒" }],
@@ -158,7 +257,7 @@ test("Local Host recovers user state from the last valid backup", async (context
   await writeFile(join(dataDir, "user-state.json"), "{broken", "utf8");
   await writeFile(join(dataDir, "user-state.json.backup"), JSON.stringify(backup), "utf8");
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   const restored = await hostRequest(host, "/api/user-state");
   assert.equal(restored.response.status, 200);
@@ -171,11 +270,10 @@ test("Local Host recovers user state from the last valid backup", async (context
 
 test("Local Host reports a recoverable error when user state and backup are both corrupt", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-corrupt-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   await writeFile(join(dataDir, "user-state.json"), "{broken", "utf8");
   await writeFile(join(dataDir, "user-state.json.backup"), "[]", "utf8");
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   const response = await hostRequest(host, "/api/user-state");
   assert.equal(response.response.status, 400);
@@ -185,10 +283,9 @@ test("Local Host reports a recoverable error when user state and backup are both
 
 test("Local Host fails closed when the primary state is missing but its backup is corrupt", async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-state-missing-primary-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   await writeFile(join(dataDir, "user-state.json.backup"), "{broken", "utf8");
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   const response = await hostRequest(host, "/api/user-state");
   assert.equal(response.response.status, 400);
@@ -212,9 +309,8 @@ test("Local Host serializes prompt requests, aborts the owner, and releases runt
   const gateway = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-runtime-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_runtime_test_123456" } });
   await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { modelGatewayBaseUrl: gateway, modelId: "test-model", models: [{ id: "test-model" }] } } });
@@ -253,9 +349,8 @@ test("model connection probe omits finance tools and records model cost", async 
   const gateway = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-model-probe-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_model_probe_test_123456" } });
   const settings = await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { modelGatewayBaseUrl: gateway, modelId: "test-model", models: [{ id: "test-model" }] } } });
   assert.equal(settings.response.status, 200);
@@ -285,9 +380,8 @@ test("客户端断开时取消上游 CAP request", async (context) => {
   const capabilityBaseUrl = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-disconnect-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_disconnect_test_123456" } });
   await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl } } });
 
@@ -316,9 +410,8 @@ test("Local Host never caches trading-calendar gates", async (context) => {
   const capabilityBaseUrl = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-calendar-cache-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_calendar_cache_test_123456" } });
   await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl } } });
 
@@ -354,9 +447,8 @@ test("动态 CAP 测试只允许当前目录已验证的工具", async (context)
   const capabilityBaseUrl = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-capability-test-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_capability_test_123456" } });
   await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl } } });
@@ -405,9 +497,8 @@ test("does not fall back to Search after an authentication failure", async (cont
   const capabilityBaseUrl = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-fallback-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_fallback_test_123456" } });
   await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl, dataProvider: "qveris_finance", dataChannel: "qveris-cap" } } });
@@ -439,9 +530,8 @@ test("does not fall back from model data tools after an authentication failure",
   const gateway = await listen(upstream);
   context.after(() => new Promise((resolve) => upstream.close(resolve)));
   const dataDir = await mkdtemp(join(tmpdir(), "foliomind-host-prompt-fallback-"));
-  context.after(() => rm(dataDir, { recursive: true, force: true }));
   const host = await startHost(dataDir);
-  context.after(() => stopHost(host.child));
+  registerHostCleanup(context, dataDir, () => [host]);
 
   await hostRequest(host, "/api/integration/credential", { method: "POST", body: { apiKey: "sk_prompt_fallback_test_123456" } });
   await hostRequest(host, "/api/integration/settings", { method: "POST", body: { input: { capabilityBaseUrl: gateway, modelGatewayBaseUrl: gateway, modelId: "test-model", models: [{ id: "test-model" }] } } });

@@ -7,6 +7,7 @@ use tauri::{
 };
 
 pub const RECONCILE_EVENT: &str = "foliomind://background-reconcile";
+pub const RESUMED_EVENT: &str = "foliomind://desktop-resumed";
 
 #[derive(Default)]
 pub struct DesktopLifecycle {
