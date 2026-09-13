@@ -6,7 +6,7 @@ import { EventsView, MarketView, MonitorView, NotificationsView, PortfolioView, 
 import { WatchlistSidebar } from "./components/WatchlistSidebar.jsx";
 import { LiveQuotesStrip } from "./components/LiveQuotesStrip.jsx";
 import { StockWorkspace } from "./components/StockWorkspace.jsx";
-import { initialLabState, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, resetUserStatePersistence, useLabStore } from "./store/useLabStore.js";
+import { initialLabState, INTEGRATION_STATUS_RECONCILE_INTERVAL_MS, LIVE_QUOTE_FULL_REFRESH_INTERVAL_MS, resetUserStatePersistence, useLabStore } from "./store/useLabStore.js";
 import { setSystemNotificationMode, setSystemNotificationsEnabled, SYSTEM_NOTIFICATION_MODES } from "./lib/systemNotifications.js";
 import { REFRESH_POLICY_STORAGE_KEY } from "./lib/refreshPolicy.js";
 import { serializeUserStateBackup } from "./lib/userState.js";
@@ -23,7 +23,7 @@ const integrationMocks = vi.hoisted(() => ({
   queryCapabilityData: vi.fn(),
   testModelConnection: vi.fn(),
 }));
-const runtimeMocks = vi.hoisted(() => ({ askPi: vi.fn(), desktopRuntime: false }));
+const runtimeMocks = vi.hoisted(() => ({ askPi: vi.fn(), desktopRuntime: false, localWebRuntime: false }));
 const desktopLifecycleMocks = vi.hoisted(() => ({
   loadDesktopLifecycleStatus: vi.fn(),
   reconcileDesktopNow: vi.fn(),
@@ -65,7 +65,7 @@ vi.mock("./lib/desktopLifecycle.js", () => desktopLifecycleMocks);
 // by the dedicated user-state and Local Host integration suites.
 vi.mock("./lib/localHost.js", async (importOriginal) => ({
   ...await importOriginal(),
-  isLocalWebRuntime: () => false,
+  isLocalWebRuntime: () => runtimeMocks.localWebRuntime,
 }));
 
 afterEach(cleanup);
@@ -80,6 +80,7 @@ beforeEach(() => {
   integrationMocks.testModelConnection.mockReset().mockResolvedValue({ text: "模型连接正常", model: "model-a" });
   runtimeMocks.askPi.mockReset().mockResolvedValue({ text: "模型连接正常" });
   runtimeMocks.desktopRuntime = false;
+  runtimeMocks.localWebRuntime = false;
   desktopLifecycleMocks.loadDesktopLifecycleStatus.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
   desktopLifecycleMocks.reconcileDesktopNow.mockReset().mockResolvedValue({ residentMode: true, hiddenToTray: false });
   desktopLifecycleMocks.listenForDesktopReconcile.mockReset().mockResolvedValue(() => {});
@@ -113,6 +114,30 @@ beforeEach(() => {
 });
 
 describe("FolioMind core flows", () => {
+  it("reconciles a separate Local Host on a bounded interval", async () => {
+    runtimeMocks.localWebRuntime = true;
+    vi.useFakeTimers();
+    try {
+      render(<App />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      integrationMocks.loadIntegrationStatus.mockClear();
+
+      await act(async () => {
+        vi.advanceTimersByTime(INTEGRATION_STATUS_RECONCILE_INTERVAL_MS);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(integrationMocks.loadIntegrationStatus).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows a recoverable notice when canonical user state cannot be read", async () => {
     const retryHydration = vi.fn().mockResolvedValue(true);
     useLabStore.setState({ userStateLoaded: false, userStateError: "本地数据暂时无法读取；请检查本地 Host 后重试", userStateLoading: false, hydrateUserState: retryHydration });
