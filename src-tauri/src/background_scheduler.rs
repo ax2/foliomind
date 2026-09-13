@@ -935,13 +935,6 @@ impl BackgroundScheduler {
         }
         *worker = Some(thread::spawn(move || {
             while !stop.load(Ordering::Acquire) {
-                match wake_receiver.recv_timeout(Duration::from_secs(60)) {
-                    Ok(_) | Err(RecvTimeoutError::Disconnected) => break,
-                    Err(RecvTimeoutError::Timeout) => {}
-                }
-                if stop.load(Ordering::Acquire) {
-                    break;
-                }
                 if running
                     .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
@@ -953,6 +946,10 @@ impl BackgroundScheduler {
                         let _ = reconcile(&task_app, &task_credentials);
                         task_running.store(false, Ordering::Release);
                     });
+                }
+                match wake_receiver.recv_timeout(Duration::from_secs(60)) {
+                    Ok(_) | Err(RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Timeout) => {}
                 }
             }
         }));

@@ -22,6 +22,7 @@ const marketData = await load("src/data/market.js");
 const workspaceModule = await load("src/lib/workspace.js");
 const workspaceOnboarding = await load("src/components/WorkspaceOnboarding.jsx");
 const architectureReview = await load("docs/architecture-review.md");
+const schedulerStartsImmediately = /while !stop\.load\([\s\S]*?compare_exchange\([\s\S]*?recv_timeout\(Duration::from_secs\(60\)\)/.test(backgroundScheduler);
 const capabilityEnvelope = await load("src/lib/capabilityEnvelope.js");
 const capabilityEnvelopeTest = await load("src/lib/capabilityEnvelope.test.js");
 const desktopLifecycleClient = await load("src/lib/desktopLifecycle.js");
@@ -96,6 +97,7 @@ check("Local Host 公开契约", packageJson.scripts.test.includes("local-host.i
 check("真实交易日门禁", briefingSchedule.includes("calendar-needed") && nativeUserState.includes("calendar_status") && marketCalendar.includes("REF.EXCHANGE_CALENDAR") && marketCalendar.includes("cn_financial_pro.trade_dates.v1"), "自动复盘必须先通过固定真实交易日历 CAP，失败时禁止猜测交易日");
 check("桌面驻留生命周期", cargoToml.includes('features = ["tray-icon"]') && desktopLifecycle.includes("CloseAction::Hide") && desktopLifecycle.includes("foliomind_reconcile") && desktopLifecycle.includes("begin_cleanup") && nativeMain.includes("BackgroundScheduler") && nativeMain.includes("stop_and_join"), "主窗口关闭需隐藏到托盘，显式退出需幂等回收原生调度器、Web Host 与 Pi");
 check("原生后台调度", backgroundScheduler.includes("market_calendar::fetch_trading_calendar") && backgroundScheduler.includes("user_state::mutate") && backgroundScheduler.includes("background-review-completed"), "桌面复盘必须由原生 worker 执行真实日历、行情门禁和原子幂等写入");
+check("原生调度启动即检查", schedulerStartsImmediately && prd.includes("Stage 3GQ 原生后台调度启动即检查") && architectureReview.includes("Stage 3GQ"), "桌面后台调度器启动后必须立即进行一次有界 reconcile，随后按 60 秒周期检查，不能把首轮任务延迟整整一分钟");
 check("原生调度可观测性", backgroundScheduler.includes("background-scheduler-log") && backgroundScheduler.includes("duration_ms") && backgroundScheduler.includes("cost_from_value") && developerPanel.includes("desktopCostSummary"), "桌面调度调用必须提供脱敏日志、耗时和费用汇总");
 check("后台复盘状态与快速退出", backgroundScheduler.includes("background-review-status") && backgroundScheduler.includes("recv_timeout") && app.includes("listenForBackgroundReviewStatus") && prd.includes("Stage 3CX"), "桌面后台复盘失败/等待状态必须回传到已打开界面，退出时应可唤醒并回收调度 worker");
 check("用户状态并发控制", userState.includes("revision") && userStateTransport.includes("mergeUserStateChanges") && nativeUserState.includes("save_if_revision") && localHost.includes("USER_STATE_CONFLICT") && hostIntegrationTest.includes("USER_STATE_CONFLICT"), "Web、Local Host 与桌面必须以 revision/CAS 防止后台状态被旧页面覆盖");
